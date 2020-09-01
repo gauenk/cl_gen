@@ -55,6 +55,7 @@ def get_cfg():
     cfg.cls.dataset.name = 'CIFAR10'
     cfg.cls.dataset.root = Path("/home/gauenk/data/cifar10/")
     cfg.cls.dataset.n_classes = 10
+    cfg.cls.dataset.download = False
 
     cfg.cls.batch_size = 128
     cfg.cls.image_size = 32

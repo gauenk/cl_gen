@@ -108,11 +108,12 @@ def get_cifar10_dataset(cfg,mode):
         data.val = ClCIFAR10(root,cfg.cl.image_size,train=True,low_light=low_light)
         data.te = ClCIFAR10(root,cfg.cl.image_size,train=False,low_light=low_light)
     elif mode == 'cls':
+        download = cfg.cls.dataset.download
         batch_size = cfg.cls.batch_size
         transform = th_transforms.Compose([th_transforms.ToTensor()])
-        data.tr = CIFAR10(root,train=True,transform=transform)
-        data.val = CIFAR10(root,train=True,transform=transform)
-        data.te = CIFAR10(root,train=False,transform=transform)
+        data.tr = CIFAR10(root,train=True,transform=transform,download=download)
+        data.val = CIFAR10(root,train=True,transform=transform,download=download)
+        data.te = CIFAR10(root,train=False,transform=transform,download=download)
     elif mode == "imgrec":
         batch_size = cfg.imgrec.batch_size
         cifar_transforms = get_cifar10_transforms(cfg)

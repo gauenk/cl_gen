@@ -26,16 +26,18 @@ def get_mnist_dataset(cfg,mode):
     data = edict()
     if mode == 'cls':
         batch_size = cfg.cls.batch_size
+        download = cfg.cls.dataset.download
         transform = th_transforms.Compose([th_transforms.ToTensor()])
-        data.tr = MNIST(root,train=True,transform=transform)
-        data.val = MNIST(root,train=True,transform=transform)
-        data.te = MNIST(root,train=False,transform=transform)
+        data.tr = MNIST(root,train=True,transform=transform,download=download)
+        data.val = MNIST(root,train=True,transform=transform,download=download)
+        data.te = MNIST(root,train=False,transform=transform,download=download)
     elif mode == "disent":
         batch_size = cfg.disent.batch_size
         N = cfg.disent.N
-        data.tr = DisentMNISTv1(root,N,train=True)
-        data.val = DisentMNISTv1(root,N,train=True)
-        data.te = DisentMNISTv1(root,N,train=False)
+        noise_level = cfg.disent.noise_level
+        data.tr = DisentMNISTv1(root,N,noise_level,train=True)
+        data.val = DisentMNISTv1(root,N,noise_level,train=True)
+        data.te = DisentMNISTv1(root,N,noise_level,train=False)
     else: raise ValueError(f"Unknown MNIST mode {mode}")
     loader = edict()
     loader_kwargs = {'batch_size': batch_size,
@@ -57,12 +59,12 @@ class DisentMNISTv1(MNIST):
 
 
 
-    def __init__(self, root, N, train=True, low_light=False,
+    def __init__(self, root, N, noise_level=1e-2, train=True, low_light=False,
                  transform=None, target_transform=None,download=False):
         # transform = BlockGaussian(N)
         transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor(),
-                                           AddGaussianNoiseSet(N),
+                                           AddGaussianNoiseSet(N,std=noise_level),
                                            ])
         th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor()

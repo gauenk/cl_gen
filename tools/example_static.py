@@ -112,7 +112,7 @@ def load_projector(cfg):
     model = model.to(cfg.disent.device)
     return model
 
-def get_disent_optim(models):
+def get_disent_optim(cfg,models):
     params = []
     for name,model in models.items():
         params += list(model.parameters())
@@ -159,7 +159,7 @@ def train_disent_exp(cfg):
                                 cfg.disent.N,
                                 cfg.disent.batch_size,
                                 cfg.disent.device)
-    optimizer,scheduler = get_disent_optim(models)
+    optimizer,scheduler = get_disent_optim(cfg,models)
 
     # init the training loop
     writer = SummaryWriter()
@@ -238,7 +238,7 @@ def test_disent_examples(cfg):
     plt.cla()
 
 def test_disent_over_epochs(cfg):
-    epoch_num_list = [0,5,10,15,19]
+    epoch_num_list = [0,5,10,15,20,25,30,35,40]
     losses = {}
     for epoch_num in epoch_num_list:
         cfg.disent.epoch_num = epoch_num
@@ -259,20 +259,20 @@ def plot_th_tensor(ax,i,j,dec_ij):
 
 if __name__ == "__main__":
     cfg = get_cfg()
-    cfg.exp_name = "static_noise_mnist_v3"
+    cfg.exp_name = "static_noise_mnist"
     # cfg.exp_name = "static_noise_celeba"
 
     cfg.disent = edict()
     cfg.disent.epochs = 5000
     cfg.disent.load = True
-    cfg.disent.epoch_num = 20
+    cfg.disent.epoch_num = 40
 
     cfg.disent.dataset = edict()
     cfg.disent.dataset.name = 'MNIST'
     # cfg.disent.dataset.name = "celeba"
     cfg.disent.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.disent.dataset.n_classes = 10
-    cfg.disent.dataset.noise_levels = [5e-2,5e-2]
+    cfg.disent.noise_level = 1e-2
     cfg.disent.N = 5
 
 
@@ -301,6 +301,6 @@ if __name__ == "__main__":
     cfg.disent.epoch_num = 20
     cfg.disent.batch_size = 128
     # test_disent(cfg)
-    # test_disent_over_epochs(cfg)
+    test_disent_over_epochs(cfg)
     test_disent_examples(cfg)
     # test_disent_examples_over_epochs(cfg)

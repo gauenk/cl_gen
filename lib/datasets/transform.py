@@ -61,7 +61,7 @@ class TransformsSimCLR:
         return self.train_transform(x), self.train_transform(x)
 
 class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=10e-3):
+    def __init__(self, mean=0., std=1e-2):
         self.std = std
         self.mean = mean
         
