@@ -1,0 +1,11 @@
+*~
+\#*
+\.\#*
+*.py[co]
+__pycache__/
+data/
+output/
+logs/
+*pdf
+\.ipynb*
+Pipfile\.lock
