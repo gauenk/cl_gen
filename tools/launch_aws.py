@@ -26,8 +26,7 @@ def wait(procs):
         p.wait()
 
 def run_process(dataset,noise_level,N,i):
-    # subprocess.run(["export","CUDA_VISIBLE_DEVICE",f"{i}"])
-    
+    subprocess.run(["export","CUDA_VISIBLE_DEVICE",f"{i}"])
     pycmd = ["python3.8","./tools/aws_denoising.py"]
     pycmd += ["--noise-level","{:2.3e}".format(noise_level)]
     pycmd += ["--N","{:d}".format(N)]
@@ -37,7 +36,7 @@ def run_process(dataset,noise_level,N,i):
 
 def run_grid(dataset):
 
-    # download_dataset(dataset)
+    download_dataset(dataset)
     noise_levels = [1e-2, 5e-2, 1e-1]
     Ngrid = [2, 5, 10, 20] # 4 gpus
 
@@ -60,7 +59,7 @@ def download_dataset(dataset):
     cfg = get_cfg()
     cfg.cls.dataset.name = dataset
     cfg.cls.dataset.root = f"{settings.ROOT_PATH}/data/"
-    cfg.cls.dataset.download = False
+    cfg.cls.dataset.download = True
     get_dataset(cfg,'cls')
 
 if __name__ == "__main__":

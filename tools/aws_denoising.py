@@ -54,7 +54,7 @@ def write_settings(exp_name,settings):
             wstr += f"{key}: {val}\n"
         else:
             raise TypeError("Uknown settings type {}".format(type(val)))
-    with open(fn,'w+') as f:
+    with open(fn,'a+') as f:
         f.write(wstr)
         
 def main():
@@ -93,8 +93,8 @@ def main():
     info = {'noise':args.noise_level,'N':args.N,
             'dataset':args.dataset,'batch_size':args.batch_size}
     print(info)
-    # write_settings(cfg.exp_name,info)
-    # train_disent_exp(cfg)
+    write_settings(cfg.exp_name,info)
+    train_disent_exp(cfg)
 
 
 if __name__ == "__main__":
