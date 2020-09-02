@@ -122,6 +122,7 @@ def get_disent_optim(cfg,models):
         optim_fn = Path(cfg.disent.optim_path) / fn
         optimizer.load_state_dict(torch.load(optim_fn, map_location=cfg.disent.device.type))
     milestones = [50,150]
+    # milestones = [100,350]
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
     # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
     #                                                        patience = 5,

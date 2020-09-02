@@ -79,6 +79,7 @@ def main():
 
     cfg.disent = edict()
     cfg.disent.epochs = 500
+
     cfg.disent.load = args.epoch_num > 0
     cfg.disent.epoch_num = args.epoch_num
 
