@@ -121,9 +121,11 @@ def get_disent_optim(cfg,models):
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         optim_fn = Path(cfg.disent.optim_path) / fn
         optimizer.load_state_dict(torch.load(optim_fn, map_location=cfg.disent.device.type))
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                           patience = 5,
-                                                           factor=1./np.sqrt(10))
+    milestones = [100,350]
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+    #                                                        patience = 5,
+    #                                                        factor=1./np.sqrt(10))
     return optimizer,scheduler
 
 def save_disent_models(cfg,models,optimizer):

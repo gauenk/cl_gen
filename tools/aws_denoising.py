@@ -70,9 +70,9 @@ def main():
 
     cfg.exp_name = str(uuid.uuid4())
     cfg.disent = edict()
-    cfg.disent.epochs = 5000
+    cfg.disent.epochs = 500
     cfg.disent.load = False
-    cfg.disent.epoch_num = 40
+    cfg.disent.epoch_num = 0
 
     cfg.disent.dataset = edict()
     cfg.disent.dataset.root = f"{settings.ROOT_PATH}/data/"
