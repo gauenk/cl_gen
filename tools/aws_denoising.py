@@ -20,6 +20,7 @@ sys.path.append("./tools/")
 import argparse,uuid
 from easydict import EasyDict as edict
 from pathlib import Path
+import torch
 
 # project imports
 import settings
@@ -37,6 +38,8 @@ def get_args():
                         help="which dataset to create")
     parser.add_argument("--batch-size", type=int, default=128,
                         help="how big are the batch sizes")
+    parser.add_argument("--gpuid", type=int, default=0,
+                        help="which gpu?")
     args = parser.parse_args()
     return args
     
@@ -60,6 +63,10 @@ def write_settings(exp_name,settings):
 def main():
     args = get_args()
     cfg = get_cfg()
+
+    cfg.cl.device = torch.device("cuda:{}".format(args.gpuid))
+    cfg.cls.device = cfg.cl.device
+
 
     cfg.exp_name = str(uuid.uuid4())
     cfg.disent = edict()

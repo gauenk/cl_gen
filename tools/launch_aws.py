@@ -25,31 +25,36 @@ def wait(procs):
     for p in procs:
         p.wait()
 
-def run_process(dataset,noise_level,N,i):
-    subprocess.run(["export","CUDA_VISIBLE_DEVICE",f"{i}"])
-    pycmd = ["python3.8","./tools/aws_denoising.py"]
+def run_process(dataset,noise_level,N,bs,i):
+    pycmd = ["python3","./tools/aws_denoising.py"]
     pycmd += ["--noise-level","{:2.3e}".format(noise_level)]
     pycmd += ["--N","{:d}".format(N)]
     pycmd += ["--dataset",dataset]
+    pycmd += ["--batch-size","{:d}".format(bs)]
+    pycmd += ["--gpuid","{:d}".format(gpui)]
     print("Running: {}".format(' '.join(pycmd)))
     return subprocess.Popen(pycmd)
 
 def run_grid(dataset):
 
     download_dataset(dataset)
-    noise_levels = [1e-2, 5e-2, 1e-1]
-    Ngrid = [2, 5, 10, 20] # 4 gpus
+    Ngrid = [2, 5, 10, 15]
+    noise_levels = [5e-2, 1e-1, 5e-1]
+    bsizes = [400, 200, 100, 75]
 
-    for noise_level in noise_levels:
-        
-        procs = []
-        for i,N in enumerate(Ngrid):
+    ngpus = 4
+    gpuid = 0
+    for i,(N,bs) in enumerate(zip(Ngrid,bsizes)):
+
+        for noise_level in noise_levels:
 
             # launch experiment
-            p = run_process(dataset,noise_level,N,i)
+            if len(procs) == 4:
+                wait(procs)
+                procs = []
+            p = run_process(dataset,noise_level,N,bs,gpuid)
+            gpuid = (gpuid + 1) % ngpus
             procs.append(p)
-
-        wait(procs)
 
         # download results
         for N in Ngrid:

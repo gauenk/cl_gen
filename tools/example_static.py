@@ -217,6 +217,9 @@ def test_disent_examples(cfg):
 
     # load the data
     data,loader = get_dataset(cfg,'disent')
+    x = next(iter(loader.tr))[0][0].to('cpu').detach().numpy()[0,0]
+    plt.imshow(x)
+    plt.savefig(f"test_disentangle_20.png")
 
     # load the model and set criterion
     models = load_disent_models(cfg)
@@ -264,7 +267,7 @@ if __name__ == "__main__":
 
     cfg.disent = edict()
     cfg.disent.epochs = 5000
-    cfg.disent.load = True
+    cfg.disent.load = False
     cfg.disent.epoch_num = 40
 
     cfg.disent.dataset = edict()
@@ -272,7 +275,7 @@ if __name__ == "__main__":
     # cfg.disent.dataset.name = "celeba"
     cfg.disent.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.disent.dataset.n_classes = 10
-    cfg.disent.noise_level = 1e-2
+    cfg.disent.noise_level = 5e-2
     cfg.disent.N = 5
 
 
@@ -292,15 +295,14 @@ if __name__ == "__main__":
     cfg.disent.log_interval = 1
 
 
-
     # exploring_nt_xent_loss(cfg)
-    train_disent_exp(cfg)
+    # train_disent_exp(cfg)
 
 
     cfg.disent.load = True
     cfg.disent.epoch_num = 20
     cfg.disent.batch_size = 128
     # test_disent(cfg)
-    test_disent_over_epochs(cfg)
+    # test_disent_over_epochs(cfg)
     test_disent_examples(cfg)
     # test_disent_examples_over_epochs(cfg)
