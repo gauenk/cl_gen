@@ -164,7 +164,7 @@ def train_disent_exp(cfg):
     optimizer,scheduler = get_disent_optim(cfg,models)
 
     # init the training loop
-    writer = SummaryWriter()
+    writer = SummaryWriter(filename_suffix=cfg.exp_name)
     global_step,current_epoch = get_model_epoch_info(cfg.disent)
     cfg.disent.global_step = global_step
     cfg.disent.current_epoch = current_epoch
