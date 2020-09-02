@@ -40,6 +40,10 @@ def get_args():
                         help="how big are the batch sizes")
     parser.add_argument("--gpuid", type=int, default=0,
                         help="which gpu?")
+    parser.add_argument("--epoch-num", type=int, default=0,
+                        help="resume training from epoch-num")
+    parser.add_argument("--name", type=str, default=None,
+                        help="experiment name")
     args = parser.parse_args()
     return args
     
@@ -68,11 +72,16 @@ def main():
     cfg.cls.device = cfg.cl.device
 
 
-    cfg.exp_name = str(uuid.uuid4())
+    # set the name
+    cfg.exp_name = args.name
+    if cfg.exp_name is None:
+        cfg.exp_name = str(uuid.uuid4())
+
     cfg.disent = edict()
     cfg.disent.epochs = 500
-    cfg.disent.load = False
-    cfg.disent.epoch_num = 0
+
+    cfg.disent.load = args.epoch_num > 0
+    cfg.disent.epoch_num = args.epoch_num
 
     cfg.disent.dataset = edict()
     cfg.disent.dataset.root = f"{settings.ROOT_PATH}/data/"
