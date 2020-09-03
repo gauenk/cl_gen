@@ -114,6 +114,7 @@ def get_denoising_cfg(args):
     else:
         cfg.disent.n_channels = 3
 
+
     info = {'noise':args.noise_level,'N':args.N,
             'dataset':args.dataset,'batch_size':args.batch_size}
     write_settings(cfg.exp_name,info)

@@ -8,6 +8,7 @@ class Decoder(nn.Module):
 
     def __init__(self, n_channels=1, embedding_size = 256, verbose = False ):
         super(Decoder, self).__init__()
+        self.n_channels = n_channels
         self.embedding_size = embedding_size
         self.i_size = int(np.sqrt(embedding_size))
 
@@ -52,7 +53,8 @@ class Decoder(nn.Module):
         x = torch.cat([x,a], dim=1)
         x = self.conv2a(x)
         x = self.conv2b(x)
-        x = F.relu(x)
+        if self.n_channels == 1:
+            x = F.relu(x)
         return x
 
 

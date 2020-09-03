@@ -177,7 +177,7 @@ def train_disent_exp(cfg):
         loss_epoch = train_disent(cfg.disent, loader.tr, models,
                                   criterion, optimizer, epoch, writer)
         if scheduler:
-           scheduler.step(loss_epoch)
+           scheduler.step()
 
         if epoch % cfg.disent.checkpoint_interval == 0:
             save_disent_models(cfg,models,optimizer)

@@ -18,6 +18,15 @@ class LowLight:
         low_light_pic = torch.poisson(self.alpha*pic,generator=self.seed)/self.alpha
         return low_light_pic
 
+class ScaleZeroMean:
+
+    def __init__(self):
+        pass
+
+    def __call__(self,pic):
+        return pic / 255. - 0.5
+
+
 class TransformsSimCLR:
     """
     A stochastic data augmentation module that transforms any given data example randomly 

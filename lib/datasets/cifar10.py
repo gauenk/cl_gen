@@ -23,7 +23,7 @@ from torchvision import transforms as th_transforms
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import TransformsSimCLR,AddGaussianNoiseSet
+from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean
 
 class ClCIFAR10(CIFAR10):
     """
@@ -112,10 +112,12 @@ class DisentCIFAR10v1(CIFAR10):
         root = Path(root)/Path("cifar10")
         transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor(),
+                                           ScaleZeroMean(),
                                            AddGaussianNoiseSet(N,std=noise_level),
                                            ])
         th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
-                                           th_transforms.ToTensor()
+                                          th_transforms.ToTensor(),
+                                          ScaleZeroMean(),
                                            ])
         self.__class__.__name__ = "cifar10"
         super(DisentCIFAR10v1, self).__init__( root, train=train, transform=transform,

@@ -13,7 +13,7 @@ from pathlib import Path
 
 # project imports
 from settings import ROOT_PATH
-from .transform import AddGaussianNoiseSet
+from .transform import AddGaussianNoiseSet,ScaleZeroMean
 
 
 class ClImageNet(ImageNet):
@@ -57,16 +57,17 @@ class DisentImageNetv1(ImageNet):
 
     def __init__(self, root: str, split: str = 'train', transform=None, target_transform=None):
         root = Path(root) / Path("imagenet")
-        transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+        transform = th_transforms.Compose([torchvision.transforms.Resize(size=256),
                                            th_transforms.ToTensor(),
+                                           ScaleZeroMean(),
                                            AddGaussianNoiseSet(N,std=noise_level),
                                            ])
-        th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+        th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=256),
+                                          ScaleZeroMean(),
                                            th_transforms.ToTensor()
                                            ])
-        super(ClImageNet, self).__init__( root, split, None, transform=transform,
-
-                                          target_transform=target_transform)
+        super(DisentImageNetv1, self).__init__( root, split, None, transform=transform,
+                                                target_transform=target_transform)
     def __getitem__(self, index):
         """
         Args:
