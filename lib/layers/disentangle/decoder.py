@@ -11,7 +11,6 @@ class Decoder(nn.Module):
         self.embedding_size = embedding_size
         self.i_size = int(np.sqrt(embedding_size))
 
-        n_channels = 48
         # self.upconv5 = SingleUpConv(48,48,0,2,2)
         # self.conv5a = SingleConv(96,96,(1,3),3,2)
         # self.conv5b = SingleConv(96,48,(1,2),3,1)
@@ -25,8 +24,8 @@ class Decoder(nn.Module):
         self.conv3b = SingleConv(96,48)
 
         self.upconv2 = SingleUpConv(48,48)
-        self.conv2a = SingleConv(49,64)
-        self.conv2b = SingleConv(64,1)
+        self.conv2a = SingleConv(48+n_channels,64)
+        self.conv2b = SingleConv(64,n_channels)
 
         # self.upconv1 = SingleUpConv(48,48)
         # self.conv1a = SingleConv(96,64)

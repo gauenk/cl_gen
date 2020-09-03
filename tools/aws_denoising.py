@@ -21,15 +21,18 @@ import argparse,uuid
 from easydict import EasyDict as edict
 from pathlib import Path
 import torch
+import numpy as np
 
 # project imports
 import settings
 from settings import ROOT_PATH
 from pyutils.cfg import get_cfg
-from example_static import train_disent_exp
+from example_static import train_disent_exp,test_disent_over_epochs,test_disent_examples_over_epochs
 
 def get_args():
     parser = argparse.ArgumentParser(description="Run static denoising on AWS")
+    parser.add_argument("--mode", type=str, default="train",
+                        help="train or test models")
     parser.add_argument("--noise-level", type=float, default=1e-2,
                         help="noise level for each input image")
     parser.add_argument("--N", type=int, default=2,
@@ -64,8 +67,7 @@ def write_settings(exp_name,settings):
     with open(fn,'a+') as f:
         f.write(wstr)
         
-def main():
-    args = get_args()
+def get_denoising_cfg(args):
     cfg = get_cfg()
 
     cfg.cl.device = torch.device("cuda:{}".format(args.gpuid))
@@ -78,7 +80,7 @@ def main():
         cfg.exp_name = str(uuid.uuid4())
 
     cfg.disent = edict()
-    cfg.disent.epochs = 500
+    cfg.disent.epochs = 10
 
     cfg.disent.load = args.epoch_num > 0
     cfg.disent.epoch_num = args.epoch_num
@@ -91,8 +93,9 @@ def main():
     cfg.disent.N = args.N
 
 
-    model_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/optim/")
+    dsname = cfg.disent.dataset.name.lower()
+    model_path = Path(f"{settings.ROOT_PATH}/output/disent/{dsname}/{cfg.exp_name}")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/disent/{dsname}/{cfg.exp_name}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.disent.model_path = model_path
     cfg.disent.optim_path = optim_path
@@ -106,12 +109,29 @@ def main():
     cfg.disent.test_interval = 5
     cfg.disent.log_interval = 1
 
+    if cfg.disent.dataset.name.lower() == "mnist":
+        cfg.disent.n_channels = 1
+    else:
+        cfg.disent.n_channels = 3
+
     info = {'noise':args.noise_level,'N':args.N,
             'dataset':args.dataset,'batch_size':args.batch_size}
-    print(info)
     write_settings(cfg.exp_name,info)
-    train_disent_exp(cfg)
+    print(info)
+    return cfg
 
 
 if __name__ == "__main__":
-    main()
+
+    args = get_args()
+    print(f"Running aws_denoising experiments with mode {args.mode}")
+    cfg = get_denoising_cfg(args)
+
+    if args.mode == "train":
+        train_disent_exp(cfg)
+    elif args.mode == "test":
+        cfg.disent.load = True
+        epoch_num_list = [0,2,5,10]# + list(range(0,501,50))
+        print(epoch_num_list)
+        test_disent_over_epochs(cfg,epoch_num_list)
+        test_disent_examples_over_epochs(cfg,epoch_num_list)

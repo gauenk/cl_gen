@@ -11,6 +11,7 @@ from PIL import Image
 from functools import partial
 from easydict import EasyDict as edict
 import numpy.random as npr
+from pathlib import Path
 
 # pytorch imports
 import torch,torchvision
@@ -22,7 +23,7 @@ from torchvision import transforms as th_transforms
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import TransformsSimCLR
+from .transform import TransformsSimCLR,AddGaussianNoiseSet
 
 class ClCIFAR10(CIFAR10):
     """
@@ -94,6 +95,53 @@ class ImgRecCIFAR10(CIFAR10):
             img_trans.append(img_i)
         return img_trans,index
 
+
+class DisentCIFAR10v1(CIFAR10):
+    """
+    This wrapper just rewrites the original Imagenet class 
+    to produce a pair of transformed observations rather than just one.
+    We overwrite:
+    __getitem__
+    """
+
+
+
+    def __init__(self, root, N, noise_level=1e-2, train=True, low_light=False,
+                 transform=None, target_transform=None,download=False):
+        # transform = BlockGaussian(N)
+        root = Path(root)/Path("cifar10")
+        transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+                                           th_transforms.ToTensor(),
+                                           AddGaussianNoiseSet(N,std=noise_level),
+                                           ])
+        th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+                                           th_transforms.ToTensor()
+                                           ])
+        self.__class__.__name__ = "cifar10"
+        super(DisentCIFAR10v1, self).__init__( root, train=train, transform=transform,
+                                          target_transform=target_transform,
+                                          download=download)
+        self.th_trans = th_trans
+
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.data[index], int(self.targets[index])
+        pil_pic = Image.fromarray(img)
+        img_set = self.transform(pil_pic)
+        th_img = self.th_trans(pil_pic)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target,index)
+
+        return img_set, th_img
+
+
 #
 # Loading the datasets in a project
 #
@@ -121,6 +169,14 @@ def get_cifar10_dataset(cfg,mode):
         data.val = ImgRecCIFAR10(root,cifar_transforms.tr,train=True)
         data.te = ImgRecCIFAR10(root,cifar_transforms.te,train=False)
         data.transforms = cifar_transforms
+        batch_size = cfg.disent.batch_size
+    elif mode == "disent":
+        batch_size = cfg.disent.batch_size
+        N = cfg.disent.N
+        noise_level = cfg.disent.noise_level
+        data.tr = DisentCIFAR10v1(root,N,noise_level,train=True)
+        data.val = DisentCIFAR10v1(root,N,noise_level,train=True)
+        data.te = DisentCIFAR10v1(root,N,noise_level,train=False)
     else: raise ValueError(f"Unknown CIFAR10 mode {mode}")
 
     loader = edict()

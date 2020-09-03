@@ -12,7 +12,7 @@ Experiments:
 """
 
 # python imports
-import sys,os
+import sys,os,json
 sys.path.append("./lib/")
 import numpy as np
 from easydict import EasyDict as edict
@@ -86,7 +86,8 @@ def exploring_nt_xent_loss(cfg):
     
 
 def load_encoder(cfg,enc_type):
-    model = Encoder(embedding_size = 256)
+    nc = cfg.disent.n_channels
+    model = Encoder(n_channels=nc,embedding_size = 256)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path(f"enc_{enc_type}") / fn
@@ -95,7 +96,8 @@ def load_encoder(cfg,enc_type):
     return model
 
 def load_decoder(cfg):
-    model = Decoder(embedding_size=256)
+    nc = cfg.disent.n_channels
+    model = Decoder(n_channels=nc,embedding_size=256)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path("dec") / fn
@@ -137,12 +139,10 @@ def save_disent_models(cfg,models,optimizer):
         cfg.disent.model_path = saved_mp
     save_optim(cfg.disent, optimizer)
 
-def load_disent_models(cfg):
+def load_static_models(cfg):
     models = edict()
     models.enc_c = load_encoder(cfg,'c')
-    models.enc_d = load_encoder(cfg,'d')
     models.dec = load_decoder(cfg)
-    models.proj = load_projector(cfg)
     return models
 
 def train_disent_exp(cfg):
@@ -152,7 +152,7 @@ def train_disent_exp(cfg):
     data,loader = get_dataset(cfg,'disent')
 
     # load the model and set criterion
-    models = load_disent_models(cfg)
+    models = load_static_models(cfg)
     hyperparams = edict()
     hyperparams.h = 0.5
     hyperparams.g = 0.5
@@ -196,64 +196,97 @@ def train_disent_exp(cfg):
     save_disent_models(cfg,models,optimizer)
 
 def test_disent(cfg):
-    print("Testing image denoising.")
+    print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
 
     # load the data
     data,loader = get_dataset(cfg,'disent')
 
     # load the model and set criterion
-    models = load_disent_models(cfg)
+    models = load_static_models(cfg)
     for name,model in models.items(): model.eval()
 
     # tr_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.tr)
     # val_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.val)
-    te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
-
+    te_losses = []
+    n_runs = 3
+    for n in range(n_runs):
+        te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
+        te_losses.append(te_loss)
+    mean = np.mean(te_losses)
+    stderr = np.std(te_losses) / np.sqrt(np.len(te_losses))
     # print("Testing loss: {:.3f}".format(tr_loss))
     # print("Testing loss: {:.3f}".format(val_loss))
-    print("Testing loss: {:.3f}".format(te_loss))
-    return te_loss
+    print("Testing loss: {:.3f} +/- {:.3f}".format(mean,stderr))
+    return mean,stderr
 
 
 def test_disent_examples(cfg):
-    print("Testing image disentanglement.")
+    print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
 
     # load the data
     data,loader = get_dataset(cfg,'disent')
-    x = next(iter(loader.tr))[0][0].to('cpu').detach().numpy()[0,0]
-    plt.imshow(x)
-    plt.savefig(f"test_disentangle_20.png")
 
     # load the model and set criterion
-    models = load_disent_models(cfg)
+    models = load_static_models(cfg)
     for name,model in models.items(): model.eval()
 
     # get the data
-    x = next(iter(loader.tr))[0]
-    pics = [x_i.to(cfg.disent.device) for x_i in x]
-    nt = len(pics) 
-    fig,ax = plt.subplots(nt,2,figsize=(8,8))
-    #plot_th_tensor(ax,i,-1,pic_i)
-    for i,pic_i in enumerate(pics):
+    numOfExamples = 4
+    fig,ax = plt.subplots(numOfExamples,3,figsize=(8,8))
+    for num_ex in range(numOfExamples):
+        x,raw_img = next(iter(loader.tr))
+        pics = [x_i.to(cfg.disent.device) for x_i in x]
+        pic_i = pics[0]
         encC_i,aux = models.enc_c(pic_i)
         dec_i = models.dec([encC_i,aux])
-        plot_th_tensor(ax,i,0,dec_i)
-        plot_th_tensor(ax,i,1,pic_i)
-    plt.savefig(f"test_disentangle_{cfg.disent.epoch_num}.png")
+        plot_th_tensor(ax,num_ex,0,dec_i)
+        plot_th_tensor(ax,num_ex,1,pic_i)
+        plot_th_tensor(ax,num_ex,2,raw_img)
+    exp_report_dir = get_report_dir(cfg)
+    fn = Path(f"test_disentangle_{cfg.exp_name}_{cfg.disent.epoch_num}.png")
+    path = exp_report_dir / fn
+    plt.savefig(path)
     plt.clf()
     plt.cla()
 
-def test_disent_over_epochs(cfg):
-    epoch_num_list = [0,5,10,15,20,25,30,35,40]
-    losses = {}
+def get_report_dir(cfg):
+    base = Path(f"{settings.ROOT_PATH}/reports/")
+    base = base / f"noise_{cfg.disent.noise_level}"
+    base = base / f"N_{cfg.disent.N}"
+    base = base / f"name_{cfg.exp_name}"
+    if not base.exists(): base.mkdir(parents=True)
+    return base
+
+def test_disent_over_epochs(cfg,epoch_num_list):
+    means,stderrs = {},{}
     for epoch_num in epoch_num_list:
         cfg.disent.epoch_num = epoch_num
-        losses[epoch_num] = test_disent(cfg)
+        mean,stderr =  test_disent(cfg)
+        means[epoch_num] = mean 
+        stderrs[epoch_num] = stderr
     print("Losses by epoch")
-    print(losses)
+    print("means")
+    print(means)
+    print("stderrs")
+    print(stderrs)
+    losses = {'means':means,'stderrs':stderrs}
+    write_losses(cfg,losses)
 
-def test_disent_examples_over_epochs(cfg):
-    epoch_num_list = [0,1,2,3,4,5,6,7,8]
+def write_losses(cfg,losses):
+    fn = get_unique_write_losses_fn(cfg,losses)
+    with open(fn,'w+') as f:
+        f.write(json.dumps(losses))
+
+def get_unique_write_losses_fn(cfg,losses):
+    fn = Path(f"{settings.ROOT_PATH}/reports/{cfg.exp_name}.txt")
+    num = 0
+    while fn.exists():
+        Path(f"{settings.ROOT_PATH}/reports/{cfg.exp_name}_{num}.txt")
+        num += 1
+    return fn
+    
+
+def test_disent_examples_over_epochs(cfg,epoch_num_list):
     for epoch_num in epoch_num_list:
         cfg.disent.epoch_num = epoch_num
         test_disent_examples(cfg)        
@@ -265,7 +298,7 @@ def plot_th_tensor(ax,i,j,dec_ij):
 
 if __name__ == "__main__":
     cfg = get_cfg()
-    cfg.exp_name = "static_noise_mnist"
+    cfg.exp_name = "static_noise_cifar10"
     # cfg.exp_name = "static_noise_celeba"
 
     cfg.disent = edict()
@@ -274,7 +307,7 @@ if __name__ == "__main__":
     cfg.disent.epoch_num = 40
 
     cfg.disent.dataset = edict()
-    cfg.disent.dataset.name = 'MNIST'
+    cfg.disent.dataset.name = 'CIFAR10'
     # cfg.disent.dataset.name = "celeba"
     cfg.disent.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.disent.dataset.n_classes = 10
@@ -282,8 +315,9 @@ if __name__ == "__main__":
     cfg.disent.N = 5
 
 
-    model_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/optim/")
+    dsname = cfg.disent.dataset.name.lower()
+    model_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/{dsname}")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/{dsname}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.disent.model_path = model_path
     cfg.disent.optim_path = optim_path
@@ -297,15 +331,23 @@ if __name__ == "__main__":
     cfg.disent.test_interval = 5
     cfg.disent.log_interval = 1
 
+    if cfg.disent.dataset.name.lower() == "mnist":
+        cfg.disent.n_channels = 1
+    else:
+        cfg.disent.n_channels = 3
 
     # exploring_nt_xent_loss(cfg)
     # train_disent_exp(cfg)
 
 
     cfg.disent.load = True
-    cfg.disent.epoch_num = 20
-    cfg.disent.batch_size = 128
+    cfg.disent.epoch_num = 0
+    cfg.disent.batch_size = 20
+    cfg.disent.noise_level = 5e-2
+    cfg.disent.N = 5
     # test_disent(cfg)
-    # test_disent_over_epochs(cfg)
-    test_disent_examples(cfg)
-    # test_disent_examples_over_epochs(cfg)
+    epoch_num_list = [0,5,50,100,250,450]
+    test_disent_over_epochs(cfg,epoch_num_list)
+    # test_disent_examples(cfg)
+    # epoch_num_list = [0,5,50,100,250,450]
+    # test_disent_examples_over_epochs(cfg,epoch_num_list)

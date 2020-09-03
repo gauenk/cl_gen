@@ -12,9 +12,9 @@ class DisentangleStaticNoiseLoss(nn.Module):
     def __init__(self, models, hyperparams, num_transforms, batch_size, device):
         super(DisentangleStaticNoiseLoss, self).__init__()
         self.encoder_c = models.enc_c
-        self.encoder_d = models.enc_d
+        # self.encoder_d = models.enc_d
         self.decoder = models.dec
-        self.projector = models.proj
+        # self.projector = models.proj
         self.hyperparams = hyperparams
         self.similarity_f = nn.CosineSimilarity(dim=2)
         self.criterion = nn.CrossEntropyLoss(reduction="sum")
