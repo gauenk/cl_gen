@@ -5,7 +5,7 @@ Launch a few models on AWS for faster training.
 
 import argparse
 import subprocess
-import sys,os
+import sys,os,time
 sys.path.append("./lib/")
 
 # project imports
@@ -77,6 +77,7 @@ def run_grid(dataset,mode):
                 procs = []
             exp = exps[N][noise_level]
             p = run_process(dataset,mode,noise_level,N,bs,gpuid,exp)
+            time.sleep(5)
             gpuid = (gpuid + 1) % ngpus
             procs.append(p)
 
