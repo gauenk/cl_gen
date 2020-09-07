@@ -7,10 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DisentangleStaticNoiseLoss(nn.Module):
+class DenoisingLoss(nn.Module):
 
-    def __init__(self, models, hyperparams, num_transforms, batch_size, device):
-        super(DisentangleStaticNoiseLoss, self).__init__()
+    def __init__(self, models, hyperparams, num_transforms, batch_size, device,
+                 img_loss_type='l2',enc_loss_type='simclr'):
+        super(DenoisingLoss, self).__init__()
         self.encoder_c = models.enc_c
         # self.encoder_d = models.enc_d
         self.decoder = models.dec
@@ -25,7 +26,8 @@ class DisentangleStaticNoiseLoss(nn.Module):
 
         msizes = [2,self.num_transforms,self.num_transforms+1]
         self.masks_neg,self.masks_pos = self.get_masks(msizes,batch_size)
-
+        self.img_loss_type = img_loss_type
+        self.enc_loss_type = enc_loss_type
 
     def forward(self,pic_set):
         hyperparams = self.hyperparams
@@ -33,6 +35,21 @@ class DisentangleStaticNoiseLoss(nn.Module):
         simh = []
         simpics = []
 
+        N = len(pic_set)
+        BS = pic_set[0].shape[0]
+        # TODO: vectorize the forward pass so there's no for loop
+        # why not torch.cat(pic_set,dim=1)?
+        print(pic_set[0].shape)
+        input_i = torch.cat(pic_set,dim=0)
+        h,aux = self.encoder_c(input_i)
+        input_i = [h,aux]
+        pics = self.decoder(input_i)
+        print(pics.shape)
+        pics = pics.reshape(N,BS,-1)
+        print('p',pics.shape)
+        print(h.shape)
+        h = h.reshape(N,BS,-1)
+        print('h',h.shape)
 
         # first pic
         h_i,aux = self.encoder_c(pic_set[0])
@@ -54,22 +71,38 @@ class DisentangleStaticNoiseLoss(nn.Module):
             pic_pair.append(torch.flatten(pic_set[i-1],1))
             pic_pair.append(torch.flatten(dec_pic,1))
 
-            loss_pairs += self.compute_loss(pic_pair,proj=False)
+            loss_pairs += self.compute_img_loss(pic_pair,proj=False)
 
         # the last pair loops back to start
         pic_pair = []
         pic_pair.append(torch.flatten(pic_set[-1],1))
         pic_pair.append(simpics[0])
+        loss_pairs += self.compute_img_loss(pic_pair,proj=False)
 
         # compute losses
-        loss_pairs += self.compute_loss(pic_pair,proj=False)
-        loss_x = self.compute_loss(simpics,proj=False)
-        loss_h = self.compute_loss(simh,proj=False)
+        loss_x = self.compute_img_loss(simpics,proj=False)
+        loss_h = self.compute_enc_loss(simh,proj=False)
         loss = loss_pairs / len(pic_set) + hyperparams.x * loss_x + hyperparams.h * loss_h
         return loss
 
 
-    def compute_loss(self,sim_i,proj=True):
+    def compute_img_loss(self,sim_i,proj=True):
+        if self.img_loss_type == 'simclr':
+            return self.compute_loss_simclr(sim_i,proj)
+        elif self.img_loss_type == 'l2':
+            return F.mse_loss(sim_i[0],sim_i[1])
+        else:
+            raise ValueError(f"Unknown img loss type [{self.loss_type}]")
+        
+    def compute_enc_loss(self,sim_i,proj=True):
+        if self.enc_loss_type == 'simclr':
+            return self.compute_loss_simclr(sim_i,proj)
+        elif self.enc_loss_type == 'l2':
+            return F.mse_loss(sim_i[0],sim_i[1])
+        else:
+            raise ValueError(f"Unknown loss type [{self.loss_type}]")
+
+    def compute_loss_simclr(self,sim_i,proj=True):
         N = len(sim_i)
         BS = self.batch_size
         Kpos = N*(N-1)*BS

@@ -47,6 +47,8 @@ def get_args():
                         help="resume training from epoch-num")
     parser.add_argument("--name", type=str, default=None,
                         help="experiment name")
+    parser.add_argument("--img-loss-type", type=str, default='l2',
+                        help="loss type [l2 or simclr]")
     args = parser.parse_args()
     return args
     
@@ -80,7 +82,7 @@ def get_denoising_cfg(args):
         cfg.exp_name = str(uuid.uuid4())
 
     cfg.disent = edict()
-    cfg.disent.epochs = 10
+    cfg.disent.epochs = 100
 
     cfg.disent.load = args.epoch_num > 0
     cfg.disent.epoch_num = args.epoch_num
@@ -107,7 +109,9 @@ def get_denoising_cfg(args):
     cfg.disent.current_epoch = 0
     cfg.disent.checkpoint_interval = 1
     cfg.disent.test_interval = 5
-    cfg.disent.log_interval = 1
+    cfg.disent.log_interval = 50
+    cfg.disent.random_crop = True
+    cfg.disent.img_loss_type = args.img_loss_type
 
     if cfg.disent.dataset.name.lower() == "mnist":
         cfg.disent.n_channels = 1
@@ -127,12 +131,13 @@ if __name__ == "__main__":
     args = get_args()
     print(f"Running aws_denoising experiments with mode {args.mode}")
     cfg = get_denoising_cfg(args)
+    print(f"Experiment named {cfg.exp_name}")
 
     if args.mode == "train":
         train_disent_exp(cfg)
     elif args.mode == "test":
         cfg.disent.load = True
-        epoch_num_list = [0,2,5,10]# + list(range(0,501,50))
+        epoch_num_list = list(range(0,100+1,10)) + [-1]
         print(epoch_num_list)
-        test_disent_over_epochs(cfg,epoch_num_list)
+        # test_disent_over_epochs(cfg,epoch_num_list)
         test_disent_examples_over_epochs(cfg,epoch_num_list)

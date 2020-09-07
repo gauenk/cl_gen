@@ -4,10 +4,10 @@ import torch,torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
-class Decoder(nn.Module):
+class DenoisingDecoder(nn.Module):
 
     def __init__(self, n_channels=1, embedding_size = 256, verbose = False ):
-        super(Decoder, self).__init__()
+        super(DenoisingDecoder, self).__init__()
         self.n_channels = n_channels
         self.embedding_size = embedding_size
         self.i_size = int(np.sqrt(embedding_size))

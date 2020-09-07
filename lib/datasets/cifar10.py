@@ -12,6 +12,7 @@ from functools import partial
 from easydict import EasyDict as edict
 import numpy.random as npr
 from pathlib import Path
+import numpy as np
 
 # pytorch imports
 import torch,torchvision
@@ -23,7 +24,7 @@ from torchvision import transforms as th_transforms
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean
+from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 class ClCIFAR10(CIFAR10):
     """
@@ -113,7 +114,12 @@ class DisentCIFAR10v1(CIFAR10):
         transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor(),
                                            ScaleZeroMean(),
-                                           AddGaussianNoiseSet(N,std=noise_level),
+                                           AddGaussianNoiseSetN2N(N,(0,50.))
+                                           ])
+        val_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+                                           th_transforms.ToTensor(),
+                                           ScaleZeroMean(),
+                                           AddGaussianNoiseSetN2N(N,(24.99,25.01))
                                            ])
         th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                           th_transforms.ToTensor(),
@@ -123,6 +129,7 @@ class DisentCIFAR10v1(CIFAR10):
         super(DisentCIFAR10v1, self).__init__( root, train=train, transform=transform,
                                           target_transform=target_transform,
                                           download=download)
+        self.val_trans = val_trans
         self.th_trans = th_trans
 
     def __getitem__(self, index):
@@ -181,11 +188,16 @@ def get_cifar10_dataset(cfg,mode):
         data.te = DisentCIFAR10v1(root,N,noise_level,train=False)
     else: raise ValueError(f"Unknown CIFAR10 mode {mode}")
 
+    def worker_init_fn(worker_id):
+        a = torch.randint(1,(2,2))
+        print(a)
+
     loader = edict()
     loader_kwargs = {'batch_size': batch_size,
                      'shuffle':True,
                      'drop_last':True,
-                     'num_workers':cfg[mode].workers,}
+                     'num_workers':cfg[mode].workers,
+                     'worker_init_fn':worker_init_fn}
     loader.tr = DataLoader(data.tr,**loader_kwargs)
     loader.val = DataLoader(data.val,**loader_kwargs)
     loader.te = DataLoader(data.te,**loader_kwargs)

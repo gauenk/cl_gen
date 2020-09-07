@@ -29,13 +29,14 @@ from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import save_image
-
+import torch.nn.functional as F
 
 # project imports
 import settings
 from pyutils.cfg import get_cfg
-from layers import NT_Xent,SimCLR,get_resnet,LogisticRegression,DisentangleStaticNoiseLoss
-from layers import DisentangleLoss,Encoder,Decoder,Projector
+from pyutils.misc import np_log
+from layers import NT_Xent,SimCLR,get_resnet,LogisticRegression,DisentangleStaticNoiseLoss,Projector
+from layers.denoising import DenoisingLoss,DenoisingEncoder,DenoisingDecoder
 from learning.train import thtrain_cl as train_cl
 from learning.train import thtrain_cls as train_cls
 from learning.train import thtrain_disent as train_disent
@@ -87,7 +88,7 @@ def exploring_nt_xent_loss(cfg):
 
 def load_encoder(cfg,enc_type):
     nc = cfg.disent.n_channels
-    model = Encoder(n_channels=nc,embedding_size = 256)
+    model = DenoisingEncoder(n_channels=nc,embedding_size = 256)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path(f"enc_{enc_type}") / fn
@@ -97,7 +98,7 @@ def load_encoder(cfg,enc_type):
 
 def load_decoder(cfg):
     nc = cfg.disent.n_channels
-    model = Decoder(n_channels=nc,embedding_size=256)
+    model = DenoisingDecoder(n_channels=nc,embedding_size=256)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path("dec") / fn
@@ -154,18 +155,28 @@ def train_disent_exp(cfg):
     # load the model and set criterion
     models = load_static_models(cfg)
     hyperparams = edict()
-    hyperparams.h = 0.5
-    hyperparams.g = 0.5
-    hyperparams.x = 0.5
+    hyperparams.g = 0
+    hyperparams.h = 0
+    hyperparams.x = 0
     hyperparams.temperature = 0.1
-    criterion = DisentangleStaticNoiseLoss(models,hyperparams,
-                                cfg.disent.N,
-                                cfg.disent.batch_size,
-                                cfg.disent.device)
+    criterion = DenoisingLoss(models,hyperparams,
+                              cfg.disent.N,
+                              cfg.disent.batch_size,
+                              cfg.disent.device,
+                              cfg.disent.img_loss_type)
     optimizer,scheduler = get_disent_optim(cfg,models)
 
-    # init the training loop
+    # init writer
     writer = SummaryWriter(filename_suffix=cfg.exp_name)
+
+    # test init model
+    # te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)            
+    # writer.add_scalar(f"test_loss at epoch", te_loss, -1)
+    # cfg.disent.current_epoch = -1
+    # save_disent_models(cfg,models,optimizer)
+
+
+    # init training loop
     global_step,current_epoch = get_model_epoch_info(cfg.disent)
     cfg.disent.global_step = global_step
     cfg.disent.current_epoch = current_epoch
@@ -183,7 +194,7 @@ def train_disent_exp(cfg):
             save_disent_models(cfg,models,optimizer)
 
         if epoch % cfg.disent.test_interval == 0:
-            te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)            
+            te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
             writer.add_scalar(f"test_loss at epoch", te_loss, epoch)
 
         writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
@@ -234,20 +245,40 @@ def test_disent_examples(cfg):
     numOfExamples = 4
     fig,ax = plt.subplots(numOfExamples,3,figsize=(8,8))
     for num_ex in range(numOfExamples):
-        x,raw_img = next(iter(loader.tr))
+        x,raw_img = next(iter(loader.te))
+        raw_img = raw_img.to(cfg.disent.device)
         pics = [x_i.to(cfg.disent.device) for x_i in x]
         pic_i = pics[0]
         encC_i,aux = models.enc_c(pic_i)
         dec_i = models.dec([encC_i,aux])
-        plot_th_tensor(ax,num_ex,0,dec_i)
-        plot_th_tensor(ax,num_ex,1,pic_i)
-        plot_th_tensor(ax,num_ex,2,raw_img)
+
+        mse = F.mse_loss(rescale_noisy_image(dec_i),raw_img).item()
+        psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
+        # print('dec',dec_i.min().item(),dec_i.max().item())
+        pic_title = 'rec psnr: {:2.2f}'.format(psnr)
+        plot_th_tensor(ax,num_ex,0,dec_i+0.5,pic_title)
+
+        # print('raw',raw_img.min().item(),raw_img.max().item())
+        # print('noisy',pic_i.min().item(),pic_i.max().item())
+        mse = F.mse_loss(rescale_noisy_image(pic_i),raw_img).item()
+        psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
+        pic_title = 'noisy psnr: {:2.2f}'.format(psnr)
+        plot_th_tensor(ax,num_ex,1,pic_i+0.5,pic_title)
+
+        pic_title = 'raw'
+        plot_th_tensor(ax,num_ex,2,raw_img,pic_title)
+
     exp_report_dir = get_report_dir(cfg)
     fn = Path(f"test_disentangle_{cfg.exp_name}_{cfg.disent.epoch_num}.png")
     path = exp_report_dir / fn
+    print(f"Writing images to output {path}")
     plt.savefig(path)
     plt.clf()
     plt.cla()
+
+def rescale_noisy_image(img):
+    img = img + 0.5
+    return img
 
 def get_report_dir(cfg):
     base = Path(f"{settings.ROOT_PATH}/reports/")
@@ -278,10 +309,13 @@ def write_losses(cfg,losses):
         f.write(json.dumps(losses))
 
 def get_unique_write_losses_fn(cfg,losses):
+    exp_report_dir = get_report_dir(cfg)
     fn = Path(f"{settings.ROOT_PATH}/reports/{cfg.exp_name}.txt")
-    num = 0
-    while fn.exists():
-        Path(f"{settings.ROOT_PATH}/reports/{cfg.exp_name}_{num}.txt")
+    path = exp_report_dir / fn
+    num = 2
+    while path.exists():
+        fn = Path(f"{settings.ROOT_PATH}/reports/{cfg.exp_name}_{num}.txt")
+        path = exp_report_dir / fn
         num += 1
     return fn
     
@@ -291,10 +325,14 @@ def test_disent_examples_over_epochs(cfg,epoch_num_list):
         cfg.disent.epoch_num = epoch_num
         test_disent_examples(cfg)        
 
-def plot_th_tensor(ax,i,j,dec_ij):
+def plot_th_tensor(ax,i,j,dec_ij,title):
     dec_ij = dec_ij.to('cpu').detach().numpy()[0,0]
+    dec_ij += np.abs(np.min(dec_ij))
+    dec_ij = dec_ij / dec_ij.max()
     ax[i,j].imshow(dec_ij,  cmap='Greys_r',  interpolation=None)
-
+    ax[i,j].set_xticks([])
+    ax[i,j].set_yticks([])
+    ax[i,j].set_title(title)
 
 if __name__ == "__main__":
     cfg = get_cfg()
@@ -313,6 +351,7 @@ if __name__ == "__main__":
     cfg.disent.dataset.n_classes = 10
     cfg.disent.noise_level = 5e-2
     cfg.disent.N = 5
+    cfg.disent.img_loss_type = 'l2' 
 
 
     dsname = cfg.disent.dataset.name.lower()

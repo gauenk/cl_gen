@@ -2,11 +2,12 @@
 Thanks to Spijkervet for this code
 """
 
-import numpy as np
-import numpy.random as npr
 import torch
 import torchvision
 
+
+def th_uniform(l,u,size):
+    return (l - u) * torch.rand(size) + u
 
 class LowLight:
 
@@ -24,7 +25,7 @@ class ScaleZeroMean:
         pass
 
     def __call__(self,pic):
-        return pic / 255. - 0.5
+        return pic - 0.5
 
 
 class TransformsSimCLR:
@@ -70,27 +71,42 @@ class TransformsSimCLR:
         return self.train_transform(x), self.train_transform(x)
 
 class AddGaussianNoise(object):
-    def __init__(self, mean=0., std=1e-2):
+    def __init__(self, std=1e-2):
         self.std = std
-        self.mean = mean
         
     def __call__(self, tensor):
-        return tensor + torch.randn(tensor.size()) * self.std + self.mean
+        pic = torch.normal(tensor,rnoise)
+        return pic
     
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 class AddGaussianNoiseSet(object):
-    def __init__(self, N, mean=0., std=1e-2):
+    def __init__(self, N, std=1e-2):
         self.N = N
         self.std = std
-        self.mean = mean
         
     def __call__(self, tensor):
         pics = []
-        # print(tensor.shape)
         for n in range(self.N):
-            pic = tensor + torch.randn(tensor.size()) * self.std + self.mean
+            pic = torch.normal(tensor,rnoise)
+            pics.append(pic)
+        return pics
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+class AddGaussianNoiseSetN2N(object):
+    def __init__(self, N, train_stddev_rng_range=(0,50.)):
+        self.N = N
+        self.train_stddev_rng_range = train_stddev_rng_range
+        
+    def __call__(self, tensor):
+        pics = []
+        (minv,maxv) = self.train_stddev_rng_range
+        for n in range(self.N):
+            rnoise = th_uniform(minv/255,maxv/255.,1)[0]
+            pic = torch.normal(tensor,rnoise)
             pics.append(pic)
         return pics
     
@@ -112,13 +128,13 @@ class BlockGaussian:
         pics = []
         for n in range(self.N):
             pic_n = pic.clone()
-            y = npr.randint(h)
-            x = npr.randint(w)
-            y1 = np.clip(y - b_h // 2, 0, h)
-            y2 = np.clip(y + b_h // 2, 0, h)
-            x1 = np.clip(x - b_w // 2, 0, w)
-            x2 = np.clip(x + b_w // 2, 0, w)
-            mask = npr.normal(self.mean,self.std,(y2-y1,x2-x1))
+            y = torch.randint(h)
+            x = torch.randint(w)
+            y1 = torch.clamp(y - b_h // 2, 0, h)
+            y2 = torch.clamp(y + b_h // 2, 0, h)
+            x1 = torch.clamp(x - b_w // 2, 0, w)
+            x2 = torch.clamp(x + b_w // 2, 0, w)            
+            mask = torch.normal(self.mean,self.std,(y2-y1,x2-x1))
             mask = torch.Tensor(mask).to(pic.device)
             mask = torch.clamp(mask,0,1.)
             pic_n[y1:y2, x1:x2] = mask

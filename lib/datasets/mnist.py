@@ -19,7 +19,7 @@ from torchvision import transforms as th_transforms
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import BlockGaussian,AddGaussianNoiseSet
+from .transform import BlockGaussian,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 def get_mnist_dataset(cfg,mode):
     root = cfg[mode].dataset.root
@@ -64,7 +64,8 @@ class DisentMNISTv1(MNIST):
         # transform = BlockGaussian(N)
         transform = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor(),
-                                           AddGaussianNoiseSet(N,std=noise_level),
+                                           ScaleZeroMean(),
+                                           AddGaussianNoiseSetN2N(N,(0,50.))
                                            ])
         th_trans = th_transforms.Compose([torchvision.transforms.Resize(size=32),
                                            th_transforms.ToTensor()
