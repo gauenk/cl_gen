@@ -27,7 +27,7 @@ import numpy as np
 import settings
 from settings import ROOT_PATH
 from pyutils.cfg import get_cfg
-from example_static import train_disent_exp,test_disent_over_epochs,test_disent_examples_over_epochs
+from example_static import train_disent_exp,test_disent_over_epochs,test_disent_examples_over_epochs,plot_noise_floor
 
 def get_args():
     parser = argparse.ArgumentParser(description="Run static denoising on AWS")
@@ -49,6 +49,8 @@ def get_args():
                         help="experiment name")
     parser.add_argument("--img-loss-type", type=str, default='l2',
                         help="loss type [l2 or simclr]")
+    parser.add_argument("--share-enc", dest="share_enc",
+                        action='store_true',help="do we share encodings?")
     args = parser.parse_args()
     return args
     
@@ -93,6 +95,8 @@ def get_denoising_cfg(args):
     cfg.disent.dataset.name = args.dataset
     cfg.disent.noise_level = args.noise_level
     cfg.disent.N = args.N
+    cfg.disent.img_loss_type = args.img_loss_type
+    cfg.disent.share_enc = args.share_enc
 
 
     dsname = cfg.disent.dataset.name.lower()
@@ -111,7 +115,6 @@ def get_denoising_cfg(args):
     cfg.disent.test_interval = 5
     cfg.disent.log_interval = 50
     cfg.disent.random_crop = True
-    cfg.disent.img_loss_type = args.img_loss_type
 
     if cfg.disent.dataset.name.lower() == "mnist":
         cfg.disent.n_channels = 1
@@ -121,7 +124,7 @@ def get_denoising_cfg(args):
 
     info = {'noise':args.noise_level,'N':args.N,
             'dataset':args.dataset,'batch_size':args.batch_size}
-    write_settings(cfg.exp_name,info)
+    # write_settings(cfg.exp_name,info)
     print(info)
     return cfg
 
@@ -134,10 +137,11 @@ if __name__ == "__main__":
     print(f"Experiment named {cfg.exp_name}")
 
     if args.mode == "train":
+        # plot_noise_floor(cfg)
         train_disent_exp(cfg)
     elif args.mode == "test":
         cfg.disent.load = True
         epoch_num_list = list(range(0,100+1,10)) + [-1]
         print(epoch_num_list)
-        # test_disent_over_epochs(cfg,epoch_num_list)
-        test_disent_examples_over_epochs(cfg,epoch_num_list)
+        test_disent_over_epochs(cfg,epoch_num_list)
+        # test_disent_examples_over_epochs(cfg,epoch_num_list)

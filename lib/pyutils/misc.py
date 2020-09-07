@@ -1,4 +1,14 @@
+
+# python imports
 import numpy as np
+import pickle,sys,os
+
+# this is the only allowed project import in this file.
+import settings
+
+def rescale_noisy_image(img):
+    img = img + 0.5
+    return img
 
 def add_noise(noise,pic):
     noisy_pic = pic + noise
@@ -23,4 +33,18 @@ def np_log(np_array):
             np_array = [np_array]
         np_array = np.array(np_array)
     return np.ma.log(np_array).filled(-np.infty)
+
+def write_pickle(data,fn,verbose=False):
+    if verbose or settings.verbose >= 2: print("Writing pickle to [{}]".format(fn))
+    with open(fn,'wb') as f:
+        pickle.dump(data,f)
+    if verbose: print("Save successful.")
+
+def read_pickle(fn,verbose=False):
+    if verbose or settings.verbose >= 2: print("Reading pickle file [{}]".format(fn))
+    data = None
+    with open(fn,'rb') as f:
+        data = pickle.load(f)
+    if verbose: print("Load successful.")
+    return data
 

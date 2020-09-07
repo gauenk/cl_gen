@@ -5,10 +5,13 @@ Test the model
 # python imports
 from tqdm import tqdm
 
-
 # torch imports
 import torch as th
 import torch.nn.functional as F
+
+# project imports
+from pyutils.misc import np_log,rescale_noisy_image
+
 
 def thtest_cls(args, model, test_loader):
     # test a classifier
@@ -45,10 +48,14 @@ def thtest_static(args, enc, dec, test_loader):
         for pic_set, th_img in tqdm(test_loader):
             set_loss = 0
             th_img = th_img.to(device)
-            for x in pic_set:
+            N = len(pic_set)
+            for k,x in enumerate(pic_set):
                 x = x.to(device)
                 h,aux = enc(x)
                 r = dec([h,aux])
+                i_dec = (k+1) % N
+                pic_i = rescale_noisy_image(pic_set[k].to(device))
+                r = rescale_noisy_image(r)
                 set_loss_i = F.mse_loss(th_img,r).item()
                 set_loss += set_loss_i
             set_loss /= len(pic_set)

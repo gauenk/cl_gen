@@ -10,7 +10,7 @@ import torch.nn.functional as F
 class DenoisingLoss(nn.Module):
 
     def __init__(self, models, hyperparams, num_transforms, batch_size, device,
-                 img_loss_type='l2',enc_loss_type='simclr'):
+                 img_loss_type='l2',enc_loss_type='simclr',share_enc=False):
         super(DenoisingLoss, self).__init__()
         self.encoder_c = models.enc_c
         # self.encoder_d = models.enc_d
@@ -28,61 +28,45 @@ class DenoisingLoss(nn.Module):
         self.masks_neg,self.masks_pos = self.get_masks(msizes,batch_size)
         self.img_loss_type = img_loss_type
         self.enc_loss_type = enc_loss_type
+        self._share_enc = share_enc
 
     def forward(self,pic_set):
         hyperparams = self.hyperparams
-        loss_pairs = 0
         simh = []
         simpics = []
 
         N = len(pic_set)
         BS = pic_set[0].shape[0]
-        # TODO: vectorize the forward pass so there's no for loop
-        # why not torch.cat(pic_set,dim=1)?
-        print(pic_set[0].shape)
-        input_i = torch.cat(pic_set,dim=0)
-        h,aux = self.encoder_c(input_i)
+
+        # forward pass
+        pic_set = torch.cat(pic_set,dim=0)
+        h,aux = self.encoder_c(pic_set)
+        if self._share_enc:
+            h = h.reshape(N,BS,-1)            
+            h_mean = torch.mean(h,dim=0)
+            print(h_mean.shape)
+            h = torch.repeat(h,N,dim=0)
+
         input_i = [h,aux]
-        pics = self.decoder(input_i)
-        print(pics.shape)
-        pics = pics.reshape(N,BS,-1)
-        print('p',pics.shape)
-        print(h.shape)
-        h = h.reshape(N,BS,-1)
-        print('h',h.shape)
+        dec_pics = self.decoder(input_i)
 
-        # first pic
-        h_i,aux = self.encoder_c(pic_set[0])
-        input_i = [h_i,aux]
-        dec_pic = self.decoder(input_i)
-        simpics.append(torch.flatten(dec_pic,1))
-        simh.append(h_i)
+        # reshaping
+        pic_set = pic_set.reshape(N,BS,-1)
+        dec_pics = dec_pics.reshape(N,BS,-1)
 
-        # compute loss for each step
-        for i,pic_i in enumerate(pic_set[1:],1):
-
-            h_i,aux = self.encoder_c(pic_i)
-            input_i = [h_i,aux]
-            dec_pic = self.decoder(input_i)
-            simpics.append(torch.flatten(dec_pic,1))
-            simh.append(h_i)
-
-            pic_pair = []
-            pic_pair.append(torch.flatten(pic_set[i-1],1))
-            pic_pair.append(torch.flatten(dec_pic,1))
-
-            loss_pairs += self.compute_img_loss(pic_pair,proj=False)
-
-        # the last pair loops back to start
-        pic_pair = []
-        pic_pair.append(torch.flatten(pic_set[-1],1))
-        pic_pair.append(simpics[0])
-        loss_pairs += self.compute_img_loss(pic_pair,proj=False)
+        # vectorized loss
+        offset_idx = [(i+1)%N for i in range(N)]
+        pic_pair = [pic_set,dec_pics[offset_idx]]
+        loss_pairs = self.compute_img_loss(pic_pair,proj=False)
 
         # compute losses
-        loss_x = self.compute_img_loss(simpics,proj=False)
-        loss_h = self.compute_enc_loss(simh,proj=False)
-        loss = loss_pairs / len(pic_set) + hyperparams.x * loss_x + hyperparams.h * loss_h
+        # h = h.reshape(N,BS,-1)
+        # dec_pics = [dec_pic for dec_pic in dec_pics]
+        # loss_x = self.compute_img_loss(dec_pics,proj=False)
+        # h = [h_i for h_i in h]
+        # loss_h = self.compute_enc_loss(h,proj=False)
+        # loss = loss_pairs + hyperparams.x * loss_x + hyperparams.h * loss_h
+        loss = loss_pairs
         return loss
 
 
@@ -92,7 +76,7 @@ class DenoisingLoss(nn.Module):
         elif self.img_loss_type == 'l2':
             return F.mse_loss(sim_i[0],sim_i[1])
         else:
-            raise ValueError(f"Unknown img loss type [{self.loss_type}]")
+            raise ValueError(f"Unknown img loss type [{self.img_loss_type}]")
         
     def compute_enc_loss(self,sim_i,proj=True):
         if self.enc_loss_type == 'simclr':
@@ -100,7 +84,7 @@ class DenoisingLoss(nn.Module):
         elif self.enc_loss_type == 'l2':
             return F.mse_loss(sim_i[0],sim_i[1])
         else:
-            raise ValueError(f"Unknown loss type [{self.loss_type}]")
+            raise ValueError(f"Unknown loss type [{self.enc_loss_type}]")
 
     def compute_loss_simclr(self,sim_i,proj=True):
         N = len(sim_i)

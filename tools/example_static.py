@@ -34,7 +34,7 @@ import torch.nn.functional as F
 # project imports
 import settings
 from pyutils.cfg import get_cfg
-from pyutils.misc import np_log
+from pyutils.misc import np_log,rescale_noisy_image
 from layers import NT_Xent,SimCLR,get_resnet,LogisticRegression,DisentangleStaticNoiseLoss,Projector
 from layers.denoising import DenoisingLoss,DenoisingEncoder,DenoisingDecoder
 from learning.train import thtrain_cl as train_cl
@@ -163,7 +163,9 @@ def train_disent_exp(cfg):
                               cfg.disent.N,
                               cfg.disent.batch_size,
                               cfg.disent.device,
-                              cfg.disent.img_loss_type)
+                              cfg.disent.img_loss_type,
+                              'simclr',
+                              cfg.disent.share_enc)
     optimizer,scheduler = get_disent_optim(cfg,models)
 
     # init writer
@@ -171,8 +173,8 @@ def train_disent_exp(cfg):
 
     # test init model
     # te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)            
-    # writer.add_scalar(f"test_loss at epoch", te_loss, -1)
     # cfg.disent.current_epoch = -1
+    # writer.add_scalar(f"test_loss at epoch", te_loss, -1)
     # save_disent_models(cfg,models,optimizer)
 
 
@@ -195,7 +197,7 @@ def train_disent_exp(cfg):
 
         if epoch % cfg.disent.test_interval == 0:
             te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
-            writer.add_scalar(f"test_loss at epoch", te_loss, epoch)
+            writer.add_scalar(f"Loss/test", te_loss, epoch)
 
         writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
         writer.add_scalar("Misc/learning_rate", lr, epoch)
@@ -206,7 +208,21 @@ def train_disent_exp(cfg):
 
     save_disent_models(cfg,models,optimizer)
 
-def test_disent(cfg):
+def plot_noise_floor(cfg):
+    """
+    Plot the noise level for Gaussian random noise
+    """
+    mean = 1.290e-02
+    stddev = 1.149e-02
+    val = mean
+    # val = mean + stddev
+    val = mean - stddev
+    writer = SummaryWriter(filename_suffix=cfg.exp_name)
+    for epoch in range(cfg.disent.epochs+1):
+        writer.add_scalar(f"test_loss at epoch", val, epoch)
+        writer.add_scalar(f"Loss/train", val, epoch)
+
+def test_disent(cfg,n_runs=5):
     print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
 
     # load the data
@@ -219,17 +235,19 @@ def test_disent(cfg):
     # tr_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.tr)
     # val_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.val)
     te_losses = []
-    n_runs = 3
     for n in range(n_runs):
         te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
         te_losses.append(te_loss)
-    mean = np.mean(te_losses)
-    stderr = np.std(te_losses) / np.sqrt(np.len(te_losses))
+    if n_runs > 1:
+        mean = np.mean(te_losses)
+        stderr = np.std(te_losses) / np.sqrt(len(te_losses))
+    else:
+        mean = te_losses[0]
+        stderr = 0.
     # print("Testing loss: {:.3f}".format(tr_loss))
     # print("Testing loss: {:.3f}".format(val_loss))
-    print("Testing loss: {:.3f} +/- {:.3f}".format(mean,stderr))
+    print("Testing loss: {:2.3e} +/- {:2.3e}".format(mean,1.96*stderr))
     return mean,stderr
-
 
 def test_disent_examples(cfg):
     print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
@@ -275,10 +293,6 @@ def test_disent_examples(cfg):
     plt.savefig(path)
     plt.clf()
     plt.cla()
-
-def rescale_noisy_image(img):
-    img = img + 0.5
-    return img
 
 def get_report_dir(cfg):
     base = Path(f"{settings.ROOT_PATH}/reports/")
@@ -352,6 +366,7 @@ if __name__ == "__main__":
     cfg.disent.noise_level = 5e-2
     cfg.disent.N = 5
     cfg.disent.img_loss_type = 'l2' 
+    cfg.disent.share_enc = False
 
 
     dsname = cfg.disent.dataset.name.lower()
