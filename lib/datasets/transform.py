@@ -102,12 +102,21 @@ class AddGaussianNoiseSetN2N(object):
         self.train_stddev_rng_range = train_stddev_rng_range
         
     def __call__(self, tensor):
-        pics = []
+
+        shape = (self.N,) + tensor.shape
+
+        # get noise term
         (minv,maxv) = self.train_stddev_rng_range
-        for n in range(self.N):
-            rnoise = th_uniform(minv/255,maxv/255.,1)[0]
-            pic = torch.normal(tensor,rnoise)
-            pics.append(pic)
+        rnoises = th_uniform(minv/255,maxv/255.,self.N).to(tensor.device)
+        for i in range(len(shape)-1): rnoises = rnoises.unsqueeze(1)
+        rnoises = rnoises.expand(shape)
+
+        # get means
+        means = tensor.expand(shape)
+
+        # simulate noise
+        pics = torch.normal(means,rnoises)
+
         return pics
     
     def __repr__(self):

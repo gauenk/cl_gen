@@ -4,10 +4,10 @@ import torch,torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
-class DenoisingDecoder(nn.Module):
+class Decoder(nn.Module):
 
     def __init__(self, n_channels=1, embedding_size = 256, verbose = False ):
-        super(DenoisingDecoder, self).__init__()
+        super(Decoder, self).__init__()
         self.n_channels = n_channels
         self.embedding_size = embedding_size
         self.i_size = int(np.sqrt(embedding_size))
@@ -66,7 +66,7 @@ class SingleUpConv(nn.Module):
             nn.ConvTranspose2d(in_channels , out_channels,
                                kernel_size=kernel_size, stride=stride,
                                padding=padding),
-            #nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(inplace=True,negative_slope=0.01),
         )
     def forward(self,x):
@@ -80,7 +80,7 @@ class SingleConv(nn.Module):
         self.single_conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
                       stride=stride, padding=padding),
-            #nn.BatchNorm2d(out_channels),
+            nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(inplace=True,negative_slope=0.01)
         )
 

@@ -10,20 +10,15 @@ import torch.nn.functional as F
 # local import
 from .utils import share_encoding_mean,share_encoding_mean_check
 
-class DenoisingLoss(nn.Module):
+class DenoisingLossDDP(nn.Module):
 
-    def __init__(self, models, hyperparams, num_transforms, batch_size, device,
-                 img_loss_type='l2',enc_loss_type='simclr',
-                 agg_fxn='id',agg_type='full'):
-        super(DenoisingLoss, self).__init__()
-        self.encoder = models.encoder
-        self.decoder = models.decoder
-        self.projector = models.projector
+    def __init__(self,hyperparams, num_transforms, batch_size,
+                 img_loss_type='l2',enc_loss_type='simclr'):
+        super(DenoisingLossDDP, self).__init__()
         self.hyperparams = hyperparams
         self.similarity_f = nn.CosineSimilarity(dim=2)
         self.criterion = nn.CrossEntropyLoss(reduction="sum")
 
-        self.device = device
         self.num_transforms = num_transforms
         self.batch_size = batch_size
 
@@ -31,11 +26,9 @@ class DenoisingLoss(nn.Module):
         self.masks_neg,self.masks_pos = self.get_masks(msizes,batch_size)
         self.img_loss_type = img_loss_type
         self.enc_loss_type = enc_loss_type
-        self._agg_fxn = agg_fxn
-        self._agg_type = agg_type
         
 
-    def forward(self,pic_set):
+    def forward(self,pic_set,dec_pics,h):
         hyperparams = self.hyperparams
         simh = []
         simpics = []
@@ -45,38 +38,22 @@ class DenoisingLoss(nn.Module):
         pshape = pic_set[0][0].shape
         shape = (N,BS,) + pshape
 
-        # encode
-        if isinstance(pic_set,list):
-            pic_set = torch.cat(pic_set,dim=0)
-        else:
-            pic_set = pic_set.reshape((N*BS,)+pshape)
-        h,aux = self.encoder(pic_set)
-        
-        # encode loss
         h = h.reshape(N,BS,-1)
-        loss_h = self.compute_enc_loss(h,proj=True)
-        h = h.reshape(N*BS,-1)
-        
-        # aggregate
-        h,aux = self.aggregate(h,aux,N,BS)
-
-        # decode
-        input_i = [h,aux]
-        dec_pics = self.decoder(input_i)
+        loss_h = self.compute_enc_loss(h)
 
         # pair-wise losses
         pic_set = pic_set.reshape(N,BS,-1)
         dec_pics = dec_pics.reshape(N,BS,-1)
         offset_idx = [(i+1)%N for i in range(N)]
         pic_pair = [pic_set,dec_pics[offset_idx]]
-        loss_pairs = self.compute_img_loss(pic_pair,proj=False)
+        loss_pairs = self.compute_img_loss(pic_pair)
 
-        # compute losses
-
+        # across decoded pics
         # dec_pics = [dec_pic for dec_pic in dec_pics]
-        # loss_x = self.compute_img_loss(dec_pics,proj=False)
-        loss_x = 0
-        loss = loss_pairs + hyperparams.x * loss_x + hyperparams.h * loss_h
+        # loss_x = self.compute_img_loss(dec_pics)
+        # + hyperparams.x * loss_x
+
+        loss = loss_pairs + hyperparams.h * loss_h
         return loss
     
     def aggregate(self,h,aux,N,BS):
@@ -89,32 +66,29 @@ class DenoisingLoss(nn.Module):
         else:
             raise ValueError(f"Uknown aggregation function [{agg_fxn}]")
 
-    def compute_img_loss(self,sim_i,proj=True):
+    def compute_img_loss(self,sim_i):
         if self.img_loss_type == 'simclr':
-            return self.compute_loss_simclr(sim_i,proj)
+            return self.compute_loss_simclr(sim_i)
         elif self.img_loss_type == 'l2':
             return F.mse_loss(sim_i[0],sim_i[1])
         else:
             raise ValueError(f"Unknown img loss type [{self.img_loss_type}]")
         
-    def compute_enc_loss(self,sim_i,proj=True):
+    def compute_enc_loss(self,sim_i):
         if self.enc_loss_type == 'simclr':
-            return self.compute_loss_simclr(sim_i,proj)
+            return self.compute_loss_simclr(sim_i)
         elif self.enc_loss_type == 'l2':
             return F.mse_loss(sim_i[0],sim_i[1])
         else:
             raise ValueError(f"Unknown loss type [{self.enc_loss_type}]")
 
-    def compute_loss_simclr(self,sim_i,proj=True):
+    def compute_loss_simclr(self,sim_i):
         N = len(sim_i)
         BS = self.batch_size
         Kpos = N*(N-1)*BS
         Kneg = N * BS
         mask_pos = self.masks_pos[N]
         mask_neg = self.masks_neg[N]
-        if proj:
-            sim_i = sim_i.reshape(N*BS,-1)
-            sim_i = self.projector(sim_i).reshape(N,BS,-1)
         return self.generalized_nt_xent(sim_i,N,BS,Kpos,Kneg,mask_pos,mask_neg)
 
 

@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 from torchvision.datasets import MNIST
 from torch.utils.data import DataLoader
 from torchvision import transforms as th_transforms
+from torch.utils.data.distributed import DistributedSampler
 
 # project imports
 from settings import ROOT_PATH
@@ -36,18 +37,91 @@ def get_mnist_dataset(cfg,mode):
         N = cfg.disent.N
         noise_level = cfg.disent.noise_level
         data.tr = DisentMNISTv1(root,N,noise_level,train=True)
-        data.val = DisentMNISTv1(root,N,noise_level,train=True)
+        data.val = DisentMNISTv1(root,N,noise_level,train=False)
+        # subset to only 1000
+        data.val.data = data.val.data[0:1000]
+        data.val.targets = data.val.targets[0:1000]
+        data.te = DisentMNISTv1(root,N,noise_level,train=False)
+    elif mode == "denoising":
+        batch_size = cfg.batch_size
+        N = cfg.N
+        noise_level = 1e-3 #cfg.noise_level
+        data.tr = DisentMNISTv1(root,N,noise_level,train=True)
+        data.val = DisentMNISTv1(root,N,noise_level,train=False)
+        # subset to only 1000
+        data.val.data = data.val.data[0:1000]
+        data.val.targets = data.val.targets[0:1000]
         data.te = DisentMNISTv1(root,N,noise_level,train=False)
     else: raise ValueError(f"Unknown MNIST mode {mode}")
-    loader = edict()
+
+    loader = get_loader(cfg,data,batch_size)
+
+    return data,loader
+
+
+def get_loader(cfg,data,batch_size):
+    if cfg.use_ddp:
+        loader = get_loader_ddp(cfg,data)
+    else:
+        loader = get_loader_serial(cfg,batch_size)
+    return loader
+
+    
+def collate_fn(batch):
+    noisy,clean = zip(*batch)
+    noisy = torch.stack(noisy,dim=1)
+    clean = torch.stack(clean,dim=0)
+    return noisy,clean
+
+def get_loader_serial(cfg,batch_size):
+
     loader_kwargs = {'batch_size': batch_size,
                      'shuffle':True,
                      'drop_last':True,
-                     'num_workers':cfg[mode].workers,}
+                     'num_workers':cfg.num_workers,
+                     'pin_memory':True}
+    if mode == "disent" or mode == "denoising":
+        loader_kwargs['collate_fn'] = collate_fn
+
+    loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)
     loader.val = DataLoader(data.val,**loader_kwargs)
     loader.te = DataLoader(data.te,**loader_kwargs)
-    return data,loader
+    return loader_kwargs
+
+def get_loader_ddp(cfg,data):
+    loader = edict()
+    loader_kwargs = {'batch_size':cfg.batch_size,
+                     'shuffle':False,
+                     'drop_last':True,
+                     'num_workers':cfg.num_workers,
+                     'pin_memory':True}
+    if cfg.use_collate:
+        loader_kwargs['collate_fn'] = collate_fn
+
+    ws = cfg.world_size
+    r = cfg.rank
+    loader = edict()
+
+    sampler = DistributedSampler(data.tr,num_replicas=ws,rank=r)
+    loader_kwargs['sampler'] = sampler
+    loader.tr = DataLoader(data.tr,**loader_kwargs)
+
+    sampler = DistributedSampler(data.val,num_replicas=ws,rank=r)
+    loader_kwargs['sampler'] = sampler
+    loader.val = DataLoader(data.val,**loader_kwargs)
+
+    sampler = DistributedSampler(data.te,num_replicas=ws,rank=r)
+    loader_kwargs['sampler'] = sampler
+    loader.te = DataLoader(data.te,**loader_kwargs)
+
+    return loader
+
+
+# class DenoisingSetCollate():
+
+#     def __init__(self,data):
+        
 
 class DisentMNISTv1(MNIST):
     """
@@ -72,8 +146,8 @@ class DisentMNISTv1(MNIST):
                                            ])
         self.__class__.__name__ = "mnist"
         super(DisentMNISTv1, self).__init__( root, train=train, transform=transform,
-                                          target_transform=target_transform,
-                                          download=download)
+                                             target_transform=target_transform,
+                                             download=download)
         self.th_trans = th_trans
 
     def __getitem__(self, index):

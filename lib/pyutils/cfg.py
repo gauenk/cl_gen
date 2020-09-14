@@ -13,6 +13,8 @@ def get_cfg():
     cfg = edict()
     cfg.seed = 123
     cfg.world_size = 1
+    cfg.use_dpp = False
+    cfg.num_workers = 8
 
     # parameters for simclr
     cfg.simclr = edict()

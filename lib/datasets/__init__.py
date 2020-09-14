@@ -5,6 +5,9 @@ from .imagenet import get_imagenet_dataset
 from .transform import TransformsSimCLR,LowLight,BlockGaussian
 
 
+def load_dataset(cfg,cfg_type):
+    return get_dataset(cfg,cfg_type)
+
 def get_dataset(cfg,cfg_type):
     if cfg[cfg_type].dataset.name.lower() == "mnist":
         return get_mnist_dataset(cfg,cfg_type)

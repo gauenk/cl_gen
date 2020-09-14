@@ -7,18 +7,15 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# local import
-from .utils import share_encoding_mean,share_encoding_mean_check
-
 class DenoisingLoss(nn.Module):
 
     def __init__(self, models, hyperparams, num_transforms, batch_size, device,
-                 img_loss_type='l2',enc_loss_type='simclr',
-                 agg_fxn='id',agg_type='full'):
+                 img_loss_type='l2',enc_loss_type='simclr',share_enc=False):
         super(DenoisingLoss, self).__init__()
-        self.encoder = models.encoder
-        self.decoder = models.decoder
-        self.projector = models.projector
+        self.encoder_c = models.enc_c
+        # self.encoder_d = models.enc_d
+        self.decoder = models.dec
+        # self.projector = models.proj
         self.hyperparams = hyperparams
         self.similarity_f = nn.CosineSimilarity(dim=2)
         self.criterion = nn.CrossEntropyLoss(reduction="sum")
@@ -31,9 +28,7 @@ class DenoisingLoss(nn.Module):
         self.masks_neg,self.masks_pos = self.get_masks(msizes,batch_size)
         self.img_loss_type = img_loss_type
         self.enc_loss_type = enc_loss_type
-        self._agg_fxn = agg_fxn
-        self._agg_type = agg_type
-        
+        self._share_enc = share_enc
 
     def forward(self,pic_set):
         hyperparams = self.hyperparams
@@ -42,52 +37,44 @@ class DenoisingLoss(nn.Module):
 
         N = len(pic_set)
         BS = pic_set[0].shape[0]
-        pshape = pic_set[0][0].shape
-        shape = (N,BS,) + pshape
 
-        # encode
-        if isinstance(pic_set,list):
-            pic_set = torch.cat(pic_set,dim=0)
-        else:
-            pic_set = pic_set.reshape((N*BS,)+pshape)
-        h,aux = self.encoder(pic_set)
-        
-        # encode loss
-        h = h.reshape(N,BS,-1)
-        loss_h = self.compute_enc_loss(h,proj=True)
-        h = h.reshape(N*BS,-1)
-        
-        # aggregate
-        h,aux = self.aggregate(h,aux,N,BS)
+        # forward pass
+        pic_set = torch.cat(pic_set,dim=0)
+        h,aux = self.encoder_c(pic_set)
+        if self._share_enc:
+            h = h.reshape(N,BS,-1)            
+            h_mean = torch.mean(h,dim=0)
+            h = torch.repeat(h,N,dim=0)
 
-        # decode
         input_i = [h,aux]
         dec_pics = self.decoder(input_i)
 
-        # pair-wise losses
+        # reshaping
         pic_set = pic_set.reshape(N,BS,-1)
         dec_pics = dec_pics.reshape(N,BS,-1)
-        offset_idx = [(i+1)%N for i in range(N)]
-        pic_pair = [pic_set,dec_pics[offset_idx]]
-        loss_pairs = self.compute_img_loss(pic_pair,proj=False)
+        # h = h.reshape(N,BS,-1)
 
+        # compute loss for each step
+        loss_pairs = 0
+        for i in range(N):
+            if i == 2: break
+            i_noisy = i
+            i_dec = (i+1) % N
+            pic_pair = []
+            pic_pair.append(pic_set[i_noisy])
+            pic_pair.append(dec_pics[i_dec])
+            loss_pairs += self.compute_img_loss(pic_pair,proj=False)
+        loss_pairs = loss_pairs / len(pic_set)
+            
         # compute losses
-
         # dec_pics = [dec_pic for dec_pic in dec_pics]
         # loss_x = self.compute_img_loss(dec_pics,proj=False)
-        loss_x = 0
-        loss = loss_pairs + hyperparams.x * loss_x + hyperparams.h * loss_h
+        # h = [h_i for h_i in h]
+        # loss_h = self.compute_enc_loss(h,proj=False)
+        # loss = loss_pairs + hyperparams.x * loss_x + hyperparams.h * loss_h
+        loss = loss_pairs
         return loss
-    
-    def aggregate(self,h,aux,N,BS):
-        agg_fxn = self._agg_fxn
-        agg_type = self._agg_type
-        if agg_fxn == 'mean':
-            return share_encoding_mean(agg_type,h,aux,N,BS)
-        elif agg_fxn == 'id':
-            return h,aux
-        else:
-            raise ValueError(f"Uknown aggregation function [{agg_fxn}]")
+
 
     def compute_img_loss(self,sim_i,proj=True):
         if self.img_loss_type == 'simclr':
@@ -112,9 +99,7 @@ class DenoisingLoss(nn.Module):
         Kneg = N * BS
         mask_pos = self.masks_pos[N]
         mask_neg = self.masks_neg[N]
-        if proj:
-            sim_i = sim_i.reshape(N*BS,-1)
-            sim_i = self.projector(sim_i).reshape(N,BS,-1)
+        if proj: sim_i = [self.projector(x) for x in sim_i]
         return self.generalized_nt_xent(sim_i,N,BS,Kpos,Kneg,mask_pos,mask_neg)
 
 
@@ -125,12 +110,7 @@ class DenoisingLoss(nn.Module):
         temperature = self.hyperparams.temperature
 
         # compute similarity scores
-        if isinstance(sim_i,list):
-            s = torch.cat(sim_i,dim=0)
-        elif isinstance(sim_i,torch.Tensor):
-            s = sim_i.reshape(N*BS,-1)
-        else:
-            raise TypeError("Unknown sim_i type [{}]".format(type(sim_i)))
+        s = torch.cat(sim_i,dim=0)
         simmat = self.similarity_f(s.unsqueeze(1),s.unsqueeze(0)) / temperature
         pos_samples = simmat[mask_pos].reshape(Kpos,1) # NumA x 1
         neg_samples = simmat[mask_neg].reshape(Kneg,-1) # NumA x NumA-2 ("same" and "1")

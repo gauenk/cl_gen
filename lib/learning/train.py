@@ -119,7 +119,7 @@ def get_batch_transforms(transforms,data_idx):
     return trans
 
 
-def thtrain_disent(cfg, train_loader, models, criterion, optimizer, epoch, writer):
+def thtrain_disent(cfg, train_loader, models, criterion, optimizer, epoch, writer, scheduler=None):
 
     for name,model in models.items(): model.train()
     idx = 0
@@ -133,10 +133,13 @@ def thtrain_disent(cfg, train_loader, models, criterion, optimizer, epoch, write
         optimizer.zero_grad()
         
         # preprocess the data; on-the-fly right now. can change to pre-process later
-        t_imgs = [x.to(cfg.device) for x in transformed_imgs]
-        loss = criterion(t_imgs)
+        transformed_imgs = transformed_imgs.to(cfg.device)
+        loss = criterion(transformed_imgs)
         loss.backward()
         optimizer.step()
+
+        if scheduler:
+            scheduler.step()
 
         # print updates
         writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
@@ -149,4 +152,38 @@ def thtrain_disent(cfg, train_loader, models, criterion, optimizer, epoch, write
         loss_epoch += loss.item()
     return loss_epoch
 
+
+def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, writer, scheduler=None):
+
+    model.train()
+    idx = 0
+    loss_epoch = 0
+    data = train_loader.dataset.data
+    print("N samples:", len(data))
+    for batch_idx, (noisy_imgs, th_img) in enumerate(train_loader):
+
+        # setup the forward pass
+        idx += cfg.batch_size
+        
+        noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+        dec_imgs,proj = model(noisy_imgs)
+        loss = criterion(noisy_imgs,dec_imgs,proj)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if scheduler:
+            scheduler.step()
+
+        # print updates
+        writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
+        cfg.global_step += 1
+        if batch_idx % cfg.log_interval == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, batch_idx * cfg.batch_size, len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+        
+        loss_epoch += loss.item()
+    return loss_epoch
 

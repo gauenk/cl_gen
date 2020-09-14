@@ -14,6 +14,10 @@ def add_noise(noise,pic):
     noisy_pic = pic + noise
     return noisy_pic
 
+def mse_to_psnr(mse):
+    psrn = 10 * np_log(1./mse)[0]/np_log(10)[0]
+    return psrn
+
 def np_divide(np_array_a,np_array_b):
     not_np = False
     if type(np_array_a) is not np.ndarray:
@@ -48,3 +52,7 @@ def read_pickle(fn,verbose=False):
     if verbose: print("Load successful.")
     return data
 
+def get_model_epoch_info(cfg):
+    if cfg.load:
+        return 0,cfg.epoch_num+1
+    else: return 0,0
