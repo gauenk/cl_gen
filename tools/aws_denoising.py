@@ -14,7 +14,7 @@ todo:
 """
 
 # python imports
-import sys,os
+import sys,os,shutil,re,json
 sys.path.append("./lib/")
 sys.path.append("./tools/")
 import argparse,uuid
@@ -27,7 +27,7 @@ import numpy as np
 import settings
 from settings import ROOT_PATH
 from pyutils.cfg import get_cfg
-from example_static import train_disent_exp,test_disent_over_epochs,test_disent_examples_over_epochs,plot_noise_floor
+from example_static import train_disent_exp,test_disent_over_epochs,test_disent_examples_over_epochs,plot_noise_floor,test_disent_examples
 
 def get_args():
     parser = argparse.ArgumentParser(description="Run static denoising on AWS")
@@ -51,6 +51,17 @@ def get_args():
                         help="loss type [l2 or simclr]")
     parser.add_argument("--share-enc", dest="share_enc",
                         action='store_true',help="do we share encodings?")
+    parser.add_argument("--hyper_h",  type=float, default=0.,
+                        help="hyperparmeter for CL loss on encodings.")
+    parser.add_argument("--new",  action='store_true',
+                        help="when running from an old experiment, do we create a new experiment file?")
+    parser.add_argument("--lr-start",  type=float, default=1e-3,
+                        help="initial learning rate")
+    parser.add_argument("--lr-policy",  type=str, default="step",
+                        help="scheduler policy for optimization")
+    parser.add_argument("--lr-params",  type=json.loads,
+                        default='{"milestone":[50,500],"gamma":0.1}',
+                        help="parameters for scheduler")
     args = parser.parse_args()
     return args
     
@@ -73,6 +84,7 @@ def write_settings(exp_name,settings):
         
 def get_denoising_cfg(args):
     cfg = get_cfg()
+    if args.new is True: setup_new_exp(args)
 
     cfg.cl.device = torch.device("cuda:{}".format(args.gpuid))
     cfg.cls.device = cfg.cl.device
@@ -84,7 +96,8 @@ def get_denoising_cfg(args):
         cfg.exp_name = str(uuid.uuid4())
 
     cfg.disent = edict()
-    cfg.disent.epochs = 100
+    cfg.disent.epochs = 1200
+    cfg.disent.device = cfg.cl.device
 
     cfg.disent.load = args.epoch_num > 0
     cfg.disent.epoch_num = args.epoch_num
@@ -97,7 +110,11 @@ def get_denoising_cfg(args):
     cfg.disent.N = args.N
     cfg.disent.img_loss_type = args.img_loss_type
     cfg.disent.share_enc = args.share_enc
-
+    cfg.disent.hyper_h = args.hyper_h
+    cfg.disent.lr = edict()
+    cfg.disent.lr.start = args.lr_start
+    cfg.disent.lr.policy = args.lr_policy
+    cfg.disent.lr.params = args.lr_params
 
     dsname = cfg.disent.dataset.name.lower()
     model_path = Path(f"{settings.ROOT_PATH}/output/disent/{dsname}/{cfg.exp_name}")
@@ -125,23 +142,59 @@ def get_denoising_cfg(args):
     info = {'noise':args.noise_level,'N':args.N,
             'dataset':args.dataset,'batch_size':args.batch_size}
     # write_settings(cfg.exp_name,info)
-    print(info)
+    # print(info)
     return cfg
 
+
+def copy_checkpoint_files(dsname,epoch_num,old_name,new_name):
+    base_output = Path(f"{settings.ROOT_PATH}/output/disent/")
+    old_path = base_output / Path(f"{dsname}/{old_name}")
+    new_path = base_output / Path(f"{dsname}/{new_name}")
+    new_path.mkdir()
+    rstr = ".*/checkpoint_(?P<num>-?[0-9]+)\.tar"
+    for fn in old_path.glob("*/*"):
+        sfn = str(fn)
+        num = int(re.match(rstr,sfn).groupdict()['num'])
+        if num <= epoch_num: # copy the file if meet criteria
+            mid_stem = fn.parent.stem
+            stem = Path("checkpoint_{}.tar".format(num))
+            old_path_fn = old_path / mid_stem / stem
+            new_path_dir = new_path / mid_stem
+            if not new_path_dir.exists(): new_path_dir.mkdir()
+            new_path_fn = new_path_dir / stem
+            shutil.copy(old_path_fn,new_path_fn)
+
+    # shutil.copytree(old_path,new_path)
+
+def setup_new_exp(args):
+    if args.name is None:
+        raise ValueError("To run a new experiment we must use an old one!")
+    dsname = args.dataset.lower()
+    epoch_num = args.epoch_num
+    old_name = args.name
+    new_name = str(uuid.uuid4())    
+    print(f"Copying experiment results from {old_name} to {new_name}")
+    copy_checkpoint_files(dsname,epoch_num,old_name,new_name)
+    print("Creating config with new uuid.")
+    args.name = new_name
 
 if __name__ == "__main__":
 
     args = get_args()
-    print(f"Running aws_denoising experiments with mode {args.mode}")
     cfg = get_denoising_cfg(args)
+    print(f"Running aws_denoising experiments with mode {args.mode}")
     print(f"Experiment named {cfg.exp_name}")
+
 
     if args.mode == "train":
         # plot_noise_floor(cfg)
         train_disent_exp(cfg)
     elif args.mode == "test":
         cfg.disent.load = True
-        epoch_num_list = list(range(0,100+1,10)) + [-1]
-        print(epoch_num_list)
-        test_disent_over_epochs(cfg,epoch_num_list)
-        # test_disent_examples_over_epochs(cfg,epoch_num_list)
+        if cfg.disent.epoch_num == 0:
+            epoch_num_list = list(range(0,100+1,10)) + [-1]
+            print(epoch_num_list)
+            test_disent_over_epochs(cfg,epoch_num_list)
+            test_disent_examples_over_epochs(cfg,epoch_num_list)
+        else:
+            test_disent_examples(cfg)

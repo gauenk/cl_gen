@@ -25,6 +25,7 @@ import numpy.random as npr
 # torch imports
 import torch
 import torchvision
+from torch import nn
 from torchvision import transforms
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -34,9 +35,10 @@ import torch.nn.functional as F
 # project imports
 import settings
 from pyutils.cfg import get_cfg
-from pyutils.misc import np_log,rescale_noisy_image
+from pyutils.misc import np_log,rescale_noisy_image,get_model_epoch_info
 from layers import NT_Xent,SimCLR,get_resnet,LogisticRegression,DisentangleStaticNoiseLoss,Projector
 from layers.denoising import DenoisingLoss,DenoisingEncoder,DenoisingDecoder
+from layers.denoising import reconstruct_set
 from learning.train import thtrain_cl as train_cl
 from learning.train import thtrain_cls as train_cls
 from learning.train import thtrain_disent as train_disent
@@ -45,11 +47,8 @@ from learning.test import thtest_static as test_static
 from learning.utils import save_model,save_optim
 from torchvision.datasets import CIFAR10
 from datasets import get_dataset
+from schedulers import get_simclr_scheduler,LinearWarmup,get_train_scheduler
 
-def get_model_epoch_info(cfg):
-    if cfg.load:
-        return 0,cfg.epoch_num+1
-    else: return 0,0
     
 def exploring_nt_xent_loss(cfg):
     print("Exploring the NT_Xent loss function.")
@@ -89,6 +88,8 @@ def exploring_nt_xent_loss(cfg):
 def load_encoder(cfg,enc_type):
     nc = cfg.disent.n_channels
     model = DenoisingEncoder(n_channels=nc,embedding_size = 256)
+    # model = nn.DataParallel(model)
+    print('encoder',cfg.disent.device.type)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path(f"enc_{enc_type}") / fn
@@ -99,6 +100,8 @@ def load_encoder(cfg,enc_type):
 def load_decoder(cfg):
     nc = cfg.disent.n_channels
     model = DenoisingDecoder(n_channels=nc,embedding_size=256)
+    # model = nn.DataParallel(model)
+    print('decoder',cfg.disent.device.type)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path("dec") / fn
@@ -115,22 +118,36 @@ def load_projector(cfg):
     model = model.to(cfg.disent.device)
     return model
 
-def get_disent_optim(cfg,models):
+def get_disent_optim(cfg,models,tr_batches=None):
     params = []
     for name,model in models.items():
         params += list(model.parameters())
-    optimizer = torch.optim.Adam(params, lr=1e-3)
-    if cfg.disent.load:
-        fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
-        optim_fn = Path(cfg.disent.optim_path) / fn
-        optimizer.load_state_dict(torch.load(optim_fn, map_location=cfg.disent.device.type))
-    milestones = [50,150]
-    # milestones = [100,350]
-    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
-    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-    #                                                        patience = 5,
-    #                                                        factor=1./np.sqrt(10))
+    base_lr = 1e-3
+    lr = base_lr * 1 # cfg.disent.batch_size
+    optimizer = torch.optim.Adam(params, lr=lr)
+    # optimizer = torch.optim.SGD(params, lr=1e-3)
+    # optimizer = torch.optim.SGD(params, lr=1e-3, momentum=0.9, dampening=0, nesterov=True)
+    # if cfg.disent.load:
+    #     fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
+    #     optim_fn = Path(cfg.disent.optim_path) / fn
+    #     optimizer.load_state_dict(torch.load(optim_fn, map_location=cfg.disent.device.type))
+    # milestones = [400]
+    # milestones = [75,150,350]
+    # scheduler = torch.optim.lr_scheduler.OneCycleLR(optimizer,max_lr=1e-3,
+    #                                                 steps_per_epoch=tr_batches,
+    #                                                 epochs=cfg.disent.epochs)
+    # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                           patience = 10,
+                                                           factor=1./np.sqrt(10))
+    batch_size = cfg.disent.batch_size
+    epochs = cfg.disent.epochs
+    burnin = 10 # cfg.disent.burnin
+    batches_per_epoch = tr_batches
+    load_epoch = -1 # cfg.disent.epoch_num
+    # scheduler = get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch)
     return optimizer,scheduler
+
 
 def save_disent_models(cfg,models,optimizer):
     for name,model in models.items():
@@ -146,8 +163,10 @@ def load_static_models(cfg):
     models.dec = load_decoder(cfg)
     return models
 
+
 def train_disent_exp(cfg):
     print("Training disentangled representations.")
+    print("TODO: allow users to load exp A and start new exp B")
 
     # load the data
     data,loader = get_dataset(cfg,'disent')
@@ -156,7 +175,7 @@ def train_disent_exp(cfg):
     models = load_static_models(cfg)
     hyperparams = edict()
     hyperparams.g = 0
-    hyperparams.h = 0
+    hyperparams.h = cfg.disent.hyper_h
     hyperparams.x = 0
     hyperparams.temperature = 0.1
     criterion = DenoisingLoss(models,hyperparams,
@@ -166,17 +185,17 @@ def train_disent_exp(cfg):
                               cfg.disent.img_loss_type,
                               'simclr',
                               cfg.disent.share_enc)
-    optimizer,scheduler = get_disent_optim(cfg,models)
+    optimizer,scheduler = get_disent_optim(cfg,models,len(loader.tr))
 
     # init writer
     writer = SummaryWriter(filename_suffix=cfg.exp_name)
 
     # test init model
-    # te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)            
-    # cfg.disent.current_epoch = -1
-    # writer.add_scalar(f"test_loss at epoch", te_loss, -1)
-    # save_disent_models(cfg,models,optimizer)
-
+    # if cfg.disent.load is False:
+    #     te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)            
+    #     cfg.disent.current_epoch = -1
+    #     writer.add_scalar("Loss/test", te_loss, -1)
+    #     save_disent_models(cfg,models,optimizer)
 
     # init training loop
     global_step,current_epoch = get_model_epoch_info(cfg.disent)
@@ -184,25 +203,30 @@ def train_disent_exp(cfg):
     cfg.disent.current_epoch = current_epoch
 
     # training loop
+    tr_scheduler = get_train_scheduler(scheduler)
     test_losses = {}
     for epoch in range(cfg.disent.current_epoch, cfg.disent.epochs+1):
         lr = optimizer.param_groups[0]["lr"]
+
         loss_epoch = train_disent(cfg.disent, loader.tr, models,
-                                  criterion, optimizer, epoch, writer)
-        if scheduler:
-           scheduler.step()
+                                  criterion, optimizer, epoch, writer,
+                                  tr_scheduler)
+
+        if scheduler and tr_scheduler is None:
+            val_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.val)
+            scheduler.step(val_loss)
 
         if epoch % cfg.disent.checkpoint_interval == 0:
             save_disent_models(cfg,models,optimizer)
 
         if epoch % cfg.disent.test_interval == 0:
             te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
-            writer.add_scalar(f"Loss/test", te_loss, epoch)
+            writer.add_scalar("Loss/test", te_loss, epoch)
 
         writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
         writer.add_scalar("Misc/learning_rate", lr, epoch)
         print(
-            f"Epoch [{epoch}/{cfg.disent.epochs}]\t Loss: {loss_epoch / len(loader.tr)}\t lr: {round(lr, 5)}"
+            f"Epoch [{epoch}/{cfg.disent.epochs}]\t Loss: {loss_epoch / len(loader.tr)}\t " + "{:2.3e}".format(lr)
         )
         cfg.disent.current_epoch += 1
 
@@ -222,7 +246,7 @@ def plot_noise_floor(cfg):
         writer.add_scalar(f"test_loss at epoch", val, epoch)
         writer.add_scalar(f"Loss/train", val, epoch)
 
-def test_disent(cfg,n_runs=5):
+def test_disent(cfg,n_runs=1,use_psnr=False):
     print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
 
     # load the data
@@ -236,7 +260,8 @@ def test_disent(cfg,n_runs=5):
     # val_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.val)
     te_losses = []
     for n in range(n_runs):
-        te_loss = test_static(cfg.disent,models.enc_c,models.dec,loader.te)
+        te_loss = test_static(cfg.disent,models.enc_c,
+                              models.dec,loader.te,use_psnr=use_psnr)
         te_losses.append(te_loss)
     if n_runs > 1:
         mean = np.mean(te_losses)
@@ -247,7 +272,11 @@ def test_disent(cfg,n_runs=5):
     # print("Testing loss: {:.3f}".format(tr_loss))
     # print("Testing loss: {:.3f}".format(val_loss))
     print("Testing loss: {:2.3e} +/- {:2.3e}".format(mean,1.96*stderr))
-    return mean,stderr
+    losses = edict()
+    losses.te_losses = te_losses
+    losses.mean = mean
+    losses.stderr = stderr
+    return losses
 
 def test_disent_examples(cfg):
     print(f"Testing image denoising with epoch {cfg.disent.epoch_num}")
@@ -260,29 +289,37 @@ def test_disent_examples(cfg):
     for name,model in models.items(): model.eval()
 
     # get the data
+    enc,dec = models.enc_c,models.dec
     numOfExamples = 4
     fig,ax = plt.subplots(numOfExamples,3,figsize=(8,8))
     for num_ex in range(numOfExamples):
-        x,raw_img = next(iter(loader.te))
+        pic_set,raw_img = next(iter(loader.te))
+        pic_set = pic_set.to(cfg.disent.device)
         raw_img = raw_img.to(cfg.disent.device)
-        pics = [x_i.to(cfg.disent.device) for x_i in x]
-        pic_i = pics[0]
-        encC_i,aux = models.enc_c(pic_i)
-        dec_i = models.dec([encC_i,aux])
 
-        mse = F.mse_loss(rescale_noisy_image(dec_i),raw_img).item()
+        N = len(pic_set)
+        BS = len(pic_set[0])
+        pshape = pic_set[0][0].shape
+        shape = (N,BS,) + pshape
+
+        rec_set = reconstruct_set(pic_set,enc,dec,cfg.disent.share_enc)
+        rec_set = rescale_noisy_image(rec_set)
+        rec_set_i = rec_set[0]
+
+        # Plot Decoded Image
+        mse = F.mse_loss(rec_set_i,raw_img).item()
         psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
-        # print('dec',dec_i.min().item(),dec_i.max().item())
         pic_title = 'rec psnr: {:2.2f}'.format(psnr)
-        plot_th_tensor(ax,num_ex,0,dec_i+0.5,pic_title)
+        plot_th_tensor(ax,num_ex,0,rec_set_i,pic_title)
 
-        # print('raw',raw_img.min().item(),raw_img.max().item())
-        # print('noisy',pic_i.min().item(),pic_i.max().item())
-        mse = F.mse_loss(rescale_noisy_image(pic_i),raw_img).item()
+        # Plot Noisy Image
+        pic_i = rescale_noisy_image(pic_set[0])
+        mse = F.mse_loss(pic_i,raw_img).item()
         psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
         pic_title = 'noisy psnr: {:2.2f}'.format(psnr)
-        plot_th_tensor(ax,num_ex,1,pic_i+0.5,pic_title)
+        plot_th_tensor(ax,num_ex,1,pic_i,pic_title)
 
+        # Plot Clean Image
         pic_title = 'raw'
         plot_th_tensor(ax,num_ex,2,raw_img,pic_title)
 
@@ -306,7 +343,8 @@ def test_disent_over_epochs(cfg,epoch_num_list):
     means,stderrs = {},{}
     for epoch_num in epoch_num_list:
         cfg.disent.epoch_num = epoch_num
-        mean,stderr =  test_disent(cfg)
+        losses = test_disent(cfg)
+        mean,stderr = losses.mean,losses.stderr
         means[epoch_num] = mean 
         stderrs[epoch_num] = stderr
     print("Losses by epoch")
@@ -367,6 +405,7 @@ if __name__ == "__main__":
     cfg.disent.N = 5
     cfg.disent.img_loss_type = 'l2' 
     cfg.disent.share_enc = False
+    cfg.disent.hyper_h = 0
 
 
     dsname = cfg.disent.dataset.name.lower()
