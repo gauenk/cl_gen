@@ -37,8 +37,9 @@ def run_train(cfg,rank,models,data,loader):
     optimizer = load_optimizer(cfg,models)
     scheduler = load_scheduler(cfg,optimizer,len(loader.tr))
 
-    # apex
-    models, optimizer = amp.initialize(models, optimizer, opt_level='O2')
+    # apply apex
+    if cfg.use_apex:
+        models, optimizer = amp.initialize(models, optimizer, opt_level='O2')
 
     # init writer
     writer = SummaryWriter(filename_suffix=cfg.exp_name)

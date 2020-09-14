@@ -38,7 +38,7 @@ def get_args():
                         from each original image""")
     parser.add_argument("--dataset", type=str, default="MNIST",
                         help="experiment's dataset")
-    parser.add_argument("--batch-size", type=int, default=1000,
+    parser.add_argument("--batch-size", type=int, default=100,
                         help="batch-size to be split among world_size")
     parser.add_argument("--world_size", type=int, default=2,
                         help="number of training gpus")
@@ -271,8 +271,8 @@ def set_cfg(args):
     cfg.enc_size = args.enc_size
     cfg.proj_size = args.proj_size
 
-    cfg.sync_batchnorm = False # args.sync_batchnorm
-    cfg.use_apex = True # args.use_apex
+    cfg.sync_batchnorm = True # args.sync_batchnorm
+    cfg.use_apex = False # args.use_apex
 
     # todo: find and replace with
     # share_enc -> agg_enc_type + agg_enc_type
