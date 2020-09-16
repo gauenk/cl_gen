@@ -15,6 +15,7 @@ def share_encoding_mean(agg_type,h,skip,N,BS):
 
 def share_encoding_mean_h(agg_type,h,N,BS):
     # share h, (N*BS,-1) or (N,BS,-1)
+    h = normalize_nd(h)
     h = h.reshape(N,BS,-1)
     h = torch.mean(h,dim=0)
     h = h.expand((N,) + h.shape)
@@ -27,6 +28,7 @@ def share_encoding_mean_skip(agg_type,skip,N,BS):
     for skip_layer in skip:
         a_shape = skip_layer.shape # (N*BS,...)
         m_shape = (N,BS,) + a_shape[1:] # (N,BS,...)
+        skip_layer = normalize_nd(skip_layer)
         skip_layer = skip_layer.reshape(m_shape)
         skip_layer = torch.mean(skip_layer,dim=0)
         skip_layer = skip_layer.expand(m_shape)
@@ -79,6 +81,13 @@ def plot_th_tensor(ax,i,j,img):
     ax[i,j].set_xticks([])
     ax[i,j].set_yticks([])
 
+def normalize_nd(tensor):
+    t_shape = tensor.shape
+    n_shape = (t_shape[0],-1)
+    nt = tensor.reshape(n_shape)
+    nt = (tensor.T / torch.norm(tensor,dim=1)).T
+    nt = nt.reshape(t_shape)
+    return nt
 
 def reconstruct_set(pic_set,encoder,decoder,_share_enc=False):
     

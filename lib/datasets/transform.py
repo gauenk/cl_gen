@@ -71,32 +71,34 @@ class TransformsSimCLR:
         return self.train_transform(x), self.train_transform(x)
 
 class AddGaussianNoise(object):
-    def __init__(self, std=1e-2):
+    def __init__(self, mean=0., std=1e-2):
+        self.mean = mean
         self.std = std
         
     def __call__(self, tensor):
-        pic = torch.normal(tensor,rnoise)
+        pic = torch.normal(tensor.add(self.mean),self.std)
         return pic
     
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
 class AddGaussianNoiseSet(object):
-    def __init__(self, N, std=1e-2):
+    def __init__(self, N, mean= 0., std=50):
         self.N = N
-        self.std = std
+        self.mean = mean
+        self.std = std / 255.
         
     def __call__(self, tensor):
-        pics = []
-        for n in range(self.N):
-            pic = torch.normal(tensor,rnoise)
-            pics.append(pic)
-        return pics
+        pics = tensor.add(self.mean)
+        pics = torch.stack(self.N*[pics])
+        return torch.normal(pics,self.std)
     
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
+
 class AddGaussianNoiseSetN2N(object):
+
     def __init__(self, N, train_stddev_rng_range=(0,50.)):
         self.N = N
         self.train_stddev_rng_range = train_stddev_rng_range
@@ -120,7 +122,8 @@ class AddGaussianNoiseSetN2N(object):
         return pics
     
     def __repr__(self):
-        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+        rng = self.train_stddev_rng_range
+        return self.__class__.__name__ + '({})'.format(rng)
 
 class BlockGaussian:
 

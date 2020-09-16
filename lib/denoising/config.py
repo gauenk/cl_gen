@@ -27,7 +27,7 @@ def get_args():
     msg = ("when running from an old experiment, ",
            "do we create a new experiment file?")
     parser.add_argument("--new",  action='store_true', help=msg)
-    parser.add_argument("--epochs", type=int, default=500,
+    parser.add_argument("--epochs", type=int, default=100,
                         help="how many epochs do we train for?")
     parser.add_argument("--epoch-num", type=int, default=-1,
                         help="resume training from epoch-num")
@@ -38,16 +38,16 @@ def get_args():
                         from each original image""")
     parser.add_argument("--dataset", type=str, default="MNIST",
                         help="experiment's dataset")
-    parser.add_argument("--batch-size", type=int, default=100,
+    parser.add_argument("--batch-size", type=int, default=1536,
                         help="batch-size to be split among world_size")
     parser.add_argument("--world_size", type=int, default=2,
                         help="number of training gpus")
     parser.add_argument("--gpuid", type=int, default=0,
                         help="if using one gpu, which gpu?")
-    parser.add_argument("--init_lr", type=float, default=1e-3,
+    parser.add_argument("--init-lr", type=float, default=1e-1,
                         help="The initial learning rate for experiments")
     msg = "How does the learning rate scale with batch-size?"
-    parser.add_argument("--lr_bs_scale", type=str, default='linear',
+    parser.add_argument("--lr_bs_scale", type=str, default='sqrt',
                         help=msg)
     parser.add_argument("--num-workers", type=int, default=4,
                         help="How many workers per dataset?")
@@ -95,14 +95,14 @@ def get_args():
         'll': Low-light Noise
         'msg': Mutli-Scale Gaussian Noise
     """
-    parser.add_argument("--noise-type", type=str, default='msg', help=msg)
+    parser.add_argument("--noise-type", type=str, default='g', help=msg)
 
     msg = """parameters for noise generation
         'g': mean (float), stddev (float)
         'll': alpha (float)
         'msg': each_image (bool), stddev_range (tuple)
     """
-    defaults = '{"g":{"mean":0.0,"stddev":0.1},\
+    defaults = '{"g":{"mean":0.0,"stddev":10},\
     "ll":{"alpha":0.5},\
     "msg":{"each_image":0,"stddev_rand":[0,50]}\
     }'
@@ -112,20 +112,24 @@ def get_args():
     msg = """what type of optimizer? adam, sgd,
         'adam': Adam
         'sgd': SGD
+        'lars': LARS
         'sched': pick Adam or SGD using scheduler choice
     """
     parser.add_argument("--optim-type", type=str,
-                        default='sched', help=msg)
+                        default='lars', help=msg)
 
     msg = """parameters for optimizer
         'adam': betas (tuple[float]), eps (float), 
                 weight_decay (float), amsgrad (bool)
         'sgd': momentum (float),  dampening (float), 
                nesterov (bool), weight_decay (float)
+        'lars': momentum (float), weight_decay (float), 
+                eta (float)
     """
     defaults = '{\
     "adam":{"betas":[0.9,0.999],"eps":1e-08,"weight_decay":0.0,"amsgrad":0},\
-    "sgd":{"momentum":0.9,"dampening":0.0,"weight_decay":0.0,"nesterov":0}\
+    "sgd":{"momentum":0.9,"weight_decay":0.0,"dampening":0.0,"nesterov":0},\
+    "lars":{"momentum":0.9,"weight_decay":0.0,"eta":1e-3}\
     }'
     parser.add_argument("--optim-params", type=jloads,
                         default=defaults, help=msg)
@@ -212,10 +216,13 @@ def set_cfg(args):
     optim-type (str): what type of optimizer? adam, sgd,
         'adam': Adam
         'sgd': SGD
+        'lars': LARS
     
     optim-params (json.loads): parameters for optimizer
         'adam': gamma (float), beta1 (float), beta2 (float)
-        'sgd': nesterov (bool), momentum (float), dampening (float)
+        'sgd': momentum (float), weight_decay (float), dampening (float),
+               nesterov (bool), 
+        'lars': momentum (float), weight_decay (float), eta (float)
 
     sched-type (str): what type of scheduler? 
         'lwca': linear warmup with cosine annealing
@@ -273,6 +280,7 @@ def set_cfg(args):
 
     cfg.sync_batchnorm = True # args.sync_batchnorm
     cfg.use_apex = False # args.use_apex
+    cfg.test_with_psnr = True
 
     # todo: find and replace with
     # share_enc -> agg_enc_type + agg_enc_type
@@ -283,7 +291,7 @@ def set_cfg(args):
     # 
 
     dsname = cfg.dataset.name.lower()
-    model_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}")
+    model_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/model/")
     optim_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.model_path = model_path
@@ -295,7 +303,7 @@ def set_cfg(args):
     cfg.current_epoch = 0
     cfg.checkpoint_interval = 1
     cfg.test_interval = 5
-    cfg.log_interval = 25
+    cfg.log_interval = 5
     
     # saving
     cfg.freeze_models = edict()
@@ -309,7 +317,7 @@ def set_cfg(args):
         cfg.n_img_channels = 3
 
     # include only for backward compatibility with datasets
-    cfg.denoising = cfg 
+    # cfg.denoising = cfg 
     cfg.use_collate = True
     cfg.rank = -1 # only used in datasets!
 

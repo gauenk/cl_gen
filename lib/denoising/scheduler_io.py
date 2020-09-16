@@ -3,8 +3,13 @@ Loading and saving scheduler parameters
 
 """
 
-import numpy as np
+# python imports
 import torch
+import numpy as np
+
+# project imports
+from schedulers.utils import linear_warmup_reduce_on_palteau,linear_warmup_multistep,get_simclr_scheduler
+
 
 def load_scheduler(cfg,optimizer,batches_per_epoch):
 
@@ -20,13 +25,16 @@ def load_scheduler(cfg,optimizer,batches_per_epoch):
     #                                                 steps_per_epoch=tr_batches,
     #                                                 epochs=cfg.disent.epochs)
     # scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=milestones, gamma=0.1)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                           patience = 10,
-                                                           factor=1./np.sqrt(10))
+    # scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+    #                                                        patience = 10,
+    #                                                        factor=1./np.sqrt(10))
     batch_size = cfg.batch_size
     epochs = cfg.epochs
     burnin = 10 # cfg.sched_params['burnin']
     load_epoch = -1 # cfg.epoch_num
-    # scheduler = get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch)
+    scheduler = get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch)
+    # scheduler = linear_warmup_reduce_on_palteau(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch=-1)
+    # scheduler = linear_warmup_multistep(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch=-1)
+    
     return scheduler
 

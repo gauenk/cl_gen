@@ -12,17 +12,17 @@ import torch
 from apex.parallel import DistributedDataParallel as apex_DDP
 from torch.nn.parallel import DistributedDataParallel as th_DDP
 
-
 # project imports
 from layers.denoising import DenoisingBlock
+from optimizers import LARS
 
 def get_scaled_lr(cfg):
     lr = cfg.init_lr
     bs_scale = cfg.lr_bs_scale
     if bs_scale == "linear":
-        lr *= cfg.batch_size * cfg.world_size
+        lr *= cfg.batch_size * cfg.world_size / 256. 
     elif bs_scale == "sqrt":
-        lr *= np.sqrt(cfg.batch_size * cfg.world_size)
+        lr *= np.sqrt(cfg.batch_size * cfg.world_size / 256. )
     elif bs_scale == "none": 
         lr = lr
     else:
@@ -38,6 +38,9 @@ def get_optimizer_type(cfg,params,lr):
     elif ot == "adam":
         p = cfg.optim_params
         return torch.optim.Adam(params, lr=lr, **p['adam'])
+    elif ot == "lars":
+        p = cfg.optim_params
+        return LARS(params, cfg.epochs, lr=lr, **p['lars'])
     elif ot == "sched":
         if cfg.sched_type == "lwca":
             return torch.optim.SGD(params, lr=lr,**p['sgd'])

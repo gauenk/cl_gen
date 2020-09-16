@@ -177,9 +177,10 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
             scheduler.step()
 
         # print updates
-        writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
+        if writer:
+            writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
         cfg.global_step += 1
-        if batch_idx % cfg.log_interval == 0:
+        if batch_idx % cfg.log_interval == 0 and writer:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * cfg.batch_size, len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))

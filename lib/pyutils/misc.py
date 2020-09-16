@@ -1,7 +1,8 @@
 
 # python imports
 import numpy as np
-import pickle,sys,os
+import pickle,sys,os,yaml,io
+from easydict import EasyDict as edict
 
 # this is the only allowed project import in this file.
 import settings
@@ -56,3 +57,14 @@ def get_model_epoch_info(cfg):
     if cfg.load:
         return 0,cfg.epoch_num+1
     else: return 0,0
+
+
+def write_cfg(cfg,fpath):
+    with io.open(fpath,'w',encoding='utf8') as f:
+        yaml.dump(cfg,f,default_flow_style=False,allow_unicode=True)
+        
+def read_cfg(fpath):
+    with open(fpath,'r') as f:
+        cfg = yaml.load(f,Loader=yaml.Loader)
+    return cfg
+

@@ -9,14 +9,20 @@ def load_dataset(cfg,cfg_type):
     return get_dataset(cfg,cfg_type)
 
 def get_dataset(cfg,cfg_type):
-    if cfg[cfg_type].dataset.name.lower() == "mnist":
+
+    # added for backward compatibility 09-14-20
+    ds_dict = cfg
+    if cfg_type != "denoising": 
+        ds_dict = cfg[cfg_tyep]
+
+    if ds_dict.dataset.name.lower() == "mnist":
         return get_mnist_dataset(cfg,cfg_type)
-    elif cfg[cfg_type].dataset.name.lower() == "cifar10":
+    elif ds_dict.dataset.name.lower() == "cifar10":
         return get_cifar10_dataset(cfg,cfg_type)
-    elif cfg[cfg_type].dataset.name.lower() == "celeba":
+    elif ds_dict.dataset.name.lower() == "celeba":
         return get_celeba_dataset(cfg,cfg_type)
-    elif cfg[cfg_type].dataset.name.lower() == "imagenet":
+    elif ds_dict.dataset.name.lower() == "imagenet":
         return get_imagenet_dataset(cfg,cfg_type)
     else:
-        raise ValueError(f"Uknown dataset name {cfg[cfg_type].dataset.name}")
+        raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 

@@ -5,6 +5,7 @@ Loading and saving model parameters
 
 # python imports
 from easydict import EasyDict as edict
+from pathlib import Path
 
 # pytorch imports
 import torch
@@ -27,6 +28,7 @@ def load_model_fp(cfg,model_fp,rank):
         map_location = {'cuda:%d' % 0, 'cuda:%d' % rank}
     else:
         map_location = {'cuda:%d' % rank}
+    print(f"Loading model filepath [{model_fp}]")
     state = torch.load(model_fp, map_location=map_location)
     model.load_state_dict(state)
     return model

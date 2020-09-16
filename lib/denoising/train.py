@@ -4,6 +4,8 @@ Run the training loop for denoising experiment
 
 
 # python imports
+import time
+import numpy.random as npr
 
 # pytorch imports
 from torch.utils.tensorboard import SummaryWriter
@@ -15,8 +17,8 @@ from pyutils.misc import get_model_epoch_info
 from schedulers import get_train_scheduler
 from layers.denoising import DenoisingLossDDP
 from learning.train import thtrain_denoising as train_loop
-# from learning.test import thtest_denoising as test_loop
-
+from learning.test import thtest_denoising as test_loop
+from learning.utils import save_model,save_optim
 
 # local proj imports
 from .model_io import load_models
@@ -26,6 +28,8 @@ from .config import load_cfg,save_cfg,get_cfg,get_args
 from .utils import load_hyperparameters,extract_loss_inputs
 
 def run_train(cfg,rank,models,data,loader):
+    s = int(npr.rand()*5+1)
+    time.sleep(s)
 
     hyperparams = load_hyperparameters(cfg)
 
@@ -42,7 +46,10 @@ def run_train(cfg,rank,models,data,loader):
         models, optimizer = amp.initialize(models, optimizer, opt_level='O2')
 
     # init writer
-    writer = SummaryWriter(filename_suffix=cfg.exp_name)
+    if rank == 0:
+        writer = SummaryWriter(filename_suffix=cfg.exp_name)
+    else:
+        writer = None
 
     # init training loop
     global_step,current_epoch = get_model_epoch_info(cfg)
@@ -54,32 +61,40 @@ def run_train(cfg,rank,models,data,loader):
     test_losses = {}
 
     t = Timer()
-    for epoch in range(cfg.current_epoch, cfg.epochs+1):
-        lr = optimizer.param_groups[0]["lr"]
-
+    for epoch in range(cfg.current_epoch, cfg.epochs):
         t.tic()
         loss_epoch = train_loop(cfg, loader.tr, models,
                                   criterion, optimizer, epoch, writer,
                                   tr_scheduler)
         t.toc()
+        lr = optimizer.param_groups[0]["lr"]
         # print(t)
 
-        # if scheduler and tr_scheduler is None:
-        #     val_loss = test_loop(cfg,models.enc_c,models.dec,loader.val)
-        #     scheduler.step(val_loss)
+        if scheduler and tr_scheduler is None:
+            val_loss = test_loop(cfg,models,loader.val)
+            scheduler.step(val_loss)
 
-        # if epoch % cfg.checkpoint_interval == 0:
-        #     save_disent_models(cfg,models,optimizer)
+        if epoch % cfg.checkpoint_interval == 0 and rank == 0:
+            save_denoising_model(cfg,models,optimizer)
 
-        # if epoch % cfg.test_interval == 0:
-        #     te_loss = test_static(cfg,models.enc_c,models.dec,loader.te)
-        #     writer.add_scalar("Loss/test", te_loss, epoch)
+        if epoch % cfg.test_interval == 0:
+            te_loss = test_loop(cfg,models,loader.te)
+            if rank == 0:
+                writer.add_scalar("Loss/test", te_loss, epoch)
 
-        writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
-        writer.add_scalar("Misc/learning_rate", lr, epoch)
-        print(
-            f"Epoch [{epoch}/{cfg.epochs}]\t Loss: {loss_epoch / len(loader.tr)}\t " + "{:2.3e}".format(lr)
-        )
+        if rank == 0:
+            writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
+            writer.add_scalar("Misc/learning_rate", lr, epoch)
+            msg = f"Epoch [{epoch}/{cfg.epochs}]\t"
+            msg += f"Loss: {loss_epoch / len(loader.tr)}\t"
+            msg += "{:2.3e}".format(lr)
+            print(msg)
         cfg.current_epoch += 1
 
-    # save_disent_models(cfg,models,optimizer)
+    save_denoising_model(cfg,models,optimizer)
+
+def save_denoising_model(cfg,model,optimizer):
+    save_model(cfg, model, None)
+    save_optim(cfg, optimizer)    
+
+

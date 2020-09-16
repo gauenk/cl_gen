@@ -67,3 +67,33 @@ def thtest_static(args, enc, dec, test_loader, use_psnr=False):
     return test_loss
 
 
+
+def thtest_denoising(cfg, model, test_loader):
+    model.eval()
+    test_loss = 0
+
+    N = cfg.N
+    BS = cfg.batch_size
+    idx = 0
+    with th.no_grad():
+        for noisy_imgs, raw_img in tqdm(test_loader):
+            set_loss = 0
+            noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+            raw_img = raw_img.cuda(non_blocking=True)
+
+            noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+            dec_imgs,proj = model(noisy_imgs)
+            dec_imgs = rescale_noisy_image(dec_imgs)
+            dshape = (N,BS,) + dec_imgs.shape[1:]
+            dec_imgs = dec_imgs.reshape(dshape)
+            raw_img = raw_img.expand(dshape)
+            loss = F.mse_loss(raw_img,dec_imgs).item()
+            if cfg.test_with_psnr: loss = mse_to_psnr(loss)
+            test_loss += loss
+            idx += 1
+    test_loss /= len(test_loader)
+    print('\nTest set: Average loss: {:2.3e}\n'.format(test_loss))
+    return test_loss
+
+
+

@@ -62,7 +62,8 @@ def cleanup():
     
 def run_experiment(rank, cfg):
     print(f"Running DDP experiment on rank {rank}")
-    proc_group = setup(rank,cfg.world_size)
+    if cfg.use_ddp:
+        proc_group = setup(rank,cfg.world_size)
     cfg.device = 'cuda:%d' % rank
     cfg.rank = rank
     torch.cuda.set_device(rank)
@@ -71,7 +72,7 @@ def run_experiment(rank, cfg):
     cfg.rank = rank # only for data loading!
     data,loader = load_dataset(cfg,'denoising')
 
-    # load models
+    # load models    
     models = load_models(cfg,rank,proc_group)
 
     # run experiment
@@ -82,9 +83,13 @@ def run_experiment(rank, cfg):
     else:
         raise ValueError(f"Uknown mode [{cfg.mode}]")
     
-def main(args=None):
-    if args is None: args = get_args()
-    cfg = get_cfg(args)
+def main(cfg=None,args=None):
+    if not args is None and not cfg is None:
+        raise InputError("cfg and args cann't both be not None. Pick one!")
+    if args is None and cfg is None:
+        args = get_args()
+    elif cfg is None:
+        cfg = get_cfg(args)
     cfg.use_ddp = True
     mp.spawn(run_experiment, nprocs=cfg.world_size, args=(cfg,))
     
