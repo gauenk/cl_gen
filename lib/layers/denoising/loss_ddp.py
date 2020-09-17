@@ -1,3 +1,5 @@
+# rename this file "loss_block.py"
+
 """ 
 Create the network to disentangle dynamic attributes from static information
  """
@@ -45,6 +47,8 @@ class DenoisingLossDDP(nn.Module):
         pic_set = pic_set.reshape(N,BS,-1)
         dec_pics = dec_pics.reshape(N,BS,-1)
         offset_idx = [(i+1)%N for i in range(N)]
+        # print('p',pic_set.min(),pic_set.max())
+        # print('d',dec_pics.min(),dec_pics.max())
         pic_pair = [pic_set,dec_pics[offset_idx]]
         loss_pairs = self.compute_img_loss(pic_pair)
 

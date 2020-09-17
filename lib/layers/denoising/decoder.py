@@ -30,7 +30,7 @@ class Decoder(nn.Module):
 
         # self.upconv1 = SingleUpConv(48,48)
         # self.conv1a = SingleConv(96,64)
-        # self.conv1b = SingleConv(64,1)
+        self.conv1 = SingleConv(n_channels,n_channels,0,1,1,True)
 
 
     def forward(self, inputs):
@@ -55,6 +55,7 @@ class Decoder(nn.Module):
         x = self.conv2b(x)
         # if self.n_channels == 1:
         #     x = F.relu(x)
+        x = self.conv1(x)
         return x
 
 
@@ -75,14 +76,20 @@ class SingleUpConv(nn.Module):
 class SingleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 1"""
 
-    def __init__(self, in_channels, out_channels, padding=(1,1), kernel_size=3, stride=1):
+    def __init__(self, in_channels, out_channels, padding=(1,1), kernel_size=3, stride=1,norelu=False):
         super().__init__()
-        self.single_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
-                      stride=stride, padding=padding),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(inplace=True,negative_slope=0.01)
-        )
+        if norelu:
+            self.single_conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                          stride=stride, padding=padding),
+            )
+        else:
+            self.single_conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                          stride=stride, padding=padding),
+                nn.BatchNorm2d(out_channels),
+                nn.LeakyReLU(inplace=True,negative_slope=0.01)
+            )
 
     def forward(self, x):
         return self.single_conv(x)

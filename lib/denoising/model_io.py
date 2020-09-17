@@ -23,11 +23,11 @@ from layers.denoising import DenoisingBlock
 # loading models
 #
 
-def load_model_fp(cfg,model_fp,rank):
+def load_model_fp(cfg,model,model_fp,rank):
     if cfg.use_ddp:
         map_location = {'cuda:%d' % 0, 'cuda:%d' % rank}
     else:
-        map_location = {'cuda:%d' % rank}
+        map_location = 'cuda:%d' % rank
     print(f"Loading model filepath [{model_fp}]")
     state = torch.load(model_fp, map_location=map_location)
     model.load_state_dict(state)
@@ -38,7 +38,7 @@ def load_model_field(cfg,rank,model,field):
     if cfg.load:
         fn = Path("checkpoint_{}.tar".format(cfg.epoch_num))
         model_fp = Path(cfg.model_path) / Path(field) / fn
-        model = load_model_fp(cfg,model_fp,rank)
+        model = load_model_fp(cfg,model,model_fp,rank)
     # if cfg.use_ddp:
     #     model = DDP(model, device_ids=[rank])
     return model
@@ -66,12 +66,20 @@ def load_projector(cfg,rank):
 
 def load_models(cfg,rank,proc_group):
     models = edict()
-    models.encoder = load_encoder(cfg,rank)
-    models.decoder = load_decoder(cfg,rank)
-    models.projector = load_projector(cfg,rank)
-    model = DenoisingBlock(models.encoder,models.decoder,
-                   models.projector,rank,cfg.N,cfg.batch_size,
-                   cfg.agg_enc_fxn,cfg.agg_enc_type)
+
+    # HACK: just get the models loaded but parameters are
+    # saved together in block
+    load = cfg.load
+    cfg.load = False
+    encoder = load_encoder(cfg,rank)
+    decoder = load_decoder(cfg,rank)
+    projector = load_projector(cfg,rank)
+    cfg.load = load
+    model = DenoisingBlock(encoder,decoder,
+                           projector,rank,cfg.N,cfg.batch_size,
+                           cfg.agg_enc_fxn,cfg.agg_enc_type)
+    if cfg.load:
+        load_model_field(cfg,rank,model,"")
     if cfg.use_ddp:
         if cfg.sync_batchnorm:
             fxn = SyncBatchNorm.convert_sync_batchnorm

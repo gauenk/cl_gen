@@ -51,9 +51,9 @@ def get_mnist_dataset(cfg,mode):
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         data.tr = DenoiseMNIST(root,N,noise_type,noise_params,train=True)
-        data.val = DenoiseMNIST(root,N,noise_type,noise_params,train=False)
-        data.val.data = data.val.data[0:1000]
-        data.val.targets = data.val.targets[0:1000]
+        data.val = DenoiseMNIST(root,N,noise_type,noise_params,train=True)
+        data.val.data = data.val.data[0:2000]
+        data.val.targets = data.val.targets[0:2000]
         data.te = DenoiseMNIST(root,N,noise_type,noise_params,train=False)
     else: raise ValueError(f"Unknown MNIST mode {mode}")
 

@@ -127,6 +127,10 @@ def main():
         pic_i = x[0]
         pic_title = 'noisy'
         if not cfg.disent.random_crop:
+            print(pic_i.mean())
+            print(pic_i.std())
+            print(pic_i.min(),pic_i.max())
+            pic_i = standardize_pic(pic_i)
             mse = criterion(pic_i,raw_img).item()
             psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
             pic_title = 'psnr: {:2.2f}'.format(psnr)
@@ -140,6 +144,12 @@ def main():
     plt.savefig(path)
     plt.clf()
     plt.cla()
+
+def standardize_pic(pic_i):
+    if pic_i.min() < 0:
+        return pic_i.add_(0.5)
+    else:
+        return pic_i
 
 
 if __name__ == "__main__":

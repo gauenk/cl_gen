@@ -13,7 +13,7 @@ class Encoder(nn.Module):
         self.conv2 = SingleConv(48, 48, (1,1),3,1)
         self.conv3 = SingleConv(48, 48, (1,1),3,1)
         self.conv4 = SingleConv(48, 48, (1,1),3,1)
-        self.conv5 = SingleConv(48, 48, (1,1),3,1)
+        self.conv5 = SingleConv(48, 48, (1,1),3,1,use_relu=False)
         self.conv6 = SingleConv(48, 48, (1,1),3,1)
 
     def forward(self, x):
@@ -36,14 +36,21 @@ class Encoder(nn.Module):
 class SingleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 1"""
 
-    def __init__(self, in_channels, out_channels, padding=(0,1), kernel_size=3, stride=1):
+    def __init__(self, in_channels, out_channels, padding=(0,1), kernel_size=3, stride=1,use_relu=True):
         super().__init__()
-        self.single_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
-                      stride=stride, padding=padding),
-            nn.BatchNorm2d(out_channels),
-            nn.LeakyReLU(inplace=True,negative_slope=0.01),
-        )
+        if use_relu:
+            self.single_conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                          stride=stride, padding=padding),
+                nn.BatchNorm2d(out_channels),
+                nn.LeakyReLU(inplace=True,negative_slope=0.01),
+            )
+        else:
+            self.single_conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                          stride=stride, padding=padding),
+                nn.BatchNorm2d(out_channels),
+            )
 
     def forward(self, x):
         return self.single_conv(x)

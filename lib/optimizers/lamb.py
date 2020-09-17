@@ -2,8 +2,10 @@
 import torch
 from torch.optim.optimizer import Optimizer, required
 
-class LARS(Optimizer):
-    r"""Implements layer-wise adaptive rate scaling for SGD.
+# TODO: implement this!
+
+class LAMB(Optimizer):
+    r"""Implements layer-wise adaptive moments optimizer for batch training.
 
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -20,7 +22,7 @@ class LARS(Optimizer):
         https://arxiv.org/abs/1708.03888
 
     Example:
-        >>> optimizer = LARS(model.parameters(), lr=0.1, eta=1e-3)
+        >>> optimizer = LAMB(model.parameters(), lr=0.1, eta=1e-3)
         >>> optimizer.zero_grad()
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
@@ -39,7 +41,7 @@ class LARS(Optimizer):
 
         self.prev_lr = []
         self.epoch = 0
-        self.clamp_range = [1e-11,1e11]
+        self.clamp_range = [0,1e11]
         defaults = dict(lr=lr, momentum=momentum,
                         weight_decay=weight_decay,
                         eta=eta, max_epoch=max_epoch)
@@ -106,6 +108,10 @@ class LARS(Optimizer):
             lr = group['lr']
             max_epoch = group['max_epoch']
 
+            # Global LR computed on polynomial decay schedule
+            decay = (1 - float(epoch) / max_epoch) ** 2
+            global_lr = lr * decay
+
             for p in group['params']:
                 if p.grad is None:
                     continue
@@ -113,13 +119,13 @@ class LARS(Optimizer):
                 param_state = self.state[p]
                 d_p = p.grad.data
 
+
                 # add 1e-16 for numerical stability; nan issues
                 weight_norm = torch.norm(p.data).clamp(*self.clamp_range)
-                grad_norm = torch.norm(d_p.add_(1e-16)).clamp(*self.clamp_range)
+                grad_norm = torch.norm(d_p).clamp(*self.clamp_range)
 
-                # Global LR computed on polynomial decay schedule
-                decay = (1 - float(epoch) / max_epoch) ** 2
-                global_lr = lr * decay
+                # if either norm is zero, local_lr = 1.
+                if weight_norm 
 
                 # Compute local learning rate for this layer
                 local_lr = eta * weight_norm / \

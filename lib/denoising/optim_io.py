@@ -20,14 +20,15 @@ def get_scaled_lr(cfg):
     lr = cfg.init_lr
     bs_scale = cfg.lr_bs_scale
     if bs_scale == "linear":
-        lr *= cfg.batch_size * cfg.world_size / 256. 
+        lr *= cfg.batch_size * cfg.world_size * cfg.N / 256. 
     elif bs_scale == "sqrt":
-        lr *= np.sqrt(cfg.batch_size * cfg.world_size / 256. )
+        lr *= np.sqrt(cfg.batch_size * cfg.world_size * cfg.N / 256. )
     elif bs_scale == "none": 
         lr = lr
     else:
         msg = f"Uknown batch-size scaling of learning rate [{bs_scale}]"
         raise ValueError(msg)
+    print("Scaled initial learning rate set at {:2.3e}".format(lr))
     return lr
 
 def get_optimizer_type(cfg,params,lr):
@@ -64,6 +65,8 @@ def get_model_params(cfg,models):
         for name,model in models.items():
             if cfg.freeze_models[name]: continue
             params += list(model.parameters())
+    elif isinstance(models,DenoisingBlock):
+        return list(models.parameters())
     elif isinstance(models,th_DDP) or isinstance(models,apex_DDP):
         return list(models.parameters())
         for name,freeze_bool in cfg.freeze_models.items():

@@ -83,6 +83,7 @@ def thtest_denoising(cfg, model, test_loader):
 
             noisy_imgs = noisy_imgs.cuda(non_blocking=True)
             dec_imgs,proj = model(noisy_imgs)
+            print(dec_imgs.min(),dec_imgs.max())
             dec_imgs = rescale_noisy_image(dec_imgs)
             dshape = (N,BS,) + dec_imgs.shape[1:]
             dec_imgs = dec_imgs.reshape(dshape)

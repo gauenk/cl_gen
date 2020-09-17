@@ -47,6 +47,7 @@ class DenoisingBlock(nn.Module):
         # decode
         input_i = [agg_h,agg_skip]
         dec_pics = self.decoder(input_i)
+        # dec_pics = dec_pics.reshape((N,BS,) + pic_shape)
 
         return dec_pics,proj
 

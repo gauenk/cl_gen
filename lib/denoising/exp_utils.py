@@ -1,11 +1,4 @@
 
-"""
-todo
-check_exp_cache('v1')
-load_exp_cache('v1')
-save_exp_cache('v1')
-record_experiment
-"""
 
 # python imports
 from pathlib import Path
@@ -74,12 +67,32 @@ def _log_summary_exp_v1(exp,fpath):
     with open(fpath,'a+') as f:
         f.write(summ)
 
+def _build_summary(cfg,version):
+    if version == "v1":
+        return _build_v1_summary(cfg)
+    elif version == "v2":
+        return _build_v2_summary(cfg)    
+    else:
+        raise ValueError(f"Unknown version [{version}]")
+
 def _build_v1_summary(cfg):
     summ = f"exp_name: {cfg.exp_name}\n"
-    summ += f"noise_params['g']: {cfg.noise_params}\n"
     summ += f"N: {cfg.N}\n"
+    summ += f"noise_params['g']: {cfg.noise_params}\n"
+    summ += f"BS: {cfg.batch_size}\n"
     summ += f"agg_enc_fxn: {cfg.agg_enc_fxn}\n"
     summ += f"hyper_params: {cfg.hyper_params}\n"
     return summ
+
+def _build_v2_summary(cfg):
+    summ = f"exp_name: {cfg.exp_name}\n"
+    summ += f"N: {cfg.N}\n"
+    summ += f"noise_params['g']: {cfg.noise_params}\n"
+    summ += f"BS: {cfg.batch_size}\n"
+    summ += f"agg_enc_fxn: {cfg.agg_enc_fxn}\n"
+    summ += f"hyper_params: {cfg.hyper_params}\n"
+    summ += f"epochs: {cfg.epochs}\n"
+    return summ
+
 
 

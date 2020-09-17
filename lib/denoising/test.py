@@ -4,6 +4,9 @@ Run the testing loop for denoising experiment
 # python imports
 from easydict import EasyDict as edict
 
+# pytorch imports
+from apex import amp
+
 # local proj imports
 from .model_io import load_models
 from .optim_io import load_optimizer
@@ -22,7 +25,7 @@ def run_test(cfg,rank,model,data,loader,n_runs=1):
 
     te_losses = []
     for n in range(n_runs):
-        te_loss = test_loop(cfg,  model, loader.tr)
+        te_loss = test_loop(cfg,  model, loader.te)
         te_losses.append(te_loss)
     if n_runs > 1:
         mean = np.mean(te_losses)

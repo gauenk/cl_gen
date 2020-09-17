@@ -62,6 +62,7 @@ def cleanup():
     
 def run_experiment(rank, cfg):
     print(f"Running DDP experiment on rank {rank}")
+    proc_group = None
     if cfg.use_ddp:
         proc_group = setup(rank,cfg.world_size)
     cfg.device = 'cuda:%d' % rank
@@ -83,7 +84,7 @@ def run_experiment(rank, cfg):
     else:
         raise ValueError(f"Uknown mode [{cfg.mode}]")
     
-def main(cfg=None,args=None):
+def run_ddp(cfg=None,args=None):
     if not args is None and not cfg is None:
         raise InputError("cfg and args cann't both be not None. Pick one!")
     if args is None and cfg is None:
@@ -93,5 +94,17 @@ def main(cfg=None,args=None):
     cfg.use_ddp = True
     mp.spawn(run_experiment, nprocs=cfg.world_size, args=(cfg,))
     
+def run_localized(cfg=None,args=None,gpuid=None):
+    if not args is None and not cfg is None:
+        raise InputError("cfg and args cann't both be not None. Pick one!")
+    if args is None and cfg is None:
+        args = get_args()
+    elif cfg is None:
+        cfg = get_cfg(args)
+    cfg.use_ddp = False
+    cfg.world_size = 1
+    if gpuid is None: gpuid = 0
+    run_experiment(gpuid,cfg)
+
 if __name__ == "__main__":
     main()

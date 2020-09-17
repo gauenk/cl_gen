@@ -27,7 +27,7 @@ def get_args():
     msg = ("when running from an old experiment, ",
            "do we create a new experiment file?")
     parser.add_argument("--new",  action='store_true', help=msg)
-    parser.add_argument("--epochs", type=int, default=100,
+    parser.add_argument("--epochs", type=int, default=500,
                         help="how many epochs do we train for?")
     parser.add_argument("--epoch-num", type=int, default=-1,
                         help="resume training from epoch-num")
@@ -44,10 +44,11 @@ def get_args():
                         help="number of training gpus")
     parser.add_argument("--gpuid", type=int, default=0,
                         help="if using one gpu, which gpu?")
-    parser.add_argument("--init-lr", type=float, default=1e-1,
+    parser.add_argument("--init-lr", type=float, default=1e-3,
                         help="The initial learning rate for experiments")
-    msg = "How does the learning rate scale with batch-size?"
-    parser.add_argument("--lr_bs_scale", type=str, default='sqrt',
+    msg = "How does the learning rate scale with batch-size? "
+    msg += "linear, sqrt, noner"
+    parser.add_argument("--lr_bs_scale", type=str, default='none',
                         help=msg)
     parser.add_argument("--num-workers", type=int, default=4,
                         help="How many workers per dataset?")
@@ -116,7 +117,7 @@ def get_args():
         'sched': pick Adam or SGD using scheduler choice
     """
     parser.add_argument("--optim-type", type=str,
-                        default='lars', help=msg)
+                        default='adam', help=msg)
 
     msg = """parameters for optimizer
         'adam': betas (tuple[float]), eps (float), 
@@ -140,7 +141,7 @@ def get_args():
         'none': no scheduler at all
     """
     parser.add_argument("--sched-type", type=str,
-                        default="lwca", help=msg)
+                        default="none", help=msg)
 
     msg = """parameters for scheduler
         'lwca': burnin (int)
@@ -317,11 +318,9 @@ def set_cfg(args):
         cfg.n_img_channels = 3
 
     # include only for backward compatibility with datasets
-    # cfg.denoising = cfg 
     cfg.use_collate = True
     cfg.rank = -1 # only used in datasets!
 
-    # write_settings(cfg.exp_name,info)
     return cfg
     
 #

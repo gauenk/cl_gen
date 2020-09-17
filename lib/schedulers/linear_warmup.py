@@ -22,6 +22,8 @@ class LinearWarmup(_LRScheduler):
         self._init_step = True
         super(LinearWarmup, self).__init__(optimizer,last_epoch)
         self._init_step = False
+        # TODO: batch_correction might be why this is not working well.
+        # we do the batch correction to the inital_lr before optim loads it.
 
     def state_dict(self):
         """
@@ -34,10 +36,10 @@ class LinearWarmup(_LRScheduler):
             warnings.warn("To get the last learning rate computed by the scheduler, "
                           "please use `get_last_lr()`.", UserWarning)
 
-        batch_correction = self.batch_correction
+        # batch_correction = self.batch_correction
         warmup_scaling = 1.0 if self.finished else float(self.last_epoch) / self.burnin_steps
         warmup_scaling = 1.0 if warmup_scaling > 1 else warmup_scaling
-        scaled_lr = [warmup_scaling * base_lrs *  batch_correction for base_lrs in self.base_lrs]
+        scaled_lr = [warmup_scaling * base_lrs for base_lrs in self.base_lrs]
 
         if self.last_epoch > self.burnin_steps and not self.finished:
             self.after_scheduler.base_lrs = scaled_lr
