@@ -30,7 +30,8 @@ class Decoder(nn.Module):
 
         # self.upconv1 = SingleUpConv(48,48)
         # self.conv1a = SingleConv(96,64)
-        self.conv1 = SingleConv(n_channels,n_channels,0,1,1,True)
+        self.conv1a = SingleConv(n_channels,n_channels,0,1,1,True)
+        self.conv1b = SingleConv(n_channels,n_channels,0,1,1,True)
 
 
     def forward(self, inputs):
@@ -53,9 +54,8 @@ class Decoder(nn.Module):
         x = torch.cat([x,a], dim=1)
         x = self.conv2a(x)
         x = self.conv2b(x)
-        # if self.n_channels == 1:
-        #     x = F.relu(x)
-        x = self.conv1(x)
+        x = self.conv1a(x)
+        x = self.conv1b(x)
         return x
 
 
@@ -67,7 +67,7 @@ class SingleUpConv(nn.Module):
             nn.ConvTranspose2d(in_channels , out_channels,
                                kernel_size=kernel_size, stride=stride,
                                padding=padding),
-            nn.BatchNorm2d(out_channels),
+            # nn.BatchNorm2d(out_channels),
             nn.LeakyReLU(inplace=True,negative_slope=0.01),
         )
     def forward(self,x):
@@ -76,19 +76,19 @@ class SingleUpConv(nn.Module):
 class SingleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 1"""
 
-    def __init__(self, in_channels, out_channels, padding=(1,1), kernel_size=3, stride=1,norelu=False):
+    def __init__(self, in_channels, out_channels, padding=(1,1), kernel_size=3, stride=1,relu=True):
         super().__init__()
-        if norelu:
-            self.single_conv = nn.Sequential(
-                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
-                          stride=stride, padding=padding),
-            )
-        else:
+        if relu:
             self.single_conv = nn.Sequential(
                 nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
                           stride=stride, padding=padding),
                 nn.BatchNorm2d(out_channels),
                 nn.LeakyReLU(inplace=True,negative_slope=0.01)
+            )
+        else:
+            self.single_conv = nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size,
+                          stride=stride, padding=padding),
             )
 
     def forward(self, x):

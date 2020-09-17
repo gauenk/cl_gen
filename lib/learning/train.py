@@ -160,18 +160,29 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
     loss_epoch = 0
     data = train_loader.dataset.data
     print("N samples:", len(data))
-    for batch_idx, (noisy_imgs, th_img) in enumerate(train_loader):
+    for batch_idx, (noisy_imgs, raw_img) in enumerate(train_loader):
+
+        optimizer.zero_grad()
 
         # setup the forward pass
         idx += cfg.batch_size
         
         noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+        prev_params = [p.clone() for p in list(model.parameters())]
+        # print(prev_params[0][0][0])
         dec_imgs,proj = model(noisy_imgs)
-        loss = criterion(noisy_imgs,dec_imgs,proj)
+        # print_stats(noisy_imgs)
+        # print_stats(dec_imgs)
 
-        optimizer.zero_grad()
+        # loss = F.mse_loss(noisy_imgs,dec_imgs)
+        loss = criterion(noisy_imgs,dec_imgs,proj)
         loss.backward()
         optimizer.step()
+
+
+        curr_params = list(model.parameters())
+        # print(curr_params[0][0][0])
+        # print_param_diff(prev_params,curr_params)
 
         if scheduler:
             scheduler.step()
@@ -188,3 +199,15 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         loss_epoch += loss.item()
     return loss_epoch
 
+
+def print_param_diff(prev_params,curr_params):
+    i = 0
+    for pset,cset in zip(prev_params,curr_params):
+        print(i,torch.equal(pset.data,cset.data))
+        i += 1
+    
+def print_stats(tensor):
+    t_min = tensor.min().item()
+    t_max = tensor.max().item()
+    t_mean = tensor.mean().item()
+    print(t_min,t_max,t_mean)

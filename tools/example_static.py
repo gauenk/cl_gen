@@ -37,7 +37,7 @@ import settings
 from pyutils.cfg import get_cfg
 from pyutils.misc import np_log,rescale_noisy_image,get_model_epoch_info
 from layers import NT_Xent,SimCLR,get_resnet,LogisticRegression,DisentangleStaticNoiseLoss,Projector
-from layers.denoising import DenoisingLoss,DenoisingEncoder,DenoisingDecoder
+from layers.denoising import DenoisingLoss,Encoder,Decoder,Projector
 from layers.denoising import reconstruct_set
 from learning.train import thtrain_cl as train_cl
 from learning.train import thtrain_cls as train_cls
@@ -87,7 +87,7 @@ def exploring_nt_xent_loss(cfg):
 
 def load_encoder(cfg,enc_type):
     nc = cfg.disent.n_channels
-    model = DenoisingEncoder(n_channels=nc,embedding_size = 256)
+    model = Encoder(n_channels=nc,embedding_size = 256)
     # model = nn.DataParallel(model)
     print('encoder',cfg.disent.device.type)
     if cfg.disent.load:
@@ -99,7 +99,7 @@ def load_encoder(cfg,enc_type):
 
 def load_decoder(cfg):
     nc = cfg.disent.n_channels
-    model = DenoisingDecoder(n_channels=nc,embedding_size=256)
+    model = Decoder(n_channels=nc,embedding_size=256)
     # model = nn.DataParallel(model)
     print('decoder',cfg.disent.device.type)
     if cfg.disent.load:
@@ -110,7 +110,7 @@ def load_decoder(cfg):
     return model
 
 def load_projector(cfg):
-    model = Projector(n_features=256)
+    model = Projector(n_features=768)
     if cfg.disent.load:
         fn = Path("checkpoint_{}.tar".format(cfg.disent.epoch_num))
         model_fp = Path(cfg.disent.model_path) / Path("proj") / fn
@@ -159,8 +159,14 @@ def save_disent_models(cfg,models,optimizer):
 
 def load_static_models(cfg):
     models = edict()
-    models.enc_c = load_encoder(cfg,'c')
-    models.dec = load_decoder(cfg)
+    models.encoder = load_encoder(cfg,'c')
+    models.decoder = load_decoder(cfg)
+    models.projector = load_projector(cfg)
+
+    # backward compat
+    models.enc_c = models.encoder
+    models.dec = models.decoder
+
     return models
 
 
@@ -184,7 +190,7 @@ def train_disent_exp(cfg):
                               cfg.disent.device,
                               cfg.disent.img_loss_type,
                               'simclr',
-                              cfg.disent.share_enc)
+                              cfg.disent.agg_enc_fxn)
     optimizer,scheduler = get_disent_optim(cfg,models,len(loader.tr))
 
     # init writer
@@ -407,7 +413,6 @@ if __name__ == "__main__":
     cfg.disent.share_enc = False
     cfg.disent.hyper_h = 0
 
-
     dsname = cfg.disent.dataset.name.lower()
     model_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/{dsname}")
     optim_path = Path(f"{settings.ROOT_PATH}/output/disent/{cfg.exp_name}/{dsname}/optim/")
@@ -430,7 +435,10 @@ if __name__ == "__main__":
         cfg.disent.n_channels = 3
 
     # exploring_nt_xent_loss(cfg)
-    # train_disent_exp(cfg)
+    cfg.disent.agg_enc_fxn = 'mean'
+    if cfg.disent.agg_fxn is False:
+        cfg.disent.agg_enc_fxn = 'id'
+    train_disent_exp(cfg)
 
 
     cfg.disent.load = True
@@ -440,7 +448,7 @@ if __name__ == "__main__":
     cfg.disent.N = 5
     # test_disent(cfg)
     epoch_num_list = [0,5,50,100,250,450]
-    test_disent_over_epochs(cfg,epoch_num_list)
+    # test_disent_over_epochs(cfg,epoch_num_list)
     # test_disent_examples(cfg)
     # epoch_num_list = [0,5,50,100,250,450]
     # test_disent_examples_over_epochs(cfg,epoch_num_list)

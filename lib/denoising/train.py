@@ -28,7 +28,7 @@ from .config import load_cfg,save_cfg,get_cfg,get_args
 from .utils import load_hyperparameters,extract_loss_inputs
 
 def run_train(cfg,rank,models,data,loader):
-    only_one_print = (rank == 0 and cfg.use_ddp) or (cfg.use_ddp is False)
+    this_proc_prints = (rank == 0 and cfg.use_ddp) or (cfg.use_ddp is False)
 
     s = int(npr.rand()*5+1)
     time.sleep(s)
@@ -42,13 +42,17 @@ def run_train(cfg,rank,models,data,loader):
 
     optimizer = load_optimizer(cfg,models)
     scheduler = load_scheduler(cfg,optimizer,len(loader.tr))
+    print("Loaded optimizer: ")
+    print(optimizer)
+    print("Loaded scheduler: ")
+    print(scheduler)
 
     # apply apex
     if cfg.use_apex:
         models, optimizer = amp.initialize(models, optimizer, opt_level='O2')
 
     # init writer
-    if only_one_print:
+    if this_proc_prints:
         writer = SummaryWriter(filename_suffix=cfg.exp_name)
     else:
         writer = None
@@ -59,7 +63,7 @@ def run_train(cfg,rank,models,data,loader):
     cfg.current_epoch = current_epoch
 
     # training loop
-    tr_scheduler = get_train_scheduler(scheduler)
+    loop_scheduler = get_train_scheduler(scheduler)
     test_losses = {}
 
     print(f"cfg.epochs: {cfg.epochs}")
@@ -70,24 +74,26 @@ def run_train(cfg,rank,models,data,loader):
         t.tic()
         loss_epoch = train_loop(cfg, loader.tr, models,
                                   criterion, optimizer, epoch, writer,
-                                  tr_scheduler)
+                                  loop_scheduler)
         t.toc()
         lr = optimizer.param_groups[0]["lr"]
         # print(t)
 
-        # if scheduler and tr_scheduler is None:
-        #     val_loss = test_loop(cfg,models,loader.val)
-        #     scheduler.step(val_loss)
+        if scheduler and loop_scheduler is None:
+            val_loss = test_loop(cfg,models,loader.val)
+            scheduler.step(val_loss)
+            if this_proc_prints:
+                writer.add_scalar("Loss/val", val_loss, epoch)
 
-        if epoch % cfg.checkpoint_interval == 0 and only_one_print:
+        if epoch % cfg.checkpoint_interval == 0 and this_proc_prints:
             save_denoising_model(cfg,models,optimizer)
 
         if epoch % cfg.test_interval == 0:
-            if only_one_print:
+            if this_proc_prints:
                 te_loss = test_loop(cfg,models,loader.te)
                 writer.add_scalar("Loss/test", te_loss, epoch)
 
-        if only_one_print:
+        if this_proc_prints:
             writer.add_scalar("Loss/train", loss_epoch / len(loader.tr), epoch)
             writer.add_scalar("Misc/learning_rate", lr, epoch)
             msg = f"Epoch [{epoch}/{cfg.epochs}]\t"
@@ -97,7 +103,7 @@ def run_train(cfg,rank,models,data,loader):
         cfg.current_epoch += 1
 
 
-    if only_one_print:
+    if this_proc_prints:
         te_loss = test_loop(cfg,models,loader.te)
         writer.add_scalar("Loss/test", te_loss, epoch)
     save_denoising_model(cfg,models,optimizer)

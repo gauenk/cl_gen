@@ -47,16 +47,16 @@ class DenoisingBlock(nn.Module):
         # decode
         input_i = [agg_h,agg_skip]
         dec_pics = self.decoder(input_i)
-        # dec_pics = dec_pics.reshape((N,BS,) + pic_shape)
+        dec_pics = dec_pics.reshape((N,BS,) + pshape)
 
         return dec_pics,proj
 
-    def aggregate(self,h,aux,N,BS):
+    def aggregate(self,h,skip,N,BS):
         agg_fxn = self._agg_fxn
         agg_type = self._agg_type
         if agg_fxn == 'mean':
-            return share_encoding_mean(agg_type,h,aux,N,BS)
+            return share_encoding_mean(agg_type,h,skip,N,BS)
         elif agg_fxn == 'id':
-            return h,aux
+            return h,skip
         else:
             raise ValueError(f"Uknown aggregation function [{agg_fxn}]")

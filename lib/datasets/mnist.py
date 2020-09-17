@@ -89,6 +89,7 @@ def get_loader_serial(cfg,data,batch_size,mode):
     loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)
     loader.val = DataLoader(data.val,**loader_kwargs)
+    loader_kwargs['drop_last'] = False
     loader.te = DataLoader(data.te,**loader_kwargs)
     return loader
 
@@ -115,6 +116,7 @@ def get_loader_ddp(cfg,data):
     loader.val = DataLoader(data.val,**loader_kwargs)
 
     sampler = DistributedSampler(data.te,num_replicas=ws,rank=r)
+    loader_kwargs['drop_last'] = False
     loader_kwargs['sampler'] = sampler
     loader.te = DataLoader(data.te,**loader_kwargs)
 
@@ -218,6 +220,7 @@ class DenoiseMNIST(MNIST):
         elif noise_type == "ll":
             return self._get_ll_noise(params,N)
         elif noise_type == "msg":
+            print("Loading msg transforms")
             return self._get_msg_noise(params,N)
         else:
             raise ValueError(f"Unknown noise_type [{noise_type}]")

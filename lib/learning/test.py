@@ -72,8 +72,6 @@ def thtest_denoising(cfg, model, test_loader):
     model.eval()
     test_loss = 0
 
-    N = cfg.N
-    BS = cfg.batch_size
     idx = 0
     with th.no_grad():
         for noisy_imgs, raw_img in tqdm(test_loader):
@@ -83,9 +81,12 @@ def thtest_denoising(cfg, model, test_loader):
 
             noisy_imgs = noisy_imgs.cuda(non_blocking=True)
             dec_imgs,proj = model(noisy_imgs)
-            print(dec_imgs.min(),dec_imgs.max())
             dec_imgs = rescale_noisy_image(dec_imgs)
-            dshape = (N,BS,) + dec_imgs.shape[1:]
+
+            N = len(dec_imgs)
+            BS = len(dec_imgs[0])
+            dshape = (N,BS,) + dec_imgs.shape[2:]
+
             dec_imgs = dec_imgs.reshape(dshape)
             raw_img = raw_img.expand(dshape)
             loss = F.mse_loss(raw_img,dec_imgs).item()

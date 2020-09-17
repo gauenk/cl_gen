@@ -26,6 +26,16 @@ def get_args():
                         help="Do we train or test?")
     parser.add_argument("--epoch_num", type=int, default=100,
                         help="What epoch do we load if we load?")
+    parser.add_argument("--init-lr", type=float, default=None,
+                        help="Overwrite the init-lr?")
+    msg = """what type of noise do we run experiments with?
+        'g': Gaussian Noise
+        'll': Low-light Noise
+        'msg': Mutli-Scale Gaussian Noise
+    """
+    parser.add_argument("--noise-type", type=str, default=None, help=msg)
+    msg = "How big is each batch?"
+    parser.add_argument("--batch-size", type=int, default=None, help=msg)
     args = parser.parse_args()
     return args
 
@@ -37,4 +47,12 @@ if __name__ == "__main__":
     cfg.epoch_num = args.epoch_num
     if cfg.mode == "test":
         cfg.load = True
+    if args.init_lr:
+        cfg.init_lr = args.init_lr
+    if args.noise_type:
+        cfg.noise_type = args.noise_type
+    if args.batch_size:
+        cfg.batch_size = args.batch_size
+        cfg.log_interval = 50
+    cfg.use_apex = False
     run_localized(cfg=cfg,gpuid=args.gpuid)

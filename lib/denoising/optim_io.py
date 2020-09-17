@@ -54,8 +54,6 @@ def load_optimizer(cfg,models):
     lr = get_scaled_lr(cfg)
     params = get_model_params(cfg,models)
     optimizer = get_optimizer_type(cfg,params,lr)
-    print("Loaded optimizer: ")
-    print(optimizer)
     return optimizer
 
 
