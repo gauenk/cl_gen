@@ -28,7 +28,7 @@ def get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,lo
 
     # init cosine annealing scheduler
     T_max = total_steps - burnin_steps
-    eta_min = 0
+    eta_min = 1e-8
     after_scheduler = CosineAnnealingLR(optimizer,T_max,eta_min,cos_batch)
     cos_loading = cos_batch > -1
 

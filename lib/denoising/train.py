@@ -5,6 +5,7 @@ Run the training loop for denoising experiment
 
 # python imports
 import time
+import numpy as np
 import numpy.random as npr
 
 # pytorch imports
@@ -14,11 +15,12 @@ from apex import amp
 # project imports
 from pyutils.timer import Timer
 from pyutils.misc import get_model_epoch_info
-from schedulers import get_train_scheduler
+from schedulers import get_train_scheduler as get_loop_scheduler
 from layers.denoising import DenoisingLossDDP
 from learning.train import thtrain_denoising as train_loop
 from learning.test import thtest_denoising as test_loop
 from learning.utils import save_model,save_optim
+from torch.optim.lr_scheduler import MultiStepLR
 
 # local proj imports
 from .model_io import load_models
@@ -26,6 +28,7 @@ from .optim_io import load_optimizer
 from .scheduler_io import load_scheduler
 from .config import load_cfg,save_cfg,get_cfg,get_args
 from .utils import load_hyperparameters,extract_loss_inputs
+from .exp_utils import _build_v2_summary
 
 def run_train(cfg,rank,models,data,loader):
     this_proc_prints = (rank == 0 and cfg.use_ddp) or (cfg.use_ddp is False)
@@ -63,12 +66,14 @@ def run_train(cfg,rank,models,data,loader):
     cfg.current_epoch = current_epoch
 
     # training loop
-    loop_scheduler = get_train_scheduler(scheduler)
+    loop_scheduler = get_loop_scheduler(scheduler)
     test_losses = {}
 
     print(f"cfg.epochs: {cfg.epochs}")
     print(f"cfg.use_apex: {cfg.use_apex}")
+    print(f"cfg.use_bn: {cfg.use_bn}")
     print("len of loader.val", len(loader.val))
+    print(_build_v2_summary(cfg))
     t = Timer()
     for epoch in range(cfg.current_epoch, cfg.epochs):
         t.tic()
@@ -78,6 +83,9 @@ def run_train(cfg,rank,models,data,loader):
         t.toc()
         lr = optimizer.param_groups[0]["lr"]
         # print(t)
+
+        # if ms_scheduler:
+        #     ms_scheduler.step()
 
         if scheduler and loop_scheduler is None:
             val_loss = test_loop(cfg,models,loader.val)

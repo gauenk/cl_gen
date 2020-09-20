@@ -18,6 +18,7 @@ def share_encoding_mean_h(agg_type,h,N,BS):
     h = normalize_nd(h)
     h = h.reshape(N,BS,-1)
     h = torch.mean(h,dim=0)
+    h = normalize_nd(h)
     h = h.expand((N,) + h.shape)
     h = h.reshape(N*BS,h.shape[-1]) # output is (N*BS,-1)
     return h
@@ -31,6 +32,7 @@ def share_encoding_mean_skip(agg_type,skip,N,BS):
         skip_layer = normalize_nd(skip_layer)
         skip_layer = skip_layer.reshape(m_shape)
         skip_layer = torch.mean(skip_layer,dim=0)
+        skip_layer = normalize_nd(skip_layer)
         skip_layer = skip_layer.expand(m_shape)
         skip_layer = skip_layer.reshape(a_shape) # output is (N*BS,...)
         skip_mean.append(skip_layer)

@@ -35,7 +35,7 @@ def load_scheduler(cfg,optimizer,batches_per_epoch):
                                                            factor=1./np.sqrt(10))
     batch_size = cfg.batch_size
     epochs = cfg.epochs
-    burnin = 10 # cfg.sched_params['burnin']
+    burnin = 5 # cfg.sched_params['burnin']
     load_epoch = -1 # cfg.epoch_num
     # scheduler = get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch)
     # scheduler = linear_warmup_reduce_on_palteau(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch=-1)

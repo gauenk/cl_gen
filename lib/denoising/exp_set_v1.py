@@ -26,11 +26,12 @@ def get_experiment_set_v1(rerun=False):
     # load default cfgs
     args = get_args()
     cfg = get_cfg(args)
+    cfg.noise_type = "g"
 
     # determine experiment grid
     # batch_grid = [1536,768,384,256]
     # batch_grid = [516,258,129,86]
-    batch_grid = [2*516,2*258,2*129,2*86]
+    batch_grid = [2*432,2*216,2*108,2*72]
     N_grid = [2,4,8,12]
     noise_params_grid = [{'stddev':50},{'stddev':100},{'stddev':10}]
     agg_enc_fxn_grid = ['mean','id']

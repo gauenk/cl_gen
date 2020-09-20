@@ -11,7 +11,7 @@ from pathlib import Path
 
 # project imports
 import settings
-from denoising import run_localized
+from denoising import run_localized,run_ddp
 from denoising.exp_utils import load_exp_cache
 
 def get_args():
@@ -36,12 +36,23 @@ def get_args():
     parser.add_argument("--noise-type", type=str, default=None, help=msg)
     msg = "How big is each batch?"
     parser.add_argument("--batch-size", type=int, default=None, help=msg)
+    msg = "Do our models use batch normalization?"
+    parser.add_argument("--no-bn", action='store_false',help=msg)
+    msg = "Pick an aggregation scheme"
+    parser.add_argument("--agg_enc_fxn", type=str, default='id',help=msg)
+    msg = "what optim type do we use?"
+    parser.add_argument("--optim-type", type=str,default=None,help=msg)
+    msg = "num epochs to train"
+    parser.add_argument("--epochs", type=int,default=None,help=msg)
+    msg = "run on ddp"
+    parser.add_argument("--use_ddp", action='store_true',help=msg)
     args = parser.parse_args()
     return args
 
 if __name__ == "__main__":
     args = get_args()
     cfg = load_exp_cache(args.cache)[args.id]
+    cfg.name = str(uuid.uuid4()) # new name!
     cfg.device = 'cuda:%d' % args.gpuid
     cfg.mode = args.mode
     cfg.epoch_num = args.epoch_num
@@ -54,5 +65,19 @@ if __name__ == "__main__":
     if args.batch_size:
         cfg.batch_size = args.batch_size
         cfg.log_interval = 50
-    cfg.use_apex = False
-    run_localized(cfg=cfg,gpuid=args.gpuid)
+    if args.optim_type:
+        cfg.optim_type = args.optim_type
+    if args.epochs:
+        cfg.epochs = args.epochs
+    if args.agg_enc_fxn:
+        cfg.agg_enc_fxn = args.agg_enc_fxn
+    cfg.use_bn = args.no_bn
+    cfg.use_apex = True
+    cfg.use_ddp = args.use_ddp
+    cfg.epochs = 500
+    if cfg.use_ddp:
+        cfg.sync_batchnorm = True
+        run_ddp(cfg=cfg)
+    else:
+        run_localized(cfg=cfg,gpuid=args.gpuid)
+

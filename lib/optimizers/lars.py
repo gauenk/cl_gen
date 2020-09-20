@@ -25,7 +25,8 @@ class LARS(Optimizer):
         >>> loss_fn(model(input), target).backward()
         >>> optimizer.step()
     """
-    def __init__(self, params, max_epoch, lr=required, momentum=.9,
+    def __init__(self, params, max_epoch, lr=required,
+                 use_apex = False, momentum=.9,
                  weight_decay=.0005, eta=0.001):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
@@ -40,6 +41,7 @@ class LARS(Optimizer):
         self.prev_lr = []
         self.epoch = 0
         self.clamp_range = [1e-11,1e11]
+        self.use_apex = use_apex
         defaults = dict(lr=lr, momentum=momentum,
                         weight_decay=weight_decay,
                         eta=eta, max_epoch=max_epoch)
@@ -111,19 +113,28 @@ class LARS(Optimizer):
                     continue
 
                 param_state = self.state[p]
+                p_data = p.data
                 d_p = p.grad.data
 
+                # convert to fp32 if needed
+                # if self.use_apex:
+                #     p_data = p_data.float()
+                #     d_p = d_p.float()
+
                 # add 1e-16 for numerical stability; nan issues
-                weight_norm = torch.norm(p.data).clamp(*self.clamp_range)
-                grad_norm = torch.norm(d_p.add_(1e-16)).clamp(*self.clamp_range)
+                weight_norm = torch.norm(p_data)
+                grad_norm = torch.norm(d_p)
+                # self.random_print(weight_norm,grad_norm)
 
                 # Global LR computed on polynomial decay schedule
                 decay = (1 - float(epoch) / max_epoch) ** 2
                 global_lr = lr * decay
 
                 # Compute local learning rate for this layer
-                local_lr = eta * weight_norm / \
-                    (grad_norm + weight_decay * weight_norm)
+                local_lr = torch.tensor(1).to(weight_norm.device)
+                if self.is_valid(weight_norm) and self.is_valid(grad_norm):
+                    local_lr = eta * weight_norm / \
+                               (grad_norm + weight_decay * weight_norm)
 
                 # Update the momentum term
                 actual_lr = local_lr * global_lr
@@ -140,13 +151,33 @@ class LARS(Optimizer):
                     exit()
 
                 if 'momentum_buffer' not in param_state:
-                    param_state['momentum_buffer'] = torch.zeros_like(p.data)
+                    param_state['momentum_buffer'] = torch.zeros_like(p_data)
                 buf = param_state['momentum_buffer']
-                to_add = d_p + weight_decay * p.data
+                to_add = d_p + weight_decay * p_data
                 buf.mul_(momentum).add_(to_add,alpha=actual_lr)
-                #buf.mul_(momentum).add_(actual_lr,d_p + weight_decay * p.data)
+                #buf.mul_(momentum).add_(actual_lr,d_p + weight_decay * p_data)
+
+                # if using apex
+                # if self.use_apex:
+                #     p.data = p.data.float()
+                #     p.data.add_(-buf)
+                #     p.data = p.data.half()
+                # else:
+                #     p.data.add_(-buf)
                 p.data.add_(-buf)
+
                 self.curr_lr.append(actual_lr)
         self.prev_lr = self.curr_lr
 
         return loss
+
+    def random_print(self,weight_norm,grad_norm):
+        if torch.rand(1)[0] > 0.80:
+            print("weight_norm: {}",weight_norm)
+            print("grad_norm: {}",grad_norm)
+
+    def is_valid(self,tensor):
+        # tensor < clamp_min or tensor > clamp_max
+        a = (tensor < self.clamp_range[0])
+        a = a or (tensor > self.clamp_range[1])
+        return not(a)

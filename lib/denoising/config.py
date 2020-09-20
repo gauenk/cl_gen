@@ -27,7 +27,7 @@ def get_args():
     msg = ("when running from an old experiment, ",
            "do we create a new experiment file?")
     parser.add_argument("--new",  action='store_true', help=msg)
-    parser.add_argument("--epochs", type=int, default=500,
+    parser.add_argument("--epochs", type=int, default=200,
                         help="how many epochs do we train for?")
     parser.add_argument("--epoch-num", type=int, default=-1,
                         help="resume training from epoch-num")
@@ -39,7 +39,7 @@ def get_args():
     parser.add_argument("--dataset", type=str, default="MNIST",
                         help="experiment's dataset")
     parser.add_argument("--batch-size", type=int, default=1536,
-                        help="batch-size to be split among world_size")
+                        help="batch-size for each item in world-size")
     parser.add_argument("--world_size", type=int, default=2,
                         help="number of training gpus")
     parser.add_argument("--gpuid", type=int, default=0,
@@ -282,6 +282,7 @@ def set_cfg(args):
     cfg.sync_batchnorm = True # args.sync_batchnorm
     cfg.use_apex = False # args.use_apex
     cfg.test_with_psnr = True
+    cfg.use_bn = True
 
     # todo: find and replace with
     # share_enc -> agg_enc_type + agg_enc_type

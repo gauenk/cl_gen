@@ -4,6 +4,7 @@ Training for Pytorch
 """
 
 import torch
+from apex import amp
 import torch.nn.functional as F
 
 
@@ -176,7 +177,15 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
 
         # loss = F.mse_loss(noisy_imgs,dec_imgs)
         loss = criterion(noisy_imgs,dec_imgs,proj)
-        loss.backward()
+
+        # compute gradients
+        if cfg.use_apex:
+            with amp.scale_loss(loss,optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
+
+        # update weights
         optimizer.step()
 
 

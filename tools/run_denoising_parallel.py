@@ -18,7 +18,7 @@ def run_experiment_set(version='v1'):
 
     # get experiment setups
     if version == "v1":
-        cfgs = get_experiment_set_v1()
+        cfgs = get_experiment_set_v1(True)
     elif version == "v2":
         cfgs = get_experiment_set_v2()
     else:
@@ -40,6 +40,7 @@ def run_process(cache,cache_id,gpuid):
     pycmd += ["--cache",str(cache)]
     pycmd += ["--id",str(cache_id)]
     pycmd += ["--gpuid",str(gpuid)]
+    # pycmd += ["--init-lr",'5e-4']
     print("Running: {}".format(' '.join(pycmd)))
     return subprocess.Popen(pycmd)
 
@@ -92,6 +93,6 @@ def run_experiment_parallel(cfgs,version,mode,use_ddp=False):
         procs = []
 
 if __name__ == "__main__":
-    # run_experiment_set(version='v1')
-    run_experiment_set(version='v2')
+    run_experiment_set(version='v1')
+    # run_experiment_set(version='v2')
 

@@ -41,6 +41,7 @@ def get_optimizer_type(cfg,params,lr):
         return torch.optim.Adam(params, lr=lr, **p['adam'])
     elif ot == "lars":
         p = cfg.optim_params
+        p['lars']['use_apex'] = cfg.use_apex
         return LARS(params, cfg.epochs, lr=lr, **p['lars'])
     elif ot == "sched":
         if cfg.sched_type == "lwca":

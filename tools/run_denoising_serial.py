@@ -62,6 +62,7 @@ def run_experiment_serial(cfgs,mode,use_ddp=True):
             cfg.load = False
             cfg.epoch_num = -1
         if use_ddp:
+            cfg.use_apex = False
             run_ddp(cfg=cfg)
         else:
             run_serial(cfg=cfg)            

@@ -46,14 +46,14 @@ def load_model_field(cfg,rank,model,field):
 def load_encoder(cfg,rank):
     nc = cfg.n_img_channels
     h_size = cfg.enc_size
-    model = Encoder(n_channels = nc, embedding_size = h_size)
+    model = Encoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
     model = load_model_field(cfg,rank,model,"encoder")
     return model
 
 def load_decoder(cfg,rank):
     nc = cfg.n_img_channels
     h_size = cfg.enc_size
-    model = Decoder(n_channels = nc, embedding_size = h_size)
+    model = Decoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
     model = load_model_field(cfg,rank,model,"decoder")
     return model
 

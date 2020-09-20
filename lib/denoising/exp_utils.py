@@ -76,22 +76,30 @@ def _build_summary(cfg,version):
         raise ValueError(f"Unknown version [{version}]")
 
 def _build_v1_summary(cfg):
+    summ = "Experiment 1 Summary:\n"
+    summ += "------------------------\n"
     summ = f"exp_name: {cfg.exp_name}\n"
     summ += f"N: {cfg.N}\n"
     summ += f"noise_params['g']: {cfg.noise_params}\n"
     summ += f"BS: {cfg.batch_size}\n"
     summ += f"agg_enc_fxn: {cfg.agg_enc_fxn}\n"
     summ += f"hyper_params: {cfg.hyper_params}\n"
+    summ += f"noise-type: {cfg.noise_type}\n"
+    summ += "------------------------\n"
     return summ
 
 def _build_v2_summary(cfg):
+    summ = "Experiment 2 Summary:\n"
+    summ += "------------------------\n"
     summ = f"exp_name: {cfg.exp_name}\n"
     summ += f"N: {cfg.N}\n"
     summ += f"noise_params['g']: {cfg.noise_params}\n"
     summ += f"BS: {cfg.batch_size}\n"
     summ += f"agg_enc_fxn: {cfg.agg_enc_fxn}\n"
     summ += f"hyper_params: {cfg.hyper_params}\n"
+    summ += f"noise-type: {cfg.noise_type}\n"
     summ += f"epochs: {cfg.epochs}\n"
+    summ += "------------------------\n"
     return summ
 
 
