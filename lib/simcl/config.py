@@ -1,5 +1,5 @@
 """
-Configurations for denoising experiments
+Configuration for Simple Contrastive Learning
 
 """
 
@@ -26,7 +26,7 @@ def get_args():
     msg = ("when running from an old experiment, ",
            "do we create a new experiment file?")
     parser.add_argument("--new",  action='store_true', help=msg)
-    parser.add_argument("--epochs", type=int, default=350,
+    parser.add_argument("--epochs", type=int, default=1000,
                         help="how many epochs do we train for?")
     parser.add_argument("--epoch-num", type=int, default=-1,
                         help="resume training from epoch-num")
@@ -35,7 +35,7 @@ def get_args():
     parser.add_argument("--N", type=int, default=2,
                         help="""number of noisy images to generate 
                         from each original image""")
-    parser.add_argument("--dataset", type=str, default="MNIST",
+    parser.add_argument("--dataset", type=str, default="cifar10",
                         help="experiment's dataset")
     parser.add_argument("--batch-size", type=int, default=1536,
                         help="batch-size for each item in world-size")
@@ -43,11 +43,14 @@ def get_args():
                         help="number of training gpus")
     parser.add_argument("--gpuid", type=int, default=0,
                         help="if using one gpu, which gpu?")
-    parser.add_argument("--init-lr", type=float, default=1e-3,
+    parser.add_argument("--init-lr", type=float, default=3e-1,
                         help="The initial learning rate for experiments")
+    parser.add_argument("--encoder-type", type=str, default="simple",
+                        help="The architecture for the encoder")
+
     msg = "How does the learning rate scale with batch-size? "
-    msg += "linear, sqrt, noner"
-    parser.add_argument("--lr_bs_scale", type=str, default='none',
+    msg += "linear, sqrt, none"
+    parser.add_argument("--lr_bs_scale", type=str, default='linear_256',
                         help=msg)
     parser.add_argument("--num-workers", type=int, default=4,
                         help="How many workers per dataset?")
@@ -55,34 +58,6 @@ def get_args():
                         help="Dimension of encoder output.")
     parser.add_argument("--proj-size", type=int, default=64,
                         help="Dimension of projection output.")
-    msg = """\
-    which type of loss function do we want to use for the reconstructed images?
-        "l2": the L_2 loss
-        "simclr": the contrastive learning loss function
-    """
-    parser.add_argument("--img-loss-type", type=str, default='l2',
-                        help=msg)
-
-    msg = """\
-    determines the type of aggregation method we use in experiment
-        'id': this is the same as no aggregation
-        'mean': this uses the arithmetic mean to aggregate results
-        'graphconv': use graph convolution to aggregate information"""
-    parser.add_argument("--agg-enc-fxn", type=str,default="mean",
-                        help=msg)
-
-    msg = """\
-    how much aggregation do we do?
-        'h': aggregate only the final output encoding
-        'skip': aggregate only the skip connections
-        'full': aggregate all activations
-    """
-    parser.add_argument("--agg-enc-type", type=str,default="full",
-                        help=msg)
-
-    msg = "determine if we use projection opt. before nt_xent"
-    parser.add_argument("--proj-enc", type=bool, default=True,
-                        help=msg)
 
     msg = """parameter settings for hyperparameters
         'h' (float): hyperparameter weight for nt_xent loss over enc repr.
@@ -94,8 +69,10 @@ def get_args():
         'g': Gaussian Noise
         'll': Low-light Noise
         'msg': Mutli-Scale Gaussian Noise
+        'msg_simcl': Mutli-Scale Gaussian Noise with Sim CL noise too
     """
-    parser.add_argument("--noise-type", type=str, default='g', help=msg)
+    parser.add_argument("--noise-type", type=str, default='msg_simcl',
+                        help=msg)
 
     msg = """parameters for noise generation
         'g': mean (float), stddev (float)
@@ -116,7 +93,7 @@ def get_args():
         'sched': pick Adam or SGD using scheduler choice
     """
     parser.add_argument("--optim-type", type=str,
-                        default='adam', help=msg)
+                        default='lars', help=msg)
 
     msg = """parameters for optimizer
         'adam': betas (tuple[float]), eps (float), 
@@ -152,11 +129,8 @@ def get_args():
     }'
     parser.add_argument("--sched-params", type=jloads,
                         default=defaults, help=msg)
-
     parser.add_argument("--freeze-enc", action='store_true',
                         help="Freeze the weights for the encoder.")
-    parser.add_argument("--freeze-dec", action='store_true',
-                        help="Freeze the weights for the decoder.")
     parser.add_argument("--freeze-proj", action='store_true',
                         help="Freeze the weights for the projector.")
     args = parser.parse_args()
@@ -263,10 +237,6 @@ def set_cfg(args):
     cfg.world_size = args.world_size
     cfg.init_lr = args.init_lr
     cfg.lr_bs_scale = args.lr_bs_scale
-    cfg.img_loss_type = args.img_loss_type
-    cfg.agg_enc_fxn = args.agg_enc_fxn
-    cfg.agg_enc_type = args.agg_enc_type
-    cfg.proj_enc = args.proj_enc
     cfg.hyper_params = args.hyper_params
     cfg.noise_type = args.noise_type
     cfg.noise_params = args.noise_params
@@ -283,34 +253,31 @@ def set_cfg(args):
     cfg.test_with_psnr = True
     cfg.use_bn = True
 
-    # todo: find and replace with
-    # share_enc -> agg_enc_type + agg_enc_type
-    # noise_level -> noisy_type + noise_params
-    # hyper_h -> hyper_params
-    # lr.policy -> sched_type 
-    # lr.params -> sched_params
-    # 
-
     dsname = cfg.dataset.name.lower()
-    model_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/model/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/optim/")
+    model_path = Path(f"{settings.ROOT_PATH}/output/simcl/{dsname}/{cfg.exp_name}/model/")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/simcl/{dsname}/{cfg.exp_name}/optim/")
+    sched_path = Path(f"{settings.ROOT_PATH}/output/simcl/{dsname}/{cfg.exp_name}/sched/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.model_path = model_path
     cfg.optim_path = optim_path
-    
+    cfg.sched_path = sched_path
+    cfg.summary_log_dir = Path(f"{settings.ROOT_PATH}/runs/simcl/{dsname}/{cfg.exp_name}/")
+    if not cfg.summary_log_dir.exists():
+        cfg.summary_log_dir.mkdir(parents=True)
 
     # logging and recording
     cfg.global_step = 0
     cfg.current_epoch = 0
     cfg.checkpoint_interval = 1
-    cfg.test_interval = 5
-    cfg.log_interval = 5
+    cfg.test_interval = 1000
+    cfg.val_interval = 1000
+    cfg.log_interval = 1
     
     # saving
     cfg.freeze_models = edict()
     cfg.freeze_models.encoder = args.freeze_enc
-    cfg.freeze_models.decoder = args.freeze_dec
     cfg.freeze_models.projector = args.freeze_proj
+    cfg.encoder_type = args.encoder_type
 
     if cfg.dataset.name.lower() == "mnist":
         cfg.n_img_channels = 1
@@ -321,7 +288,12 @@ def set_cfg(args):
     cfg.use_collate = True
     cfg.rank = -1 # only used in datasets!
 
+    cfg.resnet = 'resnet18'
+
     return cfg
+
+
+
     
 #
 # setting cfg from arguments or yaml file
@@ -361,3 +333,4 @@ def load_cfg(exp_name):
     with open(exp_cfg_path,'r') as f:
         cfg = yaml.safe_load(f)
     return cfg
+

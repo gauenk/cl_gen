@@ -44,12 +44,13 @@ def load_cls_for_simclr(cfg):
 
 def train_model_cl(cfg):
 
-    gpu = 0
+    gpu = cfg.gpuid
     torch.cuda.set_device(gpu)
     torch.manual_seed(cfg.seed)
     np.random.seed(cfg.seed)    
 
-    data,loader = get_cifar10_dataset(cfg,'cl')
+    data,loader = get_dataset(cfg,"cl")
+    # data,loader = get_cifar10_dataset(cfg,'cl')
     model,optimizer,scheduler = load_simclr(cfg)
     criterion = NT_Xent(cfg.cl.batch_size, cfg.cl.temperature, cfg.cl.device, cfg.world_size)
 
@@ -158,9 +159,9 @@ def test_model_cls(cfg):
 
     
 def get_denoising_criterion():
-    # return torch.nn.L1Loss()
+    return torch.nn.L1Loss()
     # return torch.nn.MSELoss()
-    return torch.nn.CosineSimilarity(dim=1,eps=1e-6)
+    # return torch.nn.CosineSimilarity(dim=1,eps=1e-6)
 
 def test_grad_image(cfg):
     """
@@ -276,8 +277,9 @@ if __name__ == "__main__":
 
 
     # train simCLR
-    cfg.cl.load = True
-    cfg.cl.epoch_num = 784
+    cfg.gpuid = 0
+    cfg.cl.load = False
+    cfg.cl.epoch_num = 0
     cfg.cl.epochs = 1000
     cfg.cls.load = False
     train_model_cl(cfg)

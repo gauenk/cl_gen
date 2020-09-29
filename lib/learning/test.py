@@ -6,7 +6,7 @@ Test the model
 from tqdm import tqdm
 
 # torch imports
-import torch as th
+import torch
 import torch.nn.functional as F
 
 # project imports
@@ -19,7 +19,7 @@ def thtest_cls(args, model, test_loader):
     model.eval()
     test_loss = 0
     correct = 0
-    with th.no_grad():
+    with torch.no_grad():
         for data, target in test_loader:
             data, target = data.to(device), target.to(device)
             target = target.long()#.squeeze_()
@@ -44,7 +44,7 @@ def thtest_static(args, enc, dec, test_loader, use_psnr=False):
     correct = 0
 
     idx = 0
-    with th.no_grad():
+    with torch.no_grad():
         for pic_set, th_img in tqdm(test_loader):
             set_loss = 0
             th_img = th_img.to(device)
@@ -73,7 +73,7 @@ def thtest_denoising(cfg, model, test_loader):
     test_loss = 0
 
     idx = 0
-    with th.no_grad():
+    with torch.no_grad():
         for noisy_imgs, raw_img in tqdm(test_loader):
             set_loss = 0
             noisy_imgs = noisy_imgs.cuda(non_blocking=True)
@@ -98,4 +98,36 @@ def thtest_denoising(cfg, model, test_loader):
     return test_loss
 
 
+def thtest_simcl_cls(args, simcl, logit, test_loader):
+    # test a classifier
+    device = args.device
+    simcl.eval()
+    logit.eval()
+    test_loss = 0
+    correct = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            data, target = data.to(device), target.to(device)
+            target = target.long()#.squeeze_()
+
+            data = data.unsqueeze(0)
+            h,proj = simcl(data)
+            output = logit(proj)[0]
+
+            # -- test for correctness -- 
+            # BS = len(data)
+            # data = data.reshape(BS,-1)
+            # output = logit(data)
+
+            # sum up batch loss
+            test_loss += F.cross_entropy(output, target, reduction='sum').item() 
+            pred = output.argmax(dim=1, keepdim=True)  # get the index of the max log-probability
+            correct += pred.eq(target.view_as(pred)).sum().item()
+
+    test_loss /= len(test_loader.dataset)
+    msg = '\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'
+    msg = msg.format(test_loss, correct, len(test_loader.dataset),
+                     100. * correct / len(test_loader.dataset))
+    print(msg)
+    return test_loss#,correct,len(test_loader.dataset)
 

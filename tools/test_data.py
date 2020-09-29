@@ -34,6 +34,10 @@ from learning.utils import save_model,save_optim
 from torchvision.datasets import CIFAR10
 from datasets import get_dataset
 
+from simcl.exp_set_v1 import get_experiment_set_v1 as simcl_get_experiment_set_v1
+from simcl.exp_set_v2 import get_experiment_set_v2 as simcl_get_experiment_set_v2
+
+
 
 def get_args():
     parser = argparse.ArgumentParser(description="Run static denoising on test data")
@@ -99,9 +103,9 @@ def get_denoising_cfg(args):
     return cfg
 
 def plot_th_tensor(ax,i,j,img,title):
-    img = torch.clamp(img,-.5,.5)
+    # img = torch.clamp(img,-.5,.5)
     img = img.to('cpu').detach().numpy()[0].transpose(1,2,0)
-    img += 0.5
+    # img += 0.5
     ax[i,j].imshow(img,  interpolation=None)
     ax[i,j].set_xticks([])
     ax[i,j].set_yticks([])
@@ -114,10 +118,15 @@ def get_test_data_dir(cfg):
 def main():
 
     args = get_args()
-    cfg = get_denoising_cfg(args)
-    cfg.disent.random_crop = False
-    data,loader = get_dataset(cfg,'disent')
+    # cfg = get_denoising_cfg(args)
+    # cfg.disent.random_crop = False
+    # data,loader = get_dataset(cfg,'disent')
+
+    cfg = simcl_get_experiment_set_v2()[0]
+    cfg.use_ddp = False
+    data,loader = get_dataset(cfg,'simcl')
     criterion = nn.MSELoss()
+    use_random_crop = True
     
     # get the data
     numOfExamples = 4
@@ -125,8 +134,10 @@ def main():
     for num_ex in range(numOfExamples):
         x,raw_img = next(iter(loader.val))
         pic_i = x[0]
+        print(x.shape)
+        print(pic_i.shape)
         pic_title = 'noisy'
-        if not cfg.disent.random_crop:
+        if use_random_crop:
             print(pic_i.mean())
             print(pic_i.std())
             print(pic_i.min(),pic_i.max())
@@ -134,10 +145,11 @@ def main():
             mse = criterion(pic_i,raw_img).item()
             psnr = 10 * np_log(1./mse)[0]/np_log(10)[0]
             pic_title = 'psnr: {:2.2f}'.format(psnr)
+        pic_i = standardize_pic(pic_i)
         plot_th_tensor(ax,num_ex,0,pic_i,pic_title)
         plot_th_tensor(ax,num_ex,1,raw_img,'raw')
     t_dir = get_test_data_dir(cfg)
-    dsname = cfg.disent.dataset.name.lower()
+    dsname = cfg.dataset.name.lower()
     fn = Path(f"test_dataset_{dsname}.png")
     path = t_dir / fn
     print(f"Writing images to output {path}")
@@ -147,6 +159,7 @@ def main():
 
 def standardize_pic(pic_i):
     if pic_i.min() < 0:
+        pic_i = torch.clamp(pic_i,-.5,.5)
         return pic_i.add_(0.5)
     else:
         return pic_i

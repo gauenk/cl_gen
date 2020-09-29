@@ -49,7 +49,7 @@ def get_simclr_scheduler(optimizer,batch_size,epochs,burnin,batches_per_epoch,lo
     return scheduler
 
 
-def linear_warmup_reduce_on_palteau(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch=-1):
+def linear_warmup_reduce_on_palteau(optimizer,batch_size,epochs,burnin,batches_per_epoch,load_epoch=-1,mode="min"):
 
     # grab lr from re-loaded optim
     init_lr = [group['lr'] for group in optimizer.param_groups]    
@@ -74,7 +74,8 @@ def linear_warmup_reduce_on_palteau(optimizer,batch_size,epochs,burnin,batches_p
     eta_min = 0
     after_scheduler = ReduceLROnPlateau(optimizer,
                                         patience = 10,
-                                        factor=1./np.sqrt(10))
+                                        factor=1./np.sqrt(10),
+                                        mode=mode)
     cos_loading = cos_batch > -1
 
     # init the linear warmup

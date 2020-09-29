@@ -23,18 +23,40 @@ from pyutils.misc import add_noise
 from .transform import BlockGaussian,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 def get_mnist_dataset(cfg,mode):
-    if mode == "denoising":
+    if mode == "denoising" or mode == "simcl" or mode == "simcl_cls" or mode == "cls_3c":
         root = cfg.dataset.root
     else:
         root = cfg[mode].dataset.root
     data = edict()
     if mode == 'cls':
+
         batch_size = cfg.cls.batch_size
         download = cfg.cls.dataset.download
-        transform = th_transforms.Compose([th_transforms.ToTensor()])
-        data.tr = MNIST(root,train=True,transform=transform,download=download)
-        data.val = MNIST(root,train=True,transform=transform,download=download)
-        data.te = MNIST(root,train=False,transform=transform,download=download)
+
+        resize = torchvision.transforms.Resize(size=32)
+        to_tensor = th_transforms.ToTensor()
+        t = th_transforms.Compose([resize,to_tensor])
+
+        data.tr = MNIST(root,train=True,transform=t,download=download)
+        data.val = MNIST(root,train=True,transform=t,download=download)
+        data.val.data = data.val.data[0:2000]
+        data.val.targets = data.val.targets[0:2000]
+        data.te = MNIST(root,train=False,transform=t,download=download)
+    elif mode == 'cls_3c':
+
+        batch_size = cfg.cls.batch_size
+        download = cfg.cls.dataset.download
+
+        resize = torchvision.transforms.Resize(size=32)
+        to_tensor = th_transforms.ToTensor()
+        t = th_transforms.Compose([resize,to_tensor])
+
+        data.tr = MNIST_3c(root,train=True,transform=t,download=download)
+        data.val = MNIST_3c(root,train=True,transform=t,download=download)
+        data.val.data = data.val.data[0:2000]
+        data.val.targets = data.val.targets[0:2000]
+        data.te = MNIST_3c(root,train=False,transform=t,download=download)
+
     elif mode == "disent":
         batch_size = cfg.disent.batch_size
         N = cfg.disent.N
@@ -55,6 +77,24 @@ def get_mnist_dataset(cfg,mode):
         data.val.data = data.val.data[0:2000]
         data.val.targets = data.val.targets[0:2000]
         data.te = DenoiseMNIST(root,N,noise_type,noise_params,train=False)
+    elif mode == "simcl":
+        batch_size = cfg.batch_size
+        N = cfg.N
+        noise_type = cfg.noise_type
+        noise_params = cfg.noise_params[noise_type]
+        data.tr = DenoiseMNIST(root,N,noise_type,noise_params,train=True)
+        data.val = DenoiseMNIST(root,N,noise_type,noise_params,train=True)
+        data.val.data = data.val.data[0:2000]
+        data.val.targets = data.val.targets[0:2000]
+        data.te = DenoiseMNIST(root,N,noise_type,noise_params,train=False)
+    elif mode == 'simcl_cls':
+        simcl = cfg.simcl
+        batch_size = cfg.batch_size
+        data.tr = SimClTestMNIST(root,simcl,train=True)
+        data.val = SimClTestMNIST(root,simcl,train=True)
+        data.val.data = data.val.data[0:2000]
+        data.val.targets = data.val.targets[0:2000]
+        data.te = SimClTestMNIST(root,simcl,train=False)
     else: raise ValueError(f"Unknown MNIST mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)
@@ -68,7 +108,6 @@ def get_loader(cfg,data,batch_size,mode):
     else:
         loader = get_loader_serial(cfg,data,batch_size,mode)
     return loader
-
     
 def collate_fn(batch):
     noisy,clean = zip(*batch)
@@ -121,12 +160,36 @@ def get_loader_ddp(cfg,data):
     loader.te = DataLoader(data.te,**loader_kwargs)
 
     return loader
+    
 
 
 # class DenoisingSetCollate():
 
 #     def __init__(self,data):
         
+
+class MNIST_3c(MNIST):
+
+    def __init__(self,root,train=True,transform=None,download=False):
+        self.__class__.__name__ = "mnist"
+        super(MNIST_3c, self).__init__( root, train=train,
+                                        transform=transform,
+                                        download=download)
+    def __getitem__(self,index):
+        
+        img, target = self.data[index], int(self.targets[index])
+        pil_pic = Image.fromarray(img.to('cpu').detach().numpy())
+
+        if self.transform is not None:
+            img = self.transform(pil_pic)
+
+        if self.target_transform is not None:
+            target = self.target_transform(target,index)
+
+        img = img.repeat(3,1,1)
+        return img, target
+
+
 
 class DisentMNISTv1(MNIST):
     """
@@ -264,3 +327,32 @@ class DenoiseMNIST(MNIST):
                                    th_transforms.ToTensor()
         ])
         return t
+
+
+class SimClTestMNIST(MNIST):
+
+    def __init__(self,root,simcl,train=True):
+        self.simcl = simcl
+        self.__class__.__name__ = "mnist"
+        resize = torchvision.transforms.Resize(size=32)
+        to_tensor = th_transforms.ToTensor()
+        comp = [resize,to_tensor]
+        t = th_transforms.Compose(comp)
+        super(SimClTestMNIST, self).__init__( root, train=train,
+                                              transform=t)
+                                             
+    def __getitem__(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = self.data[index], int(self.targets[index])
+        img = Image.fromarray(img.to('cpu').detach().numpy())
+        img = self.transform(img)
+        img = img.unsqueeze(0).unsqueeze(0).to(self.simcl.device)
+        h,proj = self.simcl(img)
+        proj = proj.detach().cpu().squeeze()
+        return proj, target

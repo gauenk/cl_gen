@@ -8,6 +8,11 @@ import torch
 # project imports
 from settings import ROOT_PATH
 
+
+#
+# Old "get_cfg" function
+# 
+
 def get_cfg():
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cfg = edict()

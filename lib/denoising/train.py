@@ -20,10 +20,8 @@ from layers.denoising import DenoisingLossDDP
 from learning.train import thtrain_denoising as train_loop
 from learning.test import thtest_denoising as test_loop
 from learning.utils import save_model,save_optim
-from torch.optim.lr_scheduler import MultiStepLR
 
 # local proj imports
-from .model_io import load_models
 from .optim_io import load_optimizer
 from .scheduler_io import load_scheduler
 from .config import load_cfg,save_cfg,get_cfg,get_args

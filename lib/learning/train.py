@@ -27,7 +27,8 @@ def thtrain_cls(cfg, train_loader, model, criterion, optimizer, epoch, writer):
         loss.backward()
         optimizer.step()
 
-        writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
+        if writer:
+            writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
         cfg.global_step += 1
         if batch_idx % cfg.log_interval == 0:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
@@ -169,13 +170,8 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         idx += cfg.batch_size
         
         noisy_imgs = noisy_imgs.cuda(non_blocking=True)
-        prev_params = [p.clone() for p in list(model.parameters())]
-        # print(prev_params[0][0][0])
         dec_imgs,proj = model(noisy_imgs)
-        # print_stats(noisy_imgs)
-        # print_stats(dec_imgs)
 
-        # loss = F.mse_loss(noisy_imgs,dec_imgs)
         loss = criterion(noisy_imgs,dec_imgs,proj)
 
         # compute gradients
@@ -188,10 +184,50 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         # update weights
         optimizer.step()
 
+        if scheduler:
+            scheduler.step()
 
-        curr_params = list(model.parameters())
-        # print(curr_params[0][0][0])
-        # print_param_diff(prev_params,curr_params)
+        # print updates
+        if writer:
+            writer.add_scalar("Loss/train_epoch", loss.item(), cfg.global_step)
+        cfg.global_step += 1
+        if batch_idx % cfg.log_interval == 0 and writer:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, cfg.world_size * batch_idx * cfg.batch_size,
+                len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+        
+        loss_epoch += loss.item()
+    return loss_epoch
+
+def thtrain_simcl(cfg, train_loader, model, criterion,
+                  optimizer, epoch, writer, scheduler=None):
+
+    model.train()
+    idx = 0
+    loss_epoch = 0
+    data = train_loader.dataset.data
+    print("N samples:", len(data))
+    for batch_idx, (noisy_imgs, raw_img) in enumerate(train_loader):
+
+        optimizer.zero_grad()
+
+        # setup the forward pass
+        idx += cfg.batch_size
+        
+        noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+        h,proj = model(noisy_imgs)
+        loss = criterion(proj)
+
+        # compute gradients
+        if cfg.use_apex:
+            with amp.scale_loss(loss,optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
+
+        # update weights
+        optimizer.step()
 
         if scheduler:
             scheduler.step()
@@ -202,10 +238,71 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         cfg.global_step += 1
         if batch_idx % cfg.log_interval == 0 and writer:
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
-                epoch, batch_idx * cfg.batch_size, len(train_loader.dataset),
+                epoch, cfg.world_size * batch_idx * cfg.batch_size,
+                len(train_loader.dataset),
                 100. * batch_idx / len(train_loader), loss.item()))
         
         loss_epoch += loss.item()
+    return loss_epoch
+
+def thtrain_simcl_cls(cfg, train_loader, logit, simcl, criterion,
+                      optimizer, epoch):
+    
+    simcl.eval()
+    logit.train()
+
+    idx = 0
+    loss_epoch = 0
+    data = train_loader.dataset.data
+    print("N samples:", len(data))
+    # prev_params = [p.clone() for p in logit.parameters()]
+    for batch_idx, (imgs, targets) in enumerate(train_loader):
+
+        # setup the forward pass
+        optimizer.zero_grad()
+        idx += cfg.batch_size
+
+        # forward pass
+        targets = targets.to(simcl.device)
+        imgs = imgs.to(simcl.device)
+        imgs = imgs.unsqueeze(1)
+
+        h,proj = simcl(imgs)
+        proj = torch.squeeze(proj.detach().float())
+        preds = logit(proj)
+        loss = criterion(preds,targets)
+
+        # -- test for correctness -- 
+        # BS = len(imgs)
+        # preds = logit(imgs.reshape(BS,-1))
+        # loss = criterion(preds,targets)
+
+        # compute gradients
+        if cfg.use_apex:
+            with amp.scale_loss(loss,optimizer) as scaled_loss:
+                scaled_loss.backward()
+        else:
+            loss.backward()
+
+        # update weights
+        optimizer.step()
+
+        
+        # curr_params = [p.clone() for p in logit.parameters()]
+        # print(curr_params[0][0])
+
+        # print_param_diff(prev_params,curr_params)
+        # prev_params = [p.clone() for p in logit.parameters()]
+
+        # print updates
+        if batch_idx % 10 == 0:
+            print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
+                epoch, cfg.world_size * batch_idx * cfg.batch_size,
+                len(train_loader.dataset),
+                100. * batch_idx / len(train_loader), loss.item()))
+        
+        loss_epoch += loss.item()
+    loss_epoch /= len(train_loader)
     return loss_epoch
 
 

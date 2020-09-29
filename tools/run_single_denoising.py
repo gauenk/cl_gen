@@ -73,8 +73,9 @@ if __name__ == "__main__":
         cfg.agg_enc_fxn = args.agg_enc_fxn
     cfg.use_bn = args.no_bn
     cfg.use_apex = True
+    if args.gpuid == 2:
+        cfg.use_apex = False
     cfg.use_ddp = args.use_ddp
-    cfg.epochs = 500
     if cfg.use_ddp:
         cfg.sync_batchnorm = True
         run_ddp(cfg=cfg)
