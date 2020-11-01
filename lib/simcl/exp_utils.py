@@ -89,6 +89,8 @@ def _log_summary_exp_v2(exp,fpath):
 def _build_summary(cfg,version):
     if version == "v1":
         return _build_v1_summary(cfg)
+    if version == "v2":
+        return _build_v2_summary(cfg)
     else:
         raise ValueError(f"Unknown version [{version}]")
 

@@ -7,7 +7,7 @@ def share_encoding_mean(agg_type,h,skip,N,BS):
 
     if agg_type == 'h' or agg_type == 'full':
         h = share_encoding_mean_h(agg_type,h,N,BS)
-    elif agg_type == 'skip' or agg_type == 'full':
+    elif agg_type == 'skip' or agg_type == 'full' and skip is not None:
         skip = share_encoding_mean_skip(agg_type,skip,N,BS)
     else:
         raise ValueError(f"Uknown agg_type [{agg_type}]")
@@ -29,10 +29,10 @@ def share_encoding_mean_skip(agg_type,skip,N,BS):
     for skip_layer in skip:
         a_shape = skip_layer.shape # (N*BS,...)
         m_shape = (N,BS,) + a_shape[1:] # (N,BS,...)
-        skip_layer = normalize_nd(skip_layer)
+        # skip_layer = normalize_nd(skip_layer)
         skip_layer = skip_layer.reshape(m_shape)
         skip_layer = torch.mean(skip_layer,dim=0)
-        skip_layer = normalize_nd(skip_layer)
+        # skip_layer = normalize_nd(skip_layer)
         skip_layer = skip_layer.expand(m_shape)
         skip_layer = skip_layer.reshape(a_shape) # output is (N*BS,...)
         skip_mean.append(skip_layer)

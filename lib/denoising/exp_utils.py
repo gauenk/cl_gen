@@ -9,7 +9,7 @@ from pyutils.misc import write_cfg,read_cfg
 
 def get_exp_cache_fn(v):
     logdir = Path(f"{settings.ROOT_PATH}/cache")
-    subdir = Path("run_denoising")
+    subdir = Path("denoising")
     fn = Path(f"{v}.yml")
     path = logdir / subdir
     if not path.exists():
@@ -31,7 +31,7 @@ def save_exp_cache(exps,v):
 
 def get_record_experiment_path(cfg,v):
     logdir = Path(f"{settings.ROOT_PATH}/logs")
-    subdir = Path(f"run_denoising/{v}/")
+    subdir = Path(f"denoising/{v}/")
     fulldir = logdir / subdir    
     if not fulldir.exists():
         fulldir.mkdir(parents=True)
@@ -71,6 +71,8 @@ def _build_summary(cfg,version):
     if version == "v1":
         return _build_v1_summary(cfg)
     elif version == "v2":
+        return _build_v2_summary(cfg)    
+    elif version == "v3":
         return _build_v2_summary(cfg)    
     else:
         raise ValueError(f"Unknown version [{version}]")

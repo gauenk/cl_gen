@@ -3,16 +3,28 @@ import torchvision
 import torch.nn as nn
 from torchvision.models.resnet import Bottleneck, ResNet
 
-def get_resnet(name, dataset, pretrained=True):
+def get_resnet(name, dataset, activation_hooks = False, pretrained=True):
     resnets = {
         "resnet18": torchvision.models.resnet18(pretrained=pretrained),
         "resnet50": torchvision.models.resnet50(pretrained=pretrained),
     }
     if name not in resnets.keys():
         raise KeyError(f"{name} is not a valid ResNet version")
-    return modify_resnet_model(
-        resnets[name], cifar_stem=dataset.startswith("CIFAR"), v1=True
+    model = modify_resnet_model(
+        resnets[name], cifar_stem=dataset.lower().startswith("cifar"), v1=True
     )
+    # if activation_hooks:
+    #     add_activation_hooks(model)
+    return model
+
+def add_activation_hooks(model):
+    pass
+    # model.skips = []
+    # activation = {}
+    # def get_activation(name):
+    #     def hook(model, input, output):
+    #         activation[name] = output.detach()
+    #     return hook
 
 def modify_resnet_model(model, *, cifar_stem=True, v1=True):
     """Modifies some layers of a given torchvision resnet model to
@@ -40,6 +52,7 @@ def modify_resnet_model(model, *, cifar_stem=True, v1=True):
         nn.init.kaiming_normal_(conv1.weight, mode='fan_out', nonlinearity='relu')
         model.conv1 = conv1
         model.maxpool = nn.Identity()
+        model.fc = nn.Identity()
     if v1:
         for l in range(2, 5):
             layer = getattr(model, "layer{}".format(l))
@@ -53,4 +66,67 @@ def modify_resnet_model(model, *, cifar_stem=True, v1=True):
     return model
 
 
+
+
+class ResNetWithSkip(nn.Module):
+
+    def __init__(self,resnet):
+        super(ResNetWithSkip, self).__init__()
+        self.resnet = resnet
+        self.skips = []
+        self.layer_names = ['layer1','layer2']
+        self.hooks = self._attach_skip_hooks(resnet)
+        
+    def forward(self,x):
+        self.skips.append(x)
+        final = self.resnet(x)
+        skips = [x for x in self.skips]
+        # output.append(final)
+        # print("output")
+        # for a in skips:
+        #     print(a.shape)
+        self.skips = []
+        return final,skips
+
+    def _hook_fn(self, module, inputs, outputs):
+        self.skips.append(outputs)
+        # print(outputs.shape)
+        
+    def _attach_skip_hooks(self,model):
+        hooks = {}
+        for name, module in model.named_modules():
+            if name in self.layer_names:
+                hooks[name] = module.register_forward_hook(self._hook_fn)
+        return hooks
+
+class ResNetWithSkipLarge(nn.Module):
+
+    def __init__(self,resnet):
+        super(ResNetWithSkip, self).__init__()
+        self.resnet = resnet
+        self.skips = []
+        self.layer_names = ['layer1','layer2','layer3','layer4']
+        self.hooks = self._attach_skip_hooks(resnet)
+        
+    def forward(self,x):
+        self.skips.append(x)
+        final = self.resnet(x)
+        skips = [x for x in self.skips]
+        # output.append(final)
+        # print("output")
+        # for a in skips:
+        #     print(a.shape)
+        self.skips = []
+        return final,skips
+
+    def _hook_fn(self, module, inputs, outputs):
+        self.skips.append(outputs)
+        # print(outputs.shape)
+        
+    def _attach_skip_hooks(self,model):
+        hooks = {}
+        for name, module in model.named_modules():
+            if name in self.layer_names:
+                hooks[name] = module.register_forward_hook(self._hook_fn)
+        return hooks
 

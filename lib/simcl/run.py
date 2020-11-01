@@ -62,6 +62,7 @@ def run_experiment(rank, cfg):
     print(f"Running DDP experiment on rank {rank}")
 
     # bandaid for now.
+    cfg.denoising_prep = False
     dsname = "cifar10"
     cfg.summary_log_dir = Path(f"{settings.ROOT_PATH}/runs/simcl/{dsname}/{cfg.exp_name}/")
     cfg.test_interval = 1000
@@ -97,6 +98,8 @@ def run_ddp(cfg=None,args=None):
     elif cfg is None:
         cfg = get_cfg(args)
     cfg.use_ddp = True
+    cfg.activation_hooks = False
+
     mp.spawn(run_experiment, nprocs=cfg.world_size, args=(cfg,))
     
 def run_localized(cfg=None,args=None,gpuid=None):
@@ -108,6 +111,7 @@ def run_localized(cfg=None,args=None,gpuid=None):
         cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.world_size = 1
+    cfg.activation_hooks = False
 
     # update name with "_localized" info
     # cfg.exp_name += "_localized"

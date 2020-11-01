@@ -16,8 +16,9 @@ from apex.parallel import DistributedDataParallel as apex_DDP
 from torch.nn.parallel import DistributedDataParallel as th_DDP
 
 # project imports
-from layers.denoising import DenoisingLoss,Encoder,Decoder,Projector
+from layers.denoising import DenoisingLoss,Encoder,Decoder,Projector,DecoderRes50,DecoderNoSkip,DecoderSimple
 from layers.denoising import DenoisingBlock
+from simcl.model_io import load_model as simcl_load_model
 
 #
 # loading models
@@ -46,15 +47,23 @@ def load_model_field(cfg,rank,model,field):
 def load_encoder(cfg,rank):
     nc = cfg.n_img_channels
     h_size = cfg.enc_size
-    model = Encoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
+    # model = Encoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
+    model = EncoderN(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
     model = load_model_field(cfg,rank,model,"encoder")
     return model
 
 def load_decoder(cfg,rank):
     nc = cfg.n_img_channels
     h_size = cfg.enc_size
-    model = Decoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
-    model = load_model_field(cfg,rank,model,"decoder")
+    if cfg.simcl.load:
+        model = Decoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
+    else:
+        model = DecoderSimple(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn) 
+
+    # model = DecoderNoSkip(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
+    # model = DecoderRes50(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
+    # model = load_model_field(cfg,rank,model,"decoder")
+    model = load_model_field(cfg,rank,model,"./")
     return model
 
 def load_projector(cfg,rank):
@@ -71,15 +80,29 @@ def load_models(cfg,rank,proc_group):
     # saved together in block
     load = cfg.load
     cfg.load = False
-    encoder = load_encoder(cfg,rank)
+    if cfg.simcl.load:
+        cfg.simcl.rank = rank
+        cfg.simcl.device = cfg.device
+        cfg.simcl.denoising_prep = True
+        simcl = simcl_load_model(cfg.simcl,rank,proc_group)
+        encoder = simcl.encoder
+        projector = simcl.projector
+        # encoder.eval()
+        # projector.eval()
+        for param in encoder.parameters():
+            param.requires_grad = False
+        for param in projector.parameters():
+            param.requires_grad = False
+    else:
+        encoder = load_encoder(cfg,rank)
+        projector = load_projector(cfg,rank)
     decoder = load_decoder(cfg,rank)
-    projector = load_projector(cfg,rank)
     cfg.load = load
     model = DenoisingBlock(encoder,decoder,
                            projector,rank,cfg.N,cfg.batch_size,
                            cfg.agg_enc_fxn,cfg.agg_enc_type)
-    if cfg.load:
-        load_model_field(cfg,rank,model,"")
+    # if cfg.load:
+    #     load_model_field(cfg,rank,model,"")
     if cfg.use_ddp:
         if cfg.sync_batchnorm:
             fxn = SyncBatchNorm.convert_sync_batchnorm

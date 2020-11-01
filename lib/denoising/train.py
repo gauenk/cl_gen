@@ -52,6 +52,10 @@ def run_train(cfg,rank,models,data,loader):
     if cfg.use_apex:
         models, optimizer = amp.initialize(models, optimizer, opt_level='O2')
 
+    # for name,param in models.named_parameters():
+    #     wnorm = param.norm()        
+    #     print("{}: {}".format(name,wnorm))
+
     # init writer
     if this_proc_prints:
         writer = SummaryWriter(filename_suffix=cfg.exp_name)
@@ -66,7 +70,8 @@ def run_train(cfg,rank,models,data,loader):
     # training loop
     loop_scheduler = get_loop_scheduler(scheduler)
     test_losses = {}
-
+    
+    
     print(f"cfg.epochs: {cfg.epochs}")
     print(f"cfg.use_apex: {cfg.use_apex}")
     print(f"cfg.use_bn: {cfg.use_bn}")

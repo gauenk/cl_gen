@@ -31,7 +31,7 @@ def get_scaled_lr(cfg):
     print("Scaled initial learning rate set at {:2.3e}".format(lr))
     return lr
 
-def get_optimizer_type(cfg,params,lr):
+def get_optimizer_type(cfg,names,params,lr):
     ot = cfg.optim_type
     p = cfg.optim_params    
     if ot == "sgd":
@@ -42,7 +42,10 @@ def get_optimizer_type(cfg,params,lr):
     elif ot == "lars":
         p = cfg.optim_params
         p['lars']['use_apex'] = cfg.use_apex
-        return LARS(params, cfg.epochs, lr=lr, **p['lars'])
+        del p['lars']['eta']
+        p['lars']['exclude_from_layer_adaptation'] = ['bias','\.bn[0-9]+\.']
+        # p['lars']['use_apex'] = cfg.use_apex
+        return LARS(names, params, lr=lr, **p['lars'])
     elif ot == "sched":
         if cfg.sched_type == "lwca":
             return torch.optim.SGD(params, lr=lr,**p['sgd'])
@@ -53,21 +56,42 @@ def get_optimizer_type(cfg,params,lr):
     
 def load_optimizer(cfg,models):
     lr = get_scaled_lr(cfg)
-    params = get_model_params(cfg,models)
-    optimizer = get_optimizer_type(cfg,params,lr)
+    names,params = get_model_params(cfg,models)
+    optimizer = get_optimizer_type(cfg,names,params,lr)
     return optimizer
 
 
 def get_model_params(cfg,models):
-    params = []
+    names,params = [],[]
+    
+    names,params = zip(*models.named_parameters())
+    return names,params
+        
     if isinstance(models,edict):
+
         for name,model in models.items():
             if cfg.freeze_models[name]: continue
-            params += list(model.parameters())
-    elif isinstance(models,DenoisingBlock):
-        return list(models.parameters())
+            _names,_params = zip(*model.named_parameters())
+            names += _names
+            params += _params
+
     elif isinstance(models,th_DDP) or isinstance(models,apex_DDP):
-        return list(models.parameters())
+
+        for name,freeze_bool in cfg.freeze_models.items():
+            if freeze_bool: continue
+            if name == "encoder":
+                _names,_params = zip(*models.module.encoder.named_parameters())
+            elif name == "decoder":
+                _names,_params = zip(*models.module.decoder.named_parameters())
+            elif name == "projector":
+                _names,_params = zip(*models.module.projector.named_parameters())
+            else:
+                msg = f"Unknown model parameters to freeze [{name}]"
+                raise ValueError(msg)
+            names += _names
+            params += _params
+
+    elif isinstance(models,DenoisingBlock):
         for name,freeze_bool in cfg.freeze_models.items():
             if freeze_bool: continue
             if name == "encoder":
@@ -81,5 +105,5 @@ def get_model_params(cfg,models):
                 raise ValueError(msg)
     else:
         raise TypeError(f"Uknown model type: [{models}]")
-    return params
+    return names,params
 

@@ -7,8 +7,17 @@ from easydict import EasyDict as edict
 # this is the only allowed project import in this file.
 import settings
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def rescale_noisy_image(img):
     img = img + 0.5
+    return img
+
+def normalize_image_to_zero_one(img):
+    img = img.clone()
+    img -= img.min()
+    img /= img.max()
     return img
 
 def add_noise(noise,pic):
@@ -16,7 +25,10 @@ def add_noise(noise,pic):
     return noisy_pic
 
 def mse_to_psnr(mse):
-    psrn = 10 * np_log(1./mse)[0]/np_log(10)[0]
+    if isinstance(mse,float):
+        psrn = 10 * np_log(1./mse)[0]/np_log(10)[0]
+    else:
+        psrn = 10 * np_log(1./mse)/np_log(10)
     return psrn
 
 def np_divide(np_array_a,np_array_b):

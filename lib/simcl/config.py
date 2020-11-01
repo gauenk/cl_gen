@@ -54,7 +54,7 @@ def get_args():
                         help=msg)
     parser.add_argument("--num-workers", type=int, default=4,
                         help="How many workers per dataset?")
-    parser.add_argument("--enc-size", type=int, default=768,
+    parser.add_argument("--enc-size", type=int, default=2048,
                         help="Dimension of encoder output.")
     parser.add_argument("--proj-size", type=int, default=64,
                         help="Dimension of projection output.")
@@ -289,6 +289,8 @@ def set_cfg(args):
     cfg.rank = -1 # only used in datasets!
 
     cfg.resnet = 'resnet18'
+    cfg.activation_hooks = False
+    cfg.denoising_prep = False
 
     return cfg
 

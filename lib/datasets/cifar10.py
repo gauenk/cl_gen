@@ -26,7 +26,7 @@ from torch.utils.data.distributed import DistributedSampler
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur
+from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoiseRandStd
 
 class ClCIFAR10(CIFAR10):
     """
@@ -158,7 +158,7 @@ class DenoiseCIFAR10(CIFAR10):
         self.N = N
         self.noise_type = noise_type
         self.noise_params = noise_params
-        trans = self._get_noise_transform(noise_type,noise_params,N)
+        trans,self.repN = self._get_noise_transform(noise_type,noise_params,N)
         th_trans = self._get_th_img_trans()
         self.__class__.__name__ = "cifar10"
         super(DenoiseCIFAR10, self).__init__( root, train=train,
@@ -174,7 +174,10 @@ class DenoiseCIFAR10(CIFAR10):
             tuple: (image, target) where target is index of the target class.
         """
         img, target = Image.fromarray(self.data[index]), int(self.targets[index])
-        img_set = self.transform(img)
+        if self.repN:
+            img_set = self._apply_transform_N(img)
+        else:
+            img_set = self.transform(img)
         th_img = self.th_trans(img)
 
         if self.target_transform is not None:
@@ -182,17 +185,26 @@ class DenoiseCIFAR10(CIFAR10):
 
         return img_set, th_img
 
+    def _apply_transform_N(self,img):
+        t = self.transform
+        imgs = []
+        for _ in range(self.N):
+            # imgs.append(t_img)
+            imgs.append(t(img))
+        imgs = torch.stack(imgs)
+        return imgs
+        
     def _get_noise_transform(self,noise_type,params,N):
         if noise_type == "g":
-            return self._get_g_noise(params,N)
+            return self._get_g_noise(params,N),False
         elif noise_type == "ll":
-            return self._get_ll_noise(params,N)
+            return self._get_ll_noise(params,N),False
         elif noise_type == "msg":
             print("Loading msg transforms")
-            return self._get_msg_noise(params,N)
+            return self._get_msg_noise(params,N),False
         elif noise_type == "msg_simcl":
             print("Loading msg_simcl transforms")
-            return self._get_msg_simcl_noise(params,N)
+            return self._get_msg_simcl_noise(params,N),True
         else:
             raise ValueError(f"Unknown noise_type [{noise_type}]")
 
@@ -240,14 +252,13 @@ class DenoiseCIFAR10(CIFAR10):
         - gaussian blur
         """
         comp = []
-
         # -- random resize, crop, and flip --
         crop = torchvision.transforms.RandomResizedCrop(size=32)
         comp += [crop]
 
         # -- flipping --
-        vflip = torchvision.transforms.RandomVerticalFlip(p=0.5)
-        comp += [vflip]
+        # vflip = torchvision.transforms.RandomVerticalFlip(p=0.5)
+        # comp += [vflip]
         hflip = torchvision.transforms.RandomHorizontalFlip(p=0.5)
         comp += [hflip]
 
@@ -262,25 +273,34 @@ class DenoiseCIFAR10(CIFAR10):
         comp += [cjitter]
 
         # -- convert to gray --
-        gray = torchvision.transforms.RandomGrayscale(p=0.8)
-        comp += [gray]
+        # gray = torchvision.transforms.RandomGrayscale(p=0.8)
+        # comp += [gray]
         
         # -- gaussian blur --
-        gblur = GaussianBlur(size=3)
+        # gblur = GaussianBlur(size=3)
+        # comp += [gblur]
 
         # -- convert to tensor --
         to_tensor = th_transforms.ToTensor()
         comp += [to_tensor]
 
         # -- center to zero mean, all within [-1,1] --
-        szm = ScaleZeroMean()
-        comp += [szm]
+        # szm = ScaleZeroMean()
+        # comp += [szm]
 
         # -- additive gaussian noise --
-        gaussian_n2n = AddGaussianNoiseSetN2N(N,(0,50.))
-        comp += [gaussian_n2n]
+        # gaussian_n2n = AddGaussianNoiseRandStd(0,0,50)
+        # comp += [gaussian_n2n]
 
         t = th_transforms.Compose(comp)
+
+        # def t_n_raw(t,N,img):
+        #     imgs = []
+        #     for _ in range(N):
+        #         imgs.append(t(img))
+        #     imgs = torch.stack(imgs)
+        #     return imgs
+        # t_n = partial(t_n_raw,t,N)
         return t
         
     def _get_th_img_trans(self):
@@ -312,7 +332,13 @@ def get_cifar10_dataset(cfg,mode):
     elif mode == 'cls':
         download = cfg.cls.dataset.download
         batch_size = cfg.cls.batch_size
-        transform = th_transforms.Compose([th_transforms.ToTensor()])
+        comp = []
+        tt = th_transforms.ToTensor()
+        nmlz =  th_transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        comp += [tt,nmlz]
+        # # szm = ScaleZeroMean()
+        # comp += [szm]
+        transform = th_transforms.Compose(comp)
         data.tr = CIFAR10(root,train=True,transform=transform,download=download)
         data.val = CIFAR10(root,train=True,transform=transform,download=download)
         data.te = CIFAR10(root,train=False,transform=transform,download=download)
@@ -331,15 +357,15 @@ def get_cifar10_dataset(cfg,mode):
         data.tr = DisentCIFAR10v1(root,N,noise_level,train=True)
         data.val = DisentCIFAR10v1(root,N,noise_level,train=True)
         data.te = DisentCIFAR10v1(root,N,noise_level,train=False)
-    elif mode == "simcl":
+    elif mode == "simcl" or mode == "denoising":
         batch_size = cfg.batch_size
         N = cfg.N
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         data.tr = DenoiseCIFAR10(root,N,noise_type,noise_params,train=True)
-        data.val = DenoiseCIFAR10(root,N,noise_type,noise_params,train=True)
-        data.val.data = data.val.data[0:2000]
-        data.val.targets = data.val.targets[0:2000]
+        data.val = DenoiseCIFAR10(root,N,noise_type,noise_params,train=False)
+        data.val.data = data.val.data[0:2*2048]
+        data.val.targets = data.val.targets[0:2*2048]
         data.te = DenoiseCIFAR10(root,N,noise_type,noise_params,train=False)
     else: raise ValueError(f"Unknown CIFAR10 mode {mode}")
 
@@ -429,13 +455,16 @@ def get_loader_ddp(cfg,data):
     loader_kwargs['sampler'] = sampler
     loader.tr = DataLoader(data.tr,**loader_kwargs)
 
-    sampler = DistributedSampler(data.val,num_replicas=ws,rank=r)
-    loader_kwargs['sampler'] = sampler
+    del loader_kwargs['sampler']
+    loader_kwargs['drop_last'] = False
+
+    # sampler = DistributedSampler(data.val,num_replicas=ws,rank=r)
+    # loader_kwargs['sampler'] = sampler
     loader.val = DataLoader(data.val,**loader_kwargs)
 
-    sampler = DistributedSampler(data.te,num_replicas=ws,rank=r)
-    loader_kwargs['drop_last'] = False
-    loader_kwargs['sampler'] = sampler
+    # sampler = DistributedSampler(data.te,num_replicas=ws,rank=r)
+    # loader_kwargs['drop_last'] = False
+    # loader_kwargs['sampler'] = sampler
     loader.te = DataLoader(data.te,**loader_kwargs)
 
     return loader

@@ -7,8 +7,12 @@ import torch,torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
+from torchvision.models.resnet import ResNet
+
 # local imports
 from .utils import share_encoding_mean
+from layers.resnet import ResNetWithSkip
+
 
 
 class DenoisingBlock(nn.Module):
@@ -27,6 +31,16 @@ class DenoisingBlock(nn.Module):
         self._agg_fxn = agg_fxn
         self._agg_type = agg_type
 
+        if isinstance(self.encoder,ResNetWithSkip):
+            self.two_outputs = True
+            self.offset_pic_set = True
+        elif isinstance(self.encoder,ResNet):
+            self.two_outputs = False
+            self.offset_pic_set = True
+        else:
+            self.two_outputs = True
+            self.offset_pic_set = False
+
     def forward(self,pic_set):
         simh = []
         simpics = []
@@ -36,20 +50,58 @@ class DenoisingBlock(nn.Module):
         pshape = pic_set[0][0].shape
         shape = (N,BS,) + pshape
 
-        # encode
-        pic_set = pic_set.reshape((N*BS,)+pshape)
-        h,skip = self.encoder(pic_set)
-        proj = self.projector(h).reshape(N,BS,-1)
+
+        if self.offset_pic_set:
+            enc_inputs = pic_set
+            # pic_set = pic_set.view((N*BS,-1))
+            # enc_inputs = pic_set - torch.min(pic_set,1)[0][:,None]
+            # enc_inputs = enc_inputs / torch.max(enc_inputs,1)[0][:,None]
+        else:
+            enc_inputs = pic_set
+        enc_inputs = enc_inputs.reshape((N*BS,)+pshape)
+
+        if self.two_outputs:
+
+            # encode
+            h,skip = self.encoder(enc_inputs)
+            # print("h")
+            # print(h.min(),h.max(),h.mean())
+            # print("skip")
+            # for i in range(len(skip)):
+            #     print("i = {}".format(i))
+            #     print(skip[i].min(),skip[i].max(),skip[i].mean())
+
+            # aggregate
+            if not self.encoder.training:
+                h = h.detach()
+                skip = [x.detach() for x in skip]
+            agg_h,agg_skip = self.aggregate(h,skip,N,BS)
+
+            # decode
+            input_i = [agg_h,agg_skip]
+            dec_pics = self.decoder(input_i)
+            dec_pics = dec_pics.reshape((N,BS,) + pshape)
+
+        else:
+
+            # encode
+            h = self.encoder(enc_inputs)
+
+            # aggregate
+            if not self.encoder.training:
+                h = h.detach()
+            agg_h = self.aggregate(h,None,N,BS)
         
-        # aggregate
-        agg_h,agg_skip = self.aggregate(h,skip,N,BS)
+            # decode
+            input_i = agg_h
+            dec_pics = self.decoder(input_i)
+            dec_pics = dec_pics.reshape((N,BS,) + pshape)
 
-        # decode
-        input_i = [agg_h,agg_skip]
-        dec_pics = self.decoder(input_i)
-        dec_pics = dec_pics.reshape((N,BS,) + pshape)
 
-        return dec_pics,proj
+        # projector
+        # proj = self.projector(h).reshape(N,BS,-1)
+
+        return dec_pics,h
 
     def aggregate(self,h,skip,N,BS):
         agg_fxn = self._agg_fxn

@@ -9,13 +9,17 @@ from pathlib import Path
 # pytorch imports
 import torch
 from torch import nn
-from torch.nn import SyncBatchNorm
+
 
 from apex.parallel import DistributedDataParallel as apex_DDP
+from apex.parallel import SyncBatchNorm as apex_SyncBatchNorm
+from apex.parallel import convert_syncbn_model as apex_convert_syncbbn
+
+from torch.nn import SyncBatchNorm as th_SyncBatchNorm
 from torch.nn.parallel import DistributedDataParallel as th_DDP
 
 # project imports
-from layers import get_resnet
+from layers.resnet import get_resnet,ResNetWithSkip
 from layers.simcl import ClBlock,Projector,Encoder
 
 def load_model(cfg,rank,proc_group):
@@ -30,6 +34,7 @@ def load_model(cfg,rank,proc_group):
     if cfg.load:
         fn = Path("checkpoint_{}.tar".format(cfg.epoch_num))
         model_fp = cfg.model_path / fn
+        print(f"Loading model from {model_fp}")
         if cfg.use_ddp:
             map_location = lambda storage, loc: {'cuda:%d' % 0, 'cuda:%d' % rank}
         else:
@@ -38,16 +43,21 @@ def load_model(cfg,rank,proc_group):
         model.load_state_dict(torch.load(model_fp, map_location=map_location))
     model = model.to(cfg.device)
     print("loading model: ",model.device)
+    if cfg.denoising_prep:
+        model.encoder = ResNetWithSkip(model.encoder)
 
     if cfg.use_ddp:
-        if cfg.sync_batchnorm:
-            fxn = SyncBatchNorm.convert_sync_batchnorm
-            model = fxn(model,proc_group)
         if cfg.use_apex:
             model = apex_DDP(model)
+            if cfg.sync_batchnorm:
+                fxn = apex_convert_syncbbn
+                model = fxn(model,proc_group)
         else:
             model = th_DDP(model,device_ids=[cfg.rank],
                            find_unused_parameters=True)
+            if cfg.sync_batchnorm:
+                fxn = th_SyncBatchNorm.convert_sync_batchnorm
+                model = fxn(model,proc_group)
 
     return model
 
@@ -63,7 +73,8 @@ def load_encoder(cfg,rank):
     if cfg.encoder_type == "simple":
         model = Encoder(n_channels = nc, embedding_size = h_size, use_bn=cfg.use_bn)
     elif cfg.encoder_type == "resnet18" or cfg.encoder_type == "resnet50":
-        model = get_resnet(cfg.encoder_type, cfg.dataset.name, pretrained=False)
+        model = get_resnet(cfg.encoder_type, cfg.dataset.name, cfg.activation_hooks,
+                           pretrained=False)
     else:
         raise ValueError(f"Uknown encoder type [{cfg.encoder_type}]")
     # model = load_model_field(cfg,rank,model,"encoder")

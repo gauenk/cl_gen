@@ -20,6 +20,10 @@ def run_test(cfg,rank,model,data,loader,n_runs=1):
     te_losses = []
     for n in range(n_runs):
         te_loss = test_loop(cfg,  model, "test")
+        if isinstance(te_loss,tuple):
+            n_correct = te_loss[1]
+            n_samples = te_loss[2]
+            te_loss = n_correct / n_samples
         te_losses.append(te_loss)
     if n_runs > 1:
         mean = np.mean(te_losses)

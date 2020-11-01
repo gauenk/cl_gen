@@ -7,6 +7,9 @@ import torch
 from apex import amp
 import torch.nn.functional as F
 
+# project
+from pyutils.timer import Timer
+
 
 def thtrain_cls(cfg, train_loader, model, criterion, optimizer, epoch, writer):
     # train a classifier
@@ -22,8 +25,8 @@ def thtrain_cls(cfg, train_loader, model, criterion, optimizer, epoch, writer):
         target = target.long()
 
         output = model(data)
-        loss = F.nll_loss(output, target)
-        #loss = criterion(output, target)
+        # loss = F.nll_loss(output, target)
+        loss = criterion(output, target)
         loss.backward()
         optimizer.step()
 
@@ -158,10 +161,12 @@ def thtrain_disent(cfg, train_loader, models, criterion, optimizer, epoch, write
 def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, writer, scheduler=None):
 
     model.train()
+    # model.encoder.eval()
     idx = 0
     loss_epoch = 0
     data = train_loader.dataset.data
     print("N samples:", len(data))
+    simcl_t,loss_t,optim_t = Timer(),Timer(),Timer()
     for batch_idx, (noisy_imgs, raw_img) in enumerate(train_loader):
 
         optimizer.zero_grad()
@@ -169,11 +174,21 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         # setup the forward pass
         idx += cfg.batch_size
         
+
         noisy_imgs = noisy_imgs.cuda(non_blocking=True)
+
+        simcl_t.tic()
         dec_imgs,proj = model(noisy_imgs)
+        simcl_t.toc()
 
+        loss_t.tic()
+        # print(noisy_imgs.mean().item(),noisy_imgs.max().item(),noisy_imgs.min().item())
+        # print(dec_imgs.mean().item(),dec_imgs.max().item(),dec_imgs.min().item())
         loss = criterion(noisy_imgs,dec_imgs,proj)
+        loss_t.toc()
 
+
+        # print(dec_imgs.mean(),dec_imgs.min(),dec_imgs.max())
         # compute gradients
         if cfg.use_apex:
             with amp.scale_loss(loss,optimizer) as scaled_loss:
@@ -181,11 +196,24 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
         else:
             loss.backward()
 
+        # print(loss.item())
+        # print(loss.grad)
+        # psum = 0
+        # for param in model.decoder.parameters():
+        #     pnorm = param.grad.norm()
+        #     print(pnorm)
+        #     psum += pnorm
+        # print("Overall: {:2.3e}".format(psum))
+        # exit()
+
         # update weights
+        optim_t.tic()
         optimizer.step()
+        optim_t.toc()
 
         if scheduler:
             scheduler.step()
+
 
         # print updates
         if writer:
@@ -198,6 +226,9 @@ def thtrain_denoising(cfg, train_loader, model, criterion, optimizer, epoch, wri
                 100. * batch_idx / len(train_loader), loss.item()))
         
         loss_epoch += loss.item()
+    print(simcl_t)
+    print(loss_t)
+    print(optim_t)
     return loss_epoch
 
 def thtrain_simcl(cfg, train_loader, model, criterion,
@@ -268,8 +299,8 @@ def thtrain_simcl_cls(cfg, train_loader, logit, simcl, criterion,
         imgs = imgs.unsqueeze(1)
 
         h,proj = simcl(imgs)
-        proj = torch.squeeze(proj.detach().float())
-        preds = logit(proj)
+        h = torch.squeeze(h.detach().float())
+        preds = logit(h)
         loss = criterion(preds,targets)
 
         # -- test for correctness -- 

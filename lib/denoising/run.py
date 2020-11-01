@@ -101,6 +101,7 @@ def run_localized(cfg=None,args=None,gpuid=None):
     cfg.use_ddp = False
     cfg.world_size = 1
     if gpuid is None: gpuid = 0
+
     run_experiment(gpuid,cfg)
 
 if __name__ == "__main__":

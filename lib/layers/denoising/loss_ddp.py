@@ -40,24 +40,37 @@ class DenoisingLossDDP(nn.Module):
         pshape = pic_set[0][0].shape
         shape = (N,BS,) + pshape
 
-        h = h.reshape(N,BS,-1)
-        loss_h = self.compute_enc_loss(h)
+        # h = h.reshape(N,BS,-1)
+        # loss_h = self.compute_enc_loss(h)
 
-        # pair-wise losses
+        # ----------------------
+        # -- pair-wise losses --
+        # ----------------------
         pic_set = pic_set.reshape(N,BS,-1)
         dec_pics = dec_pics.reshape(N,BS,-1)
+
+        # # -- roll the decoded pics --
+
+        # # r = torch.cat([dec_pics[-1:],dec_pics[:-1]])
+        # # pic_pair = [pic_set,r]
+
         offset_idx = [(i+1)%N for i in range(N)]
-        # print('p',pic_set.min(),pic_set.max())
-        # print('d',dec_pics.min(),dec_pics.max())
         pic_pair = [pic_set,dec_pics[offset_idx]]
         loss_pairs = self.compute_img_loss(pic_pair)
 
-        # across decoded pics
+        # pic_set = pic_set.reshape(N*BS,-1)
+        # dec_pics = dec_pics.reshape(N*BS,-1)
+        # pic_pair = [pic_set,dec_pics]
+
+        loss_pairs = self.compute_img_loss(pic_pair)
+
+
+        # -- across decoded pics --
         # dec_pics = [dec_pic for dec_pic in dec_pics]
         # loss_x = self.compute_img_loss(dec_pics)
         # + hyperparams.x * loss_x
 
-        loss = loss_pairs + hyperparams.h * loss_h
+        loss = loss_pairs #+ hyperparams.h * loss_h
         return loss
     
     def aggregate(self,h,aux,N,BS):

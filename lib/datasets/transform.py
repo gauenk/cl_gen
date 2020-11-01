@@ -2,9 +2,17 @@
 Thanks to Spijkervet for this code
 """
 
+import numpy as np
+
 import torch
 import torchvision
 import torch.nn.functional as F
+from torchvision import transforms as thT
+import torchvision.transforms.functional as tvF
+
+from joblib import Parallel, delayed
+
+
 
 def th_uniform(l,u,size):
     return (l - u) * torch.rand(size) + u
@@ -73,10 +81,24 @@ class TransformsSimCLR:
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1e-2):
         self.mean = mean
-        self.std = std
+        self.std = std / 255.
         
     def __call__(self, tensor):
         pic = torch.normal(tensor.add(self.mean),self.std)
+        return pic
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+
+class AddGaussianNoiseRandStd(object):
+    def __init__(self, mean=0., min_std=0,max_std=50):
+        self.mean = mean
+        self.min_std = min_std
+        self.max_std = max_std
+        
+    def __call__(self, tensor):
+        std = th_uniform(self.min_std,self.max_std,1)
+        pic = torch.normal(tensor.add(self.mean),std)
         return pic
     
     def __repr__(self):
@@ -207,3 +229,270 @@ class BlockGaussian:
             pic_n[y1:y2, x1:x2] = mask
             pics.append(pic_n)
         return pics
+
+
+class GlobalCameraMotionTransform():
+    """
+    Global camera motion.
+
+    direction: the vector of where we currently go
+    delta: the amount of time spent in a current direction
+
+    -- MISC thinking --
+
+    types of global camera motion
+    "wiggle": random jittering around the central location
+    - high number of direction changes
+    "shift": moving in a fixed direction
+    - low number of direction changes
+    """
+
+    def __init__(self,dynamic,noise_trans=None):
+        self.dynamic = dynamic
+        self.nframes = dynamic['frames']
+        self.ppf = dynamic['ppf']
+        self.total_pixels = dynamic['total_pixels']
+        self.PI = 2*torch.acos(torch.zeros(1)).item() 
+        self.frame_size = self.dynamic.frame_size
+        self.img_size = 256
+        self.to_tensor = thT.Compose([thT.ToTensor()])
+        self.szm = thT.Compose([ScaleZeroMean()])
+        self.noise_trans = noise_trans
+
+    def __call__(self, pic):
+        
+        # pics = pic.unsqueeze(0).repeat(cfg.nframes,1,1,1) 
+        clean_target = None
+        middle_index = self.nframes // 2
+        w,h = pic.size
+        d = self.sample_direction()
+        tl = self.init_coordinate(d,h,w)
+
+        out_frame_size = (self.frame_size,self.frame_size)
+        # tl_init = tl.clone()
+
+        # -- compute ppf rate given fixed frames --
+        if self.total_pixels > 0:
+            raw_ppf = float(self.total_pixels) / (self.nframes-1)
+        else:
+            raw_ppf = self.ppf
+
+        # -- compute pixels per frame and resize image for fractions -- 
+        if raw_ppf < 1:
+            h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
+            tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
+            # print(h_new,w_new,h,w)
+            pic = tvF.resize(pic,(h_new,w_new))
+            crop_frame_size = int(self.frame_size/raw_ppf)+1
+            ppf = 1
+        else:
+            ppf = raw_ppf
+            crop_frame_size = self.frame_size
+        # print(f"ppf: {ppf}")
+
+        # -- create list of indices -- 
+        tl_list = [tl.clone()]
+        for i in range(self.nframes-1):
+            step = (torch.round((i+1) * d * ppf)).type(torch.int)
+            tl_i = tl + step
+            tl_list.append(tl_i)
+        a = tl_list[0].type(torch.float)
+        b = tl_list[-1].type(torch.float)
+        # print("pix diff",torch.sqrt(torch.sum(( a - b)**2)).item())
+        # print(tl_list[0],tl_list[-1],d,w,h,pic.size)
+
+        # -- get clean image --
+        w_new,h_new = pic.size
+        tl_mid = tl_list[middle_index]
+        t,l = tl_mid[0].item(),tl_mid[1].item()
+        target = tvF.resized_crop(pic,0,0,h_new,w_new,out_frame_size)
+        clean_target = self.to_tensor(target)
+        
+        # -- create noisy frames -- 
+        create_frames = partial(self._crop_image,pic,tl_list,crop_frame_size,out_frame_size)
+        if self.nframes <= 30:
+            pics = []
+            for i in range(self.nframes):
+                pic_i = create_frames(i)
+                pics.append(pic_i)
+        # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
+        else:
+            nj = np.min([self.nframes // 5,8])
+            pics = Parallel(n_jobs=nj)(delayed(create_frames)(i) for i in range(self.nframes))
+        pics = torch.stack(pics)
+        # print(clean_target.min(),clean_target.max(),clean_target.mean())
+        return pics,clean_target
+
+    def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
+        tl = tl_list[i]
+        # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
+        t,l = tl[0].item(),tl[1].item()
+        # print(t,l,t+self.frame_size,l+self.frame_size,h,w)            
+        pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
+        if (not self.noise_trans is None):
+            pic_i = self.noise_trans(pic_i)
+        else:
+            pic_i = self.szm(self.to_tensor(pic_i))
+        return pic_i
+
+    def sample_direction(self):
+        # torch.manual_seed(0)
+        # r = torch.sqrt(torch.rand(1))
+        r = 1
+        rand_int = torch.rand(1)
+        # print("rand_int",rand_int)
+        theta = rand_int * 2 * self.PI
+        direction = torch.FloatTensor([r * torch.cos(theta),r * torch.sin(theta)])
+        # direction = torch.FloatTensor([1.,0.])
+        return direction
+
+    def init_coordinate(self,direction,h,w):
+        
+        odd = torch.prod(direction).item() > 0
+        quandrant = 0
+        if odd:
+            if torch.all(direction > 0):
+                quandrant = 1
+            else:
+                quandrant = 3
+        elif not odd:
+            if direction[1] > 0:
+                quandrant = 2
+            else:
+                quandrant = 4
+
+        init = [-1,-1] # top-left corner
+        if quandrant == 1:
+            init = [0,0]
+        elif quandrant == 2:
+            init = [h - self.frame_size, 0]# bottom-left to top-left
+        elif quandrant == 3:
+            init = [h - self.frame_size, w - self.frame_size] # bottom-right to top-left
+        elif quandrant == 4:
+            init = [0,w - self.frame_size] # top-right to top-left
+        else:
+            raise ValueError("What happened here?")
+        # print(direction,odd,quandrant)
+
+        return torch.IntTensor(init)
+
+
+# class GlobalCameraMotionTransform():
+#     """
+#     Global camera motion.
+
+#     direction: the vector of where we currently go
+#     delta: the amount of time spent in a current direction
+
+#     -- MISC thinking --
+
+#     types of global camera motion
+#     "wiggle": random jittering around the central location
+#     - high number of direction changes
+#     "shift": moving in a fixed direction
+#     - low number of direction changes
+#     """
+
+#     def __init__(self,dynamic,noise_trans=None):
+#         self.dynamic = dynamic
+#         self.nframes = dynamic['frames']
+#         self.ppf = dynamic['ppf']
+#         self.total_pixels = dynamic['total_pixels']
+#         self.PI = 2*torch.acos(torch.zeros(1)).item() 
+#         self.frame_size = self.dynamic.frame_size
+#         self.img_size = 256
+#         self.to_tensor = thT.Compose([thT.ToTensor()])
+#         self.szm = thT.Compose([ScaleZeroMean()])
+#         self.noise_trans = noise_trans
+
+#     def __call__(self, pic):
+        
+#         # pics = pic.unsqueeze(0).repeat(cfg.nframes,1,1,1) 
+#         clean_target = None
+#         middle_index = self.nframes // 2
+#         h,w = pic.size
+#         d = self.sample_direction()
+#         tl = self.init_coordinate(d,h,w)
+#         out_frame_size = (self.frame_size,self.frame_size)
+#         pics = []
+#         # tl_init = tl.clone()
+
+#         if self.total_pixels > 0:
+#             raw_ppf = float(self.total_pixels) / self.nframes
+#         else:
+#             raw_ppf = self.ppf
+
+#         if raw_ppf < 1:
+#             h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
+#             tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
+#             # print(h_new,w_new,h,w)
+#             pic = tvF.resize(pic,(h_new,w_new))
+#             crop_frame_size = int(self.frame_size/raw_ppf)+1
+#             ppf = 1
+#         else:
+#             ppf = raw_ppf
+#             crop_frame_size = self.frame_size
+
+#         # print(f"ppf: {ppf}")
+#         for i in range(self.nframes):
+#             step = (torch.round(d * ppf)).type(torch.int)
+#             tl += step
+#             # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
+#             t,l = tl[0].item(),tl[1].item()
+#             # print(t,l,t+self.frame_size,l+self.frame_size,h,w)            
+#             pic_i = tvF.resized_crop(pic,l,t,crop_frame_size,crop_frame_size,out_frame_size)
+#             if (middle_index == i):
+#                 clean_target = self.to_tensor(pic_i)
+#             if (not self.noise_trans is None):
+#                 pic_i = self.noise_trans(pic_i)
+#             else:
+#                 pic_i = self.szm(self.to_tensor(pic_i))
+                
+#             pics.append(pic_i)
+#         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
+
+#         pics = torch.stack(pics)
+#         # print(clean_target.min(),clean_target.max(),clean_target.mean())
+#         return pics,clean_target
+
+#     def sample_direction(self):
+#         # torch.manual_seed(0)
+#         # r = torch.sqrt(torch.rand(1))
+#         r = 1
+#         rand_int = torch.rand(1)
+#         # print("rand_int",rand_int)
+#         theta = rand_int * 2 * self.PI
+#         direction = torch.FloatTensor([r * torch.cos(theta),r * torch.sin(theta)])
+#         # direction = torch.FloatTensor([1.,0.])
+#         return direction
+
+#     def init_coordinate(self,direction,h,w):
+        
+#         odd = torch.prod(direction).item() > 0
+#         quandrant = 0
+#         if odd:
+#             if torch.all(direction > 0):
+#                 quandrant = 1
+#             else:
+#                 quandrant = 3
+#         elif not odd:
+#             if direction[1] > 0:
+#                 quandrant = 2
+#             else:
+#                 quandrant = 4
+
+#         init = [-1,-1] # top-left corner
+#         if quandrant == 1:
+#             init = [0,0]
+#         elif quandrant == 2:
+#             init = [h - self.frame_size, 0]# bottom-left to top-left
+#         elif quandrant == 3:
+#             init = [h - self.frame_size, w - self.frame_size] # bottom-right to top-left
+#         elif quandrant == 4:
+#             init = [0,w - self.frame_size] # top-right to top-left
+#         else:
+#             raise ValueError("What happened here?")
+#         # print(direction,odd,quandrant)
+
+#         return torch.IntTensor(init)
+

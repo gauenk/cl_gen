@@ -112,7 +112,8 @@ def thtest_simcl_cls(args, simcl, logit, test_loader):
 
             data = data.unsqueeze(0)
             h,proj = simcl(data)
-            output = logit(proj)[0]
+            h = torch.squeeze(h)
+            output = logit(h)
 
             # -- test for correctness -- 
             # BS = len(data)

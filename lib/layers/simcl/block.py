@@ -7,6 +7,7 @@ import torch,torchvision
 import torch.nn as nn
 import torch.nn.functional as F
 
+from ..identity import Identity
 from torchvision.models.resnet import ResNet
 
 class ClBlock(nn.Module):
@@ -17,13 +18,23 @@ class ClBlock(nn.Module):
         self.encoder = encoder
         self.projector = projector
         
+        # n_features = 2048
+        # projection_dim = 64
+        # self.projector = nn.Sequential(
+        #     nn.Linear(n_features, n_features, bias=False),
+        #     nn.ReLU(),
+        #     nn.Linear(n_features, projection_dim, bias=False),
+        # )
+
         self.device = device
         self.num_transforms = num_transforms
         self.batch_size = batch_size
         
 
+        self.two_outputs = True
         if isinstance(self.encoder,ResNet):
-            self.two_outputs = False
+            # self.two_outputs = False
+            self.encoder.fc = Identity()
         else:
             self.two_outputs = True
 
@@ -45,5 +56,6 @@ class ClBlock(nn.Module):
         # project
         proj = self.projector(h).reshape(N,BS,-1)
         
+        h = h.reshape(N,BS,-1)
         return h,proj
 

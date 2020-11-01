@@ -19,8 +19,8 @@ from optimizers import LARS
 
 def load_optimizer(cfg,model):
     lr = get_scaled_lr(cfg)
-    params = get_model_params(cfg,model)
-    optimizer = get_optimizer_type(cfg,params,lr)
+    names,params = get_model_params(cfg,model)
+    optimizer = get_optimizer_type(cfg,names,params,lr)
     return optimizer
 
 def get_scaled_lr(cfg):
@@ -43,15 +43,20 @@ def get_scaled_lr(cfg):
     return lr
 
 def get_model_params(cfg,model):
+    names = []
     params = []
     if isinstance(model,edict):
         for name,model in model.items():
             if cfg.freeze_model[name]: continue
-            params += list(model.parameters())
+            _names,_params = zip(*model.named_parameters())
+            names += list(_names)
+            params += list(_params)
     elif isinstance(model,ClBlock):
-        return list(model.parameters())
+        names,params = zip(*model.named_parameters())
+        return list(names),list(params)
     elif isinstance(model,th_DDP) or isinstance(model,apex_DDP):
-        return list(model.parameters())
+        names,params = zip(*model.named_parameters())
+        return list(names),list(params)
         for name,freeze_bool in cfg.freeze_model.items():
             if freeze_bool: continue
             if name == "encoder":
@@ -63,9 +68,9 @@ def get_model_params(cfg,model):
                 raise ValueError(msg)
     else:
         raise TypeError(f"Uknown model type: [{model}]")
-    return params
+    return names,params
 
-def get_optimizer_type(cfg,params,lr):
+def get_optimizer_type(cfg,names,params,lr):
     ot = cfg.optim_type
     p = cfg.optim_params    
     optimizer = None
@@ -77,7 +82,10 @@ def get_optimizer_type(cfg,params,lr):
     elif ot == "lars":
         p = cfg.optim_params
         p['lars']['use_apex'] = cfg.use_apex
-        optimizer = LARS(params, cfg.epochs, lr=lr, **p['lars'])
+        del p['lars']['eta']
+        p['lars']['exclude_from_layer_adaptation'] = ['bias','\.bn[0-9]+\.']
+        # optimizer = LARS(params, cfg.epochs, lr=lr, **p['lars'])
+        optimizer = LARS(names, params, lr=lr, **p['lars'])
     elif ot == "sched":
         if cfg.sched_type == "lwca":
             optimizer = torch.optim.SGD(params, lr=lr,**p['sgd'])

@@ -1,98 +1,91 @@
-""" Layer-wise adaptive rate scaling for SGD in PyTorch! """
+"""
+LARS: Layer-wise Adaptive Rate Scaling
+
+Converted from TensorFlow to PyTorch
+https://github.com/google-research/simclr/blob/master/lars_optimizer.py
+"""
+
 import torch
 from torch.optim.optimizer import Optimizer, required
+import re
+
+EETA_DEFAULT = 0.001
+
 
 class LARS(Optimizer):
-    r"""Implements layer-wise adaptive rate scaling for SGD.
-
-    Args:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float): base learning rate (\gamma_0)
-        momentum (float, optional): momentum factor (default: 0) ("m")
-        weight_decay (float, optional): weight decay (L2 penalty) (default: 0)
-            ("\beta")
-        eta (float, optional): LARS coefficient
-        max_epoch: maximum training epoch to determine polynomial LR decay.
-
-    Based on Algorithm 1 of the following paper by You, Gitman, and Ginsburg.
-    Large Batch Training of Convolutional Networks:
-        https://arxiv.org/abs/1708.03888
-
-    Example:
-        >>> optimizer = LARS(model.parameters(), lr=0.1, eta=1e-3)
-        >>> optimizer.zero_grad()
-        >>> loss_fn(model(input), target).backward()
-        >>> optimizer.step()
     """
-    def __init__(self, params, max_epoch, lr=required,
-                 use_apex = False, momentum=.9,
-                 weight_decay=.0005, eta=0.001):
-        if lr is not required and lr < 0.0:
-            raise ValueError("Invalid learning rate: {}".format(lr))
-        if momentum < 0.0:
-            raise ValueError("Invalid momentum value: {}".format(momentum))
-        if weight_decay < 0.0:
-            raise ValueError("Invalid weight_decay value: {}"
-                             .format(weight_decay))
-        if eta < 0.0:
-            raise ValueError("Invalid LARS coefficient value: {}".format(eta))
+    Layer-wise Adaptive Rate Scaling for large batch training.
+    Introduced by "Large Batch Training of Convolutional Networks" by Y. You,
+    I. Gitman, and B. Ginsburg. (https://arxiv.org/abs/1708.03888)
+    """
 
-        self.prev_lr = []
+    def __init__(
+        self,
+        names,
+        params,
+        lr=required,
+        momentum=0.9,
+        use_nesterov=False,
+        weight_decay=0.0,
+        use_apex = False,
+        exclude_from_weight_decay=None,
+        exclude_from_layer_adaptation=None,
+        classic_momentum=True,
+        eeta=EETA_DEFAULT,
+    ):
+        """Constructs a LARSOptimizer.
+        Args:
+        lr: A `float` for learning rate.
+        momentum: A `float` for momentum.
+        use_nesterov: A 'Boolean' for whether to use nesterov momentum.
+        weight_decay: A `float` for weight decay.
+        exclude_from_weight_decay: A list of `string` for variable screening, if
+            any of the string appears in a variable's name, the variable will be
+            excluded for computing weight decay. For example, one could specify
+            the list like ['batch_normalization', 'bias'] to exclude BN and bias
+            from weight decay.
+        exclude_from_layer_adaptation: Similar to exclude_from_weight_decay, but
+            for layer adaptation. If it is None, it will be defaulted the same as
+            exclude_from_weight_decay.
+        classic_momentum: A `boolean` for whether to use classic (or popular)
+            momentum. The learning rate is applied during momeuntum update in
+            classic momentum, but after momentum for popular momentum.
+        eeta: A `float` for scaling of learning rate when computing trust ratio.
+        name: The name for the scope.
+        """
+
         self.epoch = 0
-        self.clamp_range = [1e-11,1e11]
-        self.use_apex = use_apex
-        defaults = dict(lr=lr, momentum=momentum,
-                        weight_decay=weight_decay,
-                        eta=eta, max_epoch=max_epoch)
+        defaults = dict(
+            lr=lr,
+            momentum=momentum,
+            use_nesterov=use_nesterov,
+            weight_decay=weight_decay,
+            exclude_from_weight_decay=exclude_from_weight_decay,
+            exclude_from_layer_adaptation=exclude_from_layer_adaptation,
+            classic_momentum=classic_momentum,
+            eeta=eeta,
+        )
+
         super(LARS, self).__init__(params, defaults)
+        self.names = names
+        self.lr = lr
+        self.momentum = momentum
+        self.weight_decay = weight_decay
+        self.use_nesterov = use_nesterov
+        self.classic_momentum = classic_momentum
+        self.eeta = eeta
+        self.exclude_from_weight_decay = exclude_from_weight_decay
+        # exclude_from_layer_adaptation is set to exclude_from_weight_decay if the
+        # arg is None.
+        if exclude_from_layer_adaptation:
+            self.exclude_from_layer_adaptation = exclude_from_layer_adaptation
+        else:
+            self.exclude_from_layer_adaptation = exclude_from_weight_decay
 
-    @torch.no_grad()
-    def step_misc(self, epoch=None, closure=None):
-        """Performs a single optimization step.
+        self.prev_lr = 0
+        self.prev_update = 0
 
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-            epoch: current epoch to calculate polynomial LR decay schedule.
-                   if None, uses self.epoch and increments it.
-        """
-        loss = None
-        if closure is not None:
-            loss = closure()
-
-        if epoch is None:
-            epoch = self.epoch
-            self.epoch += 1
-
-        for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            eta = group['eta'] # not in Alg 1; c.f. eq 6
-            lr = group['lr']
-            max_epoch = group['max_epoch']
-
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-
-                param_state = self.state[p]
-                d_p = p.grad.data
-
-                p.add_(d_p, alpha=-group['lr'])
-        return loss
-
-    @torch.no_grad()
     def step(self, epoch=None, closure=None):
-        """Performs a single optimization step.
-
-        Arguments:
-            closure (callable, optional): A closure that reevaluates the model
-                and returns the loss.
-            epoch: current epoch to calculate polynomial LR decay schedule.
-                   if None, uses self.epoch and increments it.
-        """
-        self.curr_lr = []
         loss = None
         if closure is not None:
             loss = closure()
@@ -102,82 +95,92 @@ class LARS(Optimizer):
             self.epoch += 1
 
         for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            eta = group['eta'] # not in Alg 1; c.f. eq 6
-            lr = group['lr']
-            max_epoch = group['max_epoch']
+            weight_decay = group["weight_decay"]
+            momentum = group["momentum"]
+            eeta = group["eeta"]
+            lr = group["lr"]
 
-            for p in group['params']:
+            for p_index,p in enumerate(group["params"]):
                 if p.grad is None:
                     continue
 
+                param_name = self.names[p_index]
+                param = p.data
+                grad = p.grad.data
+
                 param_state = self.state[p]
-                p_data = p.data
-                d_p = p.grad.data
 
-                # convert to fp32 if needed
-                # if self.use_apex:
-                #     p_data = p_data.float()
-                #     d_p = d_p.float()
+                # TODO: get param names
+                # if self._use_weight_decay(param_name):
+                grad += self.weight_decay * param
 
-                # add 1e-16 for numerical stability; nan issues
-                weight_norm = torch.norm(p_data)
-                grad_norm = torch.norm(d_p)
-                # self.random_print(weight_norm,grad_norm)
+                if self.classic_momentum:
+                    trust_ratio = 1.0
 
-                # Global LR computed on polynomial decay schedule
-                decay = (1 - float(epoch) / max_epoch) ** 2
-                global_lr = lr * decay
 
-                # Compute local learning rate for this layer
-                local_lr = torch.tensor(1).to(weight_norm.device)
-                if self.is_valid(weight_norm) and self.is_valid(grad_norm):
-                    local_lr = eta * weight_norm / \
-                               (grad_norm + weight_decay * weight_norm)
+                    if self._do_layer_adaptation(param_name):
+                        w_norm = torch.norm(param)
+                        g_norm = torch.norm(grad)
+                        device = g_norm.get_device()
+                        trust_ratio = torch.where(
+                            w_norm.ge(0),
+                            torch.where(
+                                g_norm.ge(0),
+                                (self.eeta * w_norm / g_norm),
+                                torch.Tensor([1.0]).to(device),
+                            ),
+                            torch.Tensor([1.0]).to(device),
+                        ).item()
 
-                # Update the momentum term
-                actual_lr = local_lr * global_lr
-                actual_lr = actual_lr.clamp(*self.clamp_range)
+                    scaled_lr = lr * trust_ratio
+                    if torch.isnan(torch.tensor(scaled_lr)):
+                        print("actual_lr IS NA")
+                        print("prev update")
+                        print(self.prev_update)
+                        print("trust_ratio: {:2.3e}".format(trust_ratio))
+                        print("lr: {:2.3e}".format(lr))
+                        print("weight_norm: {:2.3e}".format(w_norm))
+                        print("grad_norm: {:2.3e}".format(g_norm))
+                        print(torch.norm(d_p.add_(1e-16)))
+                        print("prev scaled lr: {:2.3e}".format(self.prev_lr))
+                        exit()
 
-                if torch.isnan(actual_lr):
-                    print("actual_lr IS NA")
-                    print("local_lr: {:2.3e}".format(local_lr))
-                    print("global_lr: {:2.3e}".format(global_lr))
-                    print("weight_norm: {:2.3e}".format(weight_norm))
-                    print("grad_norm: {:2.3e}".format(grad_norm))
-                    print(torch.norm(d_p.add_(1e-16)))
-                    print(self.prev_lr)
-                    exit()
+                    if "momentum_buffer" not in param_state:
+                        next_v = param_state["momentum_buffer"] = torch.zeros_like(
+                            p.data
+                        )
+                    else:
+                        next_v = param_state["momentum_buffer"]
 
-                if 'momentum_buffer' not in param_state:
-                    param_state['momentum_buffer'] = torch.zeros_like(p_data)
-                buf = param_state['momentum_buffer']
-                to_add = d_p + weight_decay * p_data
-                buf.mul_(momentum).add_(to_add,alpha=actual_lr)
-                #buf.mul_(momentum).add_(actual_lr,d_p + weight_decay * p_data)
+                    next_v.mul_(momentum).add_(grad, alpha=scaled_lr)
+                    if self.use_nesterov:
+                        update = (self.momentum * next_v) + (scaled_lr * grad)
+                    else:
+                        update = next_v
 
-                # if using apex
-                # if self.use_apex:
-                #     p.data = p.data.float()
-                #     p.data.add_(-buf)
-                #     p.data = p.data.half()
-                # else:
-                #     p.data.add_(-buf)
-                p.data.add_(-buf)
+                    self.prev_lr = scaled_lr
+                    self.prev_update = update
 
-                self.curr_lr.append(actual_lr)
-        self.prev_lr = self.curr_lr
+                    p.data.add_(-update)
+                else:
+                    raise NotImplementedError
 
         return loss
 
-    def random_print(self,weight_norm,grad_norm):
-        if torch.rand(1)[0] > 0.80:
-            print("weight_norm: {}",weight_norm)
-            print("grad_norm: {}",grad_norm)
+    def _use_weight_decay(self, param_name):
+        """Whether to use L2 weight decay for `param_name`."""
+        if not self.weight_decay:
+            return False
+        if self.exclude_from_weight_decay:
+            for r in self.exclude_from_weight_decay:
+                if re.search(r, param_name) is not None:
+                    return False
+        return True
 
-    def is_valid(self,tensor):
-        # tensor < clamp_min or tensor > clamp_max
-        a = (tensor < self.clamp_range[0])
-        a = a or (tensor > self.clamp_range[1])
-        return not(a)
+    def _do_layer_adaptation(self, param_name):
+        """Whether to do layer-wise learning rate adaptation for `param_name`."""
+        if self.exclude_from_layer_adaptation:
+            for r in self.exclude_from_layer_adaptation:
+                if re.search(r, param_name) is not None:
+                    return False
+        return True

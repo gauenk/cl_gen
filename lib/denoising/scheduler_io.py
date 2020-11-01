@@ -31,7 +31,7 @@ def load_scheduler(cfg,optimizer,batches_per_epoch):
         mode = 'min'
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                            mode=mode,
-                                                           patience = 10,
+                                                           patience = 5,
                                                            factor=1./np.sqrt(10))
     batch_size = cfg.batch_size
     epochs = cfg.epochs

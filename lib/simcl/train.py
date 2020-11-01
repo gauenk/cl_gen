@@ -85,6 +85,7 @@ def run_train(cfg,rank,model,data,loader):
     print(f"cfg.use_bn: {cfg.use_bn}")
     print("len of loader.val", len(loader.val))
     print(f"cfg.optim_type: {cfg.optim_type}")
+    print(f"cfg.checkpoint_interval: {cfg.checkpoint_interval}")
     print(_build_v2_summary(cfg))
     t = Timer()
     for epoch in range(cfg.current_epoch, cfg.epochs):
@@ -136,9 +137,10 @@ def run_train(cfg,rank,model,data,loader):
     save_simcl_model(cfg,model,optimizer)
 
 def save_simcl_model(cfg,model,optimizer):
+    print("Saving model and optim state")
     save_model(cfg, model, None)
-    save_optim(cfg, optimizer)    
-
+    save_optim(cfg, optimizer)
+    
 
 
 def spawn_split_eval(cfg,split,writer,epoch,gpuid=2):

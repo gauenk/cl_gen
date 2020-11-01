@@ -35,7 +35,7 @@ def get_args():
     parser.add_argument("--N", type=int, default=2,
                         help="""number of noisy images to generate 
                         from each original image""")
-    parser.add_argument("--dataset", type=str, default="MNIST",
+    parser.add_argument("--dataset", type=str, default="CIFAR10",
                         help="experiment's dataset")
     parser.add_argument("--batch-size", type=int, default=1536,
                         help="batch-size for each item in world-size")
@@ -320,6 +320,35 @@ def set_cfg(args):
     # include only for backward compatibility with datasets
     cfg.use_collate = True
     cfg.rank = -1 # only used in datasets!
+
+    # -- simple contrastive learning settings -- 
+    cfg.simcl = edict()
+    cfg.simcl.exp_name = "59145a79-aa5d-49a0-a31d-8df27492b662"
+    cfg.simcl.dataset = edict()
+    cfg.simcl.dataset.name = "cifar10"
+    cfg.simcl.encoder_type = "resnet50"
+    dsname = cfg.simcl.dataset.name
+    enc_path = Path(f"{settings.ROOT_PATH}/output/simcl/{dsname}/{cfg.simcl.exp_name}/model/")
+    cfg.simcl.model_path = enc_path
+    cfg.simcl.enc_size = 2048
+    cfg.simcl.proj_size = 64
+    cfg.simcl.load = True
+    cfg.simcl.epoch_num = 100
+    cfg.simcl.N = cfg.N
+    cfg.simcl.batch_size = cfg.batch_size
+    cfg.simcl.use_ddp = False #cfg.use_ddp
+    cfg.simcl.sync_batchnorm = cfg.sync_batchnorm
+    cfg.simcl.use_apex = cfg.use_apex
+    cfg.simcl.n_img_channels = cfg.n_img_channels
+    cfg.simcl.activation_hooks = False
+
+    # set current config from simcl config
+    cfg.enc_size = cfg.simcl.enc_size
+    cfg.proj_size = cfg.simcl.proj_size
+
+    # to update before model_io call
+    cfg.simcl.device = cfg.device
+    cfg.simcl.rank = cfg.rank
 
     return cfg
     

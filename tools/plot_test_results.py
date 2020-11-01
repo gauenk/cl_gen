@@ -45,7 +45,7 @@ def get_run_full_path(run_dir):
 
 def load_experiment_logfiles(version="v1"):
     cfgs = load_exp_cache(version)
-    fn = f"cache/run_denoising/runs_{version}.txt"
+    fn = f"cache/denoising/runs_{version}.txt"
     with open(fn,"r") as f:
         lines = f.readlines()
 

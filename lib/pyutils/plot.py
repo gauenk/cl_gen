@@ -8,15 +8,16 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 
 
-def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,fontsize=15,framealpha=1.0):
+def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,fontsize=15,framealpha=1.0,ncol=1,shrink_perc=.90):
     box = ax.get_position()
     if shrink:
-        ax.set_position([box.x0, box.y0, box.width * 0.7, box.height])
+        ax.set_position([box.x0, box.y0, box.width * shrink_perc, box.height])
     if legend_handles is not None:
         ax.legend(legend_handles,legend_str,
                   title = legend_title,
                   title_fontsize=fontsize,
                   fontsize=fontsize,
+                  ncol=ncol,
                   loc='center left',
                   bbox_to_anchor=(1, 0.5),
                   framealpha=framealpha)
@@ -25,6 +26,7 @@ def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,font
                   title = legend_title,
                   title_fontsize=fontsize,
                   fontsize=fontsize,
+                  ncol=ncol,
                   loc='center left',
                   bbox_to_anchor=(1, 0.5),
                   framealpha=framealpha)

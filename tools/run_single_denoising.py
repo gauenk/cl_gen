@@ -24,7 +24,7 @@ def get_args():
                         help="Specify the gpu to use.") 
     parser.add_argument("--mode", type=str, default="train",
                         help="Do we train or test?")
-    parser.add_argument("--epoch_num", type=int, default=100,
+    parser.add_argument("--epoch_num", type=int, default=-1,
                         help="What epoch do we load if we load?")
     parser.add_argument("--init-lr", type=float, default=None,
                         help="Overwrite the init-lr?")
@@ -39,13 +39,16 @@ def get_args():
     msg = "Do our models use batch normalization?"
     parser.add_argument("--no-bn", action='store_false',help=msg)
     msg = "Pick an aggregation scheme"
-    parser.add_argument("--agg_enc_fxn", type=str, default='id',help=msg)
+    parser.add_argument("--agg_enc_fxn", type=str, default=None,help=msg)
     msg = "what optim type do we use?"
     parser.add_argument("--optim-type", type=str,default=None,help=msg)
     msg = "num epochs to train"
     parser.add_argument("--epochs", type=int,default=None,help=msg)
     msg = "run on ddp"
     parser.add_argument("--use_ddp", action='store_true',help=msg)
+    msg = "don't use apex"
+    parser.add_argument("--no_apex", action='store_true',help=msg)
+
     args = parser.parse_args()
     return args
 
@@ -56,6 +59,7 @@ if __name__ == "__main__":
     cfg.device = 'cuda:%d' % args.gpuid
     cfg.mode = args.mode
     cfg.epoch_num = args.epoch_num
+    cfg.load = cfg.epoch_num > 0
     if cfg.mode == "test":
         cfg.load = True
     if args.init_lr:
@@ -72,7 +76,12 @@ if __name__ == "__main__":
     if args.agg_enc_fxn:
         cfg.agg_enc_fxn = args.agg_enc_fxn
     cfg.use_bn = args.no_bn
-    cfg.use_apex = True
+
+    if args.no_apex:
+        cfg.use_apex = False
+    else:
+        cfg.use_apex = True        
+
     if args.gpuid == 2:
         cfg.use_apex = False
     cfg.use_ddp = args.use_ddp
