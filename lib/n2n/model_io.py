@@ -6,7 +6,7 @@ import torch
 from layers.unet import UNetN_v2,UNet_n2n
 
 def load_model(cfg):
-    model = UNet_n2n(cfg.input_N,cfg.unet_channels)
+    model = UNet_n2n(cfg.input_N)
     # model = UNetN_v2(cfg.input_N,cfg.unet_channels)
     return model
 

@@ -102,7 +102,7 @@ def load_noise_frame_grid():
     # blind_grid = ["blind"]
     # frame_grid = [2,3,4,5,10,20,30,100]
     # frame_grid = [4,50,100]
-    frame_grid = [3,5,10,20]
+    frame_grid = [3,5,10]
     results = pd.DataFrame({'noise_level':[],'noise_name':[],'frames':[],'psnr':[],'epoch':[]})
     for noise,level in zip(noise_name_grid,noise_level_grid):
         for frame in frame_grid:

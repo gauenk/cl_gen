@@ -21,7 +21,7 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
     total_loss = 0
     running_loss = 0
 
-    for batch_idx, (burst_imgs, raw_img) in enumerate(train_loader):
+    for batch_idx, (burst_imgs, res_img, raw_img) in enumerate(train_loader):
 
         optimizer.zero_grad()
         model.zero_grad()
@@ -62,7 +62,7 @@ def test_loop_n2n(cfg,model,criterion,test_loader,epoch):
     total_psnr = 0
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (burst_imgs, raw_img) in enumerate(test_loader):
+        for batch_idx, (burst_imgs, res_img, raw_img) in enumerate(test_loader):
 
             BS = raw_img.shape[0]
 

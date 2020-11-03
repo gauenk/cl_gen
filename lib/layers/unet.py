@@ -74,7 +74,7 @@ class UNet_n2n(nn.Module):
         super(UNet_n2n, self).__init__()
         self.n_channels = n_channels
         self.verbose = False
-
+        
         self.conv1 = DoubleConv(3*n_channels, 48, kernel_size=3, padding=1)
         self.conv2 = SingleConv(48, 48, 1)
         self.conv3 = SingleConv(48, 48, 1)

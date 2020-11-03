@@ -34,7 +34,7 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
     szm = ScaleZeroMean()
 
     # if cfg.N != 5: return
-    for batch_idx, (burst_imgs, raw_img) in enumerate(train_loader):
+    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(train_loader):
 
         optimizer.zero_grad()
         model.zero_grad()
@@ -51,9 +51,9 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
         # ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
         # Writer = animation.writers['ffmpeg']
         # writer = Writer(fps=1, metadata=dict(artist='Me'), bitrate=1800)
-        # ani.save(f"{settings.ROOT_PATH}/train_loop_cifar10.mp4", writer=writer)
+        # ani.save(f"{settings.ROOT_PATH}/train_loop_voc.mp4", writer=writer)
         # print("I DID IT!")
-        # exit()
+        # return
 
         # -- reshaping of data --
         # raw_img = raw_img.cuda(non_blocking=True)
@@ -108,7 +108,7 @@ def test_loop_offset(cfg,model,criterion,test_loader,epoch):
     total_psnr = 0
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (burst_imgs, raw_img) in enumerate(test_loader):
+        for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(test_loader):
     
             BS = raw_img.shape[0]
             
@@ -116,7 +116,7 @@ def test_loop_offset(cfg,model,criterion,test_loader,epoch):
             input_order = np.arange(cfg.N)
             # print("pre",input_order)
             if cfg.blind or True:
-                middle = len(input_order) // 2
+                middle = cfg.N // 2
                 # print(middle)
                 middle_img_idx = input_order[middle]
                 input_order = np.r_[input_order[:middle],input_order[middle+1:]]
@@ -165,7 +165,7 @@ def train_loop_N_half(cfg,model,optimizer,criterion,train_loader,epoch):
     running_loss = 0
 
 
-    for batch_idx, (burst_imgs, raw_img) in enumerate(train_loader):
+    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(train_loader):
 
         optimizer.zero_grad()
         model.zero_grad()
@@ -203,7 +203,7 @@ def test_loop_N_half(cfg,model,criterion,test_loader,epoch):
     N_half = cfg.N//2
     running_loss = 0
 
-    for batch_idx, (burst_imgs, raw_img) in enumerate(test_loader):
+    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(test_loader):
 
         # reshaping of data
         burst_imgs = burst_imgs.cuda(non_blocking=True)

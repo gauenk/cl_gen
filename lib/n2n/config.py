@@ -258,6 +258,8 @@ def set_cfg(args):
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.dataset.n_classes = 10
     cfg.dataset.name = args.dataset
+    cfg.dataset.load_residual = False
+    cfg.dataset.triplet_loader = True
 
     cfg.batch_size = args.batch_size
     cfg.world_size = args.world_size

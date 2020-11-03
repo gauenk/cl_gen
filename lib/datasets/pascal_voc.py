@@ -78,7 +78,8 @@ class DenoiseVOC(VOCDetection):
         return imgs
 
     def _get_dynamic_transform(self,dynamic):
-        if dynamic['bool'] == False: return None
+        if dynamic['bool'] == False:
+            return None
         if dynamic['mode'] == 'global':
             return self._get_global_dynamic_transform(dynamic)
         elif dynamic['mode'] == 'local':
@@ -209,16 +210,17 @@ class DenoiseVOC(VOCDetection):
 
 class DynamicVOC(VOCDetection):
 
-    def __init__(self,root,year,image_set,N,noise_type,noise_params,dynamic):
+    def __init__(self,root,year,image_set,N,noise_type,noise_params,dynamic,load_res):
         self.N = N
         self.noise_type = noise_type
         self.noise_params = noise_params
         self.dynamic = dynamic
         self.size = self.dynamic.frame_size
         self.image_set = image_set
+        self.load_res = load_res
         noisy_N = N if dynamic['bool'] else 1
         noisy_trans = self._get_noise_transform(noise_type,noise_params)
-        self.dynamic_trans = self._get_dynamic_transform(dynamic,noisy_trans)
+        self.dynamic_trans = self._get_dynamic_transform(dynamic,noisy_trans,load_res)
         th_trans = self._get_th_img_trans()
         self.__class__.__name__ = "pascal_voc"
         if year == "2012":
@@ -243,8 +245,8 @@ class DynamicVOC(VOCDetection):
         img = Image.open(self.images[index]).convert("RGB")
         target = self.parse_voc_xml(ET.parse(self.annotations[index]).getroot())
         th_img = self.to_tensor(img)
-        img_set,clean_target = self.dynamic_trans(img)
-        return img_set, clean_target
+        img_set,res_set,clean_target = self.dynamic_trans(img)
+        return img_set, res_set, clean_target
 
     def _apply_transform_N(self,img):
         t = self.transform
@@ -255,10 +257,11 @@ class DynamicVOC(VOCDetection):
         imgs = torch.stack(imgs)
         return imgs
 
-    def _get_dynamic_transform(self,dynamic,noisy_trans):
-        if dynamic['bool'] == False: return None
+    def _get_dynamic_transform(self,dynamic,noisy_trans,load_res=False):
+        if dynamic['bool'] == False: 
+            raise ValueError("We must set dynamics = True for the dynamic dataset loader.")
         if dynamic['mode'] == 'global':
-            return GlobalCameraMotionTransform(dynamic,noisy_trans)
+            return GlobalCameraMotionTransform(dynamic,noisy_trans,load_res)
         elif dynamic['mode'] == 'local':
             raise NotImplemented("No local motion coded.")
         else:
@@ -397,25 +400,27 @@ def get_voc_dataset(cfg,mode):
     elif mode == "simcl" or mode == "denoising":
         batch_size = cfg.batch_size
         N = cfg.N
+        load_res = cfg.dataset.load_residual
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
-        data.tr = DenoiseVOC(root,N,noise_type,noise_params,dynamic,train=True)
-        data.val = DenoiseVOC(root,N,noise_type,noise_params,dynamic,train=False)
+        data.tr = DenoiseVOC(root,N,noise_type,noise_params,dynamic,load_res,train=True)
+        data.val = DenoiseVOC(root,N,noise_type,noise_params,dynamic,load_res,train=False)
         data.val.data = data.val.data[0:2*2048]
         data.val.targets = data.val.targets[0:2*2048]
-        data.te = DenoiseVOC(root,N,noise_type,noise_params,dynamic,train=False)
+        data.te = DenoiseVOC(root,N,noise_type,noise_params,dynamic,load_res,train=False)
     elif mode == "dynamic":
         batch_size = cfg.batch_size
         N = cfg.N
+        load_res = cfg.dataset.load_residual
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
-        data.tr = DynamicVOC(root,"2012","trainval",N,noise_type,noise_params,dynamic)
-        data.val = DynamicVOC(root,"2012","val",N,noise_type,noise_params,dynamic)
+        data.tr = DynamicVOC(root,"2012","trainval",N,noise_type,noise_params,dynamic,load_res)
+        data.val = DynamicVOC(root,"2012","val",N,noise_type,noise_params,dynamic,load_res)
         # data.val.data = data.val.data[0:2*2048]
         # data.val.targets = data.val.targets[0:2*2048]
-        data.te = DynamicVOC(root,"2007","test",N,noise_type,noise_params,dynamic)
+        data.te = DynamicVOC(root,"2007","test",N,noise_type,noise_params,dynamic,load_res)
     else: raise ValueError(f"Unknown VOC mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)
@@ -458,6 +463,13 @@ def collate_fn(batch):
     clean = torch.stack(clean,dim=0)
     return noisy,clean
 
+def collate_triplet_fn(batch):
+    noisy,res,clean = zip(*batch)
+    noisy = torch.stack(noisy,dim=1)
+    res = torch.stack(res,dim=1)
+    clean = torch.stack(clean,dim=0)
+    return noisy,res,clean
+
 def set_torch_seed(worker_id):
     torch.manual_seed(0)
 
@@ -470,7 +482,10 @@ def get_loader_serial(cfg,data,batch_size,mode):
     if cfg.set_worker_seed:
         loader_kwargs['worker_init_fn'] = set_torch_seed
     if cfg.use_collate:
-        loader_kwargs['collate_fn'] = collate_fn
+        if cfg.dataset.triplet_loader:
+            loader_kwargs['collate_fn'] = collate_triplet_fn
+        else:
+            loader_kwargs['collate_fn'] = collate_fn
 
     loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)

@@ -22,7 +22,7 @@ from learning.utils import save_model
 
 # [this folder] project code
 from .config import get_cfg,get_args
-from .model_io import load_model
+from .model_io import load_model,load_model_fp
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
@@ -60,9 +60,8 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     cfg.batch_size = 16
     cfg.init_lr = 1e-3
     cfg.unet_channels = 3
-    # if cfg.blind: cfg.input_N = cfg.N - 1
-    # else: cfg.input_N = cfg.N
-    cfg.input_N = cfg.N-1
+    # cfg.input_N = cfg.N-1
+    cfg.input_N = cfg.N
     cfg.epochs = 30
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
@@ -75,7 +74,7 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
 
     # if blind == "nonblind": return 
-    postfix = Path(f"./dynamic/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    postfix = Path(f"./dynamic/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
     cfg.model_path = cfg.model_path / postfix
     cfg.optim_path = cfg.optim_path / postfix
     if not cfg.model_path.exists(): cfg.model_path.mkdir(parents=True)
@@ -103,12 +102,17 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     # load criterion
     criterion = nn.BCELoss()
 
+    if cfg.load:
+        fp = cfg.model_path / Path("checkpoint_30.tar")
+        model = load_model_fp(cfg,model,fp,0)
+
     cfg.current_epoch = 0
     te_ave_psnr = {}
-    test_before = False
+    test_before = True
     if test_before:
         ave_psnr = test_loop(cfg,model,criterion,loader.te,-1)
         print("PSNR before training {:2.3e}".format(ave_psnr))
+        return 
     if checkpoint.exists() and cfg.load:
         model = load_model_fp(cfg,model,checkpoint,gpuid)
         print("Loaded model.")
@@ -138,13 +142,13 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     save_model(cfg, model, optimizer)
 
 def run_me_Ngrid():
-    ngpus = 2
+    ngpus = 3
     nprocs_per_gpu = 2
     nprocs = ngpus * nprocs_per_gpu 
     Sgrid = [50000]
     # Ggrid = [10,25,50,100,150,200]
     Ggrid = [25]
-    Ngrid = [50,30]
+    Ngrid = [3,10,20]
     nNgrid = len(Ngrid)
     nGgrid = len(Ggrid)
     te_losses = dict.fromkeys(Ngrid)

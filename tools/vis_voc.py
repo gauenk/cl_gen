@@ -19,7 +19,7 @@ import torchvision.utils as vutils
 import settings
 from datasets import get_dataset
 from n2n.config import get_cfg,get_args
-from datasets.transform_te import GlobalCameraMotionTransform
+from datasets.transform import GlobalCameraMotionTransform
 from pyutils.timer import Timer
 
 def main():
@@ -48,24 +48,28 @@ def main():
 
     data,loader = get_dataset(cfg,'dynamic')
     noisy_trans = data.tr._get_noise_transform(cfg.noise_type,cfg.noise_params[cfg.noise_type])
-    motion = GlobalCameraMotionTransform(cfg.dynamic,noisy_trans)
-    noisy_l,raw_l = [],[]
+    motion = GlobalCameraMotionTransform(cfg.dynamic,noisy_trans,True)
+    noisy_l,rec_l,raw_l = [],[],[]
     timer = Timer()
     timer.tic()
     for index in range(cfg.batch_size):
         img = Image.open(data.tr.images[index])
-        noisy,raw = motion(img)
-        noisy_l.append(noisy),raw_l.append(raw)
+        noisy,rec,raw = motion(img)
+        noisy_l.append(noisy),rec_l.append(rec),raw_l.append(raw)
     timer.toc()
     print(timer)
     noisy = torch.stack(noisy_l,dim=1)
+    rec = torch.stack(rec_l,dim=1)
     raw = torch.stack(raw_l)
     # noisy,raw = next(iter(loader.tr))
     noisy += 0.5
     noisy.clamp_(0,1.)
 
+    rec += 0.5
+    rec.clamp_(0,1.)
+
     raw = raw.expand(noisy.shape)
-    images = torch.cat([noisy,raw],dim=1)
+    images = torch.cat([noisy,rec,raw],dim=1)
 
     fig,ax = plt.subplots(figsize=(10,10))
     grids = [vutils.make_grid(images[i],nrow=8) for i in range(cfg.dynamic.frames)]

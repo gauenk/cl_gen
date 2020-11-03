@@ -2,17 +2,20 @@
 Thanks to Spijkervet for this code
 """
 
+# python imports
 import numpy as np
+from joblib import Parallel, delayed
+from functools import partial
 
+# pytorch imports
 import torch
 import torchvision
 import torch.nn.functional as F
 from torchvision import transforms as thT
 import torchvision.transforms.functional as tvF
 
-from joblib import Parallel, delayed
-
-
+# project imports
+from pyutils.timer import Timer
 
 def th_uniform(l,u,size):
     return (l - u) * torch.rand(size) + u
@@ -247,8 +250,9 @@ class GlobalCameraMotionTransform():
     - low number of direction changes
     """
 
-    def __init__(self,dynamic,noise_trans=None):
+    def __init__(self,dynamic,noise_trans=None,load_res=False):
         self.dynamic = dynamic
+        self.load_res = load_res
         self.nframes = dynamic['frames']
         self.ppf = dynamic['ppf']
         self.total_pixels = dynamic['total_pixels']
@@ -258,6 +262,9 @@ class GlobalCameraMotionTransform():
         self.to_tensor = thT.Compose([thT.ToTensor()])
         self.szm = thT.Compose([ScaleZeroMean()])
         self.noise_trans = noise_trans
+        self.reset_seed = False
+        if "reset_seed" in list(dynamic.keys()):
+            self.reset_seed = dynamic.reset_seed
 
     def __call__(self, pic):
         
@@ -278,7 +285,7 @@ class GlobalCameraMotionTransform():
             raw_ppf = self.ppf
 
         # -- compute pixels per frame and resize image for fractions -- 
-        if raw_ppf < 1:
+        if raw_ppf < 1 and raw_ppf > 0:
             h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
             tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
             # print(h_new,w_new,h,w)
@@ -296,8 +303,8 @@ class GlobalCameraMotionTransform():
             step = (torch.round((i+1) * d * ppf)).type(torch.int)
             tl_i = tl + step
             tl_list.append(tl_i)
-        a = tl_list[0].type(torch.float)
-        b = tl_list[-1].type(torch.float)
+        # a = tl_list[0].type(torch.float)
+        # b = tl_list[-1].type(torch.float)
         # print("pix diff",torch.sqrt(torch.sum(( a - b)**2)).item())
         # print(tl_list[0],tl_list[-1],d,w,h,pic.size)
 
@@ -305,38 +312,48 @@ class GlobalCameraMotionTransform():
         w_new,h_new = pic.size
         tl_mid = tl_list[middle_index]
         t,l = tl_mid[0].item(),tl_mid[1].item()
-        target = tvF.resized_crop(pic,0,0,h_new,w_new,out_frame_size)
+        target = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
         clean_target = self.to_tensor(target)
         
         # -- create noisy frames -- 
         create_frames = partial(self._crop_image,pic,tl_list,crop_frame_size,out_frame_size)
         if self.nframes <= 30:
             pics = []
+            res = []
             for i in range(self.nframes):
-                pic_i = create_frames(i)
-                pics.append(pic_i)
+                pic_i,res_i = create_frames(i)
+                pics.append(pic_i),res.append(res_i)
         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
         else:
             nj = np.min([self.nframes // 5,8])
-            pics = Parallel(n_jobs=nj)(delayed(create_frames)(i) for i in range(self.nframes))
+            both = Parallel(n_jobs=nj)(delayed(create_frames)(i) for i in range(self.nframes))
+            pics = [x[0] for x in both]
+            res = [x[1] for x in both]            
         pics = torch.stack(pics)
+        res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
-        return pics,clean_target
+        return pics,res,clean_target
 
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
         tl = tl_list[i]
         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
         t,l = tl[0].item(),tl[1].item()
-        # print(t,l,t+self.frame_size,l+self.frame_size,h,w)            
+        # print(t,l,t+self.frame_size,l+self.frame_size,h,w)             
         pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
+        res_i = torch.empty(0)
         if (not self.noise_trans is None):
-            pic_i = self.noise_trans(pic_i)
+            noisy_pic_i = self.noise_trans(pic_i)
+            if self.load_res:
+                pic_nmlz = self.szm(self.to_tensor(pic_i))
+                res_i = noisy_pic_i - pic_nmlz
+            pic_i = noisy_pic_i
         else:
             pic_i = self.szm(self.to_tensor(pic_i))
-        return pic_i
+        return pic_i,res_i
 
     def sample_direction(self):
-        # torch.manual_seed(0)
+        if self.reset_seed:
+            torch.manual_seed(0)
         # r = torch.sqrt(torch.rand(1))
         r = 1
         rand_int = torch.rand(1)
