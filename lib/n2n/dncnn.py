@@ -1,4 +1,3 @@
-
 # python imports
 from tqdm import tqdm
 import numpy as np
@@ -22,14 +21,16 @@ from learning.utils import save_model
 
 # [this folder] project code
 from .config import get_cfg,get_args
-from .model_io import load_model,load_model_fp
+from .model_io import load_model as load_model
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
-from .learn import train_loop,test_loop
-from .learn_n2n import train_loop_n2n,test_loop_n2n
+from .learn_dncnn import train_loop,test_loop
 
-def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
-# def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
+def get_postfix_str(cfg,blind,noise_level):
+    postfix = Path(f"./dynamic/dncnn/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    return postfix
+
+def run_me(rank=0,Sgrid=[50000],Ngrid=[2],nNgrid=2,Ggrid=[25],nGgrid=1,ngpus=3,idx=0):
     
     args = get_args()
     args.name = "default"
@@ -60,20 +61,23 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     cfg.batch_size = 16
     cfg.init_lr = 1e-3
     cfg.unet_channels = 3
+    # if cfg.blind: cfg.input_N = cfg.N - 1
+    # else: cfg.input_N = cfg.N
     cfg.input_N = cfg.N-1
     cfg.epochs = 30
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
+    cfg.dataset.load_residual = True
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 2
+    cfg.dynamic.ppf = 0
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = 20
+    cfg.dynamic.total_pixels = 0
     cfg.load = False
 
     blind = "blind" if cfg.blind else "nonblind"
     print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
 
     # if blind == "nonblind": return 
-    postfix = Path(f"./dynamic/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    postfix = get_postfix_str(cfg,blind,noise_level)
     cfg.model_path = cfg.model_path / postfix
     cfg.optim_path = cfg.optim_path / postfix
     if not cfg.model_path.exists(): cfg.model_path.mkdir(parents=True)
@@ -101,17 +105,12 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     # load criterion
     criterion = nn.BCELoss()
 
-    if cfg.load:
-        fp = cfg.model_path / Path("checkpoint_30.tar")
-        model = load_model_fp(cfg,model,fp,0)
-
     cfg.current_epoch = 0
     te_ave_psnr = {}
     test_before = False
     if test_before:
         ave_psnr = test_loop(cfg,model,criterion,loader.te,-1)
         print("PSNR before training {:2.3e}".format(ave_psnr))
-        return 
     if checkpoint.exists() and cfg.load:
         model = load_model_fp(cfg,model,checkpoint,gpuid)
         print("Loaded model.")
@@ -128,7 +127,7 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     best_index = np.argmax(psnr)
     best_epoch,best_psnr = epochs[best_index],psnr[best_index]
     
-    root = Path(f"{settings.ROOT_PATH}/output/n2n/{postfix}/")
+    root = Path(f"{settings.ROOT_PATH}/output/dncnn/{postfix}/")
     # if cfg.blind: root = root / Path(f"./blind/")
     # else: root = root / Path(f"./nonblind/")
     fn = Path(f"results.csv")
@@ -160,50 +159,3 @@ def run_me_Ngrid():
     # remainder = num_of_grids % nprocs
     # r = mp.spawn(run_me, nprocs=remainder, args=(Sgrid,Ngrid,nNgrid,Ggrid,nGgrid,ngpus,idx))
 
-"""
-
-
-cifar10
-[train_offset] noisy -> clean gives psnr of 35 on cifar10 fixed gaussian noise std = 10 @ epoch?
-[train_offset] noisy -> clean gives psnr of 29.9 - 30.2 on cifar10 msg (0,50) @ epoch 45 - 55
-[train_n2n] standard stuff [psnr: 6] @ epochs 10 - 145
-
-
--- scheme 1 --
-noisy_imgs -> clean_img
-noisy_imgs -> noise_params
-noise_instance ~ clean_img
-new_noisy_img = noise_instance(clean_img)
-mse(other_noisy_img,new_noisy_img)
-
--- scheme 2 --
-noisy_imgs -> clean_img
-mse(other_noisy_img,clean_img)
-
-train_offset with 10 frames: (with no dropout)
-
-n_input | n_output | psnr @ 30ish  | psnr @1150
-  9     |   1      |   33.66       |  34.08
-  5     |   5      |   32.31       |  32.55
-  1     |   9      |   29.71       |  30.00
-
-
- N  |  PSNR 
- 2  |  30.06
- 3  |  31.85
- 30 |  36.95
-
-
-
-train_offset with 10 frames: (with dropout)
-
-n_input | n_output | psnr
-  9     |   1      | 
-  5     |   5      | 
-  1     |   9      | 
-
-
-
-
-
-"""

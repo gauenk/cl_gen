@@ -70,23 +70,23 @@ class UNet(nn.Module):
 
 
 class UNet_n2n(nn.Module):
-    def __init__(self, n_channels, verbose = False ):
+    def __init__(self, n_channels, k_size = 3, verbose = False):
         super(UNet_n2n, self).__init__()
         self.n_channels = n_channels
         self.verbose = False
-        
-        self.conv1 = DoubleConv(3*n_channels, 48, kernel_size=3, padding=1)
-        self.conv2 = SingleConv(48, 48, 1)
-        self.conv3 = SingleConv(48, 48, 1)
-        self.conv4 = SingleConv(48, 48, 1)
-        self.conv5 = SingleConv(48, 48, 1)
-        self.conv6 = SingleConv(48, 48, 1, use_pool=False)
 
-        self.up1 = Up(96,96)
-        self.up2 = Up(144,96)
-        self.up3 = Up(144,96)
-        self.up4 = Up(144,96)
-        self.up5 = Up(96+3*n_channels,96)
+        self.conv1 = DoubleConv(3*n_channels, 48, kernel_size=k_size, padding=2)
+        self.conv2 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv3 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv4 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv5 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv6 = SingleConv(48, 48, 1, kernel_size=3, use_pool=False)
+
+        self.up1 = Up(96,96,kernel_size=3)
+        self.up2 = Up(144,96,kernel_size=3)
+        self.up3 = Up(144,96,kernel_size=3)
+        self.up4 = Up(144,96,kernel_size=3)
+        self.up5 = Up(96+3*n_channels,96,kernel_size=k_size)
         
         self.out_conv = SingleConv(96,3,kernel_size=3,padding=1,use_pool=False,use_relu=False)
 

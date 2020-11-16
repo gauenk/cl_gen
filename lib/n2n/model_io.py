@@ -3,10 +3,11 @@
 import torch
 
 # project imports
+from layers.ame_kpn.KPN import KPN as KPN_model,LossFunc
 from layers.unet import UNetN_v2,UNet_n2n
 
 def load_model(cfg):
-    model = UNet_n2n(cfg.input_N)
+    model = UNet_n2n(cfg.input_N,5)
     # model = UNetN_v2(cfg.input_N,cfg.unet_channels)
     return model
 
@@ -30,3 +31,5 @@ def load_model_field(cfg,rank,model,field):
     #     model = DDP(model, device_ids=[rank])
     return model
 
+def load_model_kpn(cfg):
+    return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True),LossFunc()

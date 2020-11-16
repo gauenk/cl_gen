@@ -64,16 +64,19 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
             middle = len(input_order) // 2
             # print(middle)
             middle_img_idx = input_order[middle]
-            input_order = np.r_[input_order[:middle],input_order[middle+1:]]
+            # input_order = np.r_[input_order[:middle],input_order[middle+1:]]
         else:
             input_order = np.arange(cfg.N)
         # print("post",input_order,cfg.blind,cfg.N,middle_img_idx)
 
         burst_imgs = burst_imgs.cuda(non_blocking=True)
         # print(cfg.N,cfg.blind,[input_order[x] for x in range(cfg.input_N)])
-        stacked_burst = torch.cat([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
+        # stacked_burst = torch.cat([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
         # print("stacked_burst",stacked_burst.shape)
-
+        stacked_burst = torch.stack([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
+        cat_burst = torch.cat([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
+        # print("burst_imgs.shape",burst_imgs.shape)
+        # print("stacked_burst.shape",stacked_burst.shape)
         # -- extract target image --
         if cfg.blind:
             t_img = burst_imgs[middle_img_idx]
@@ -81,13 +84,23 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
             t_img = szm(raw_img.cuda(non_blocking=True))
         
         # -- denoising --
-        rec_img = model(stacked_burst)
+        rec_img_i,rec_img = model(cat_burst,stacked_burst)
+        # print("---")
+        # print(rec_img[0].shape)
+        # print(rec_img[1].shape)
+        # print(torch.mean(torch.sum( torch.pow(rec_img[0] - rec_img[1],2) ) ) )
+        # print("^^^^^")
         # rec_img = burst_imgs[middle_img_idx] - rec_res
 
         # -- compare with stacked burst --
         # print(cfg.blind,t_img.min(),t_img.max(),t_img.mean())
-        rec_img = rec_img.expand(t_img.shape)
-        loss = F.mse_loss(t_img,rec_img)
+        # rec_img = rec_img.expand(t_img.shape)
+        # loss = F.mse_loss(t_img,rec_img)
+
+
+        # -- compute loss to optimize --
+        loss = criterion(rec_img_i, rec_img, t_img, cfg.global_step)
+        loss = np.sum(loss)
 
         # -- update info --
         running_loss += loss.item()
@@ -102,6 +115,7 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
             print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
                                             running_loss))
             running_loss = 0
+        cfg.global_step += 1
     total_loss /= len(train_loader)
     return total_loss
 
@@ -110,6 +124,7 @@ def test_loop_offset(cfg,model,criterion,test_loader,epoch):
     model = model.to(cfg.device)
     total_psnr = 0
     total_loss = 0
+
     with torch.no_grad():
         for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(test_loader):
     
@@ -122,26 +137,29 @@ def test_loop_offset(cfg,model,criterion,test_loader,epoch):
                 middle = cfg.N // 2
                 # print(middle)
                 middle_img_idx = input_order[middle]
-                input_order = np.r_[input_order[:middle],input_order[middle+1:]]
+                # input_order = np.r_[input_order[:middle],input_order[middle+1:]]
             else:
                 input_order = np.arange(cfg.N)
             
             # reshaping of data
             raw_img = raw_img.cuda(non_blocking=True)
             burst_imgs = burst_imgs.cuda(non_blocking=True)
-            stacked_burst = torch.cat([burst_imgs[input_order[x]] for
-                                       x in range(cfg.input_N)],dim=1)
+            stacked_burst = torch.stack([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
+            cat_burst = torch.cat([burst_imgs[input_order[x]] for x in range(cfg.input_N)],dim=1)
     
             # denoising
-            rec_img = model(stacked_burst)
+            rec_img = model(cat_burst,stacked_burst)[1]
+
             # rec_img = burst_imgs[middle_img_idx] - rec_res
             
-            # compare with stacked targets
+            # -- compare with stacked targets --
             rec_img = rescale_noisy_image(rec_img)        
+
+            # -- compute psnr --
             loss = F.mse_loss(raw_img,rec_img,reduction='none').reshape(BS,-1)
             loss = torch.mean(loss,1).detach().cpu().numpy()
             psnr = mse_to_psnr(loss)
-
+                        
             total_psnr += np.mean(psnr)
             total_loss += np.mean(loss)
 
@@ -160,77 +178,3 @@ def test_loop_offset(cfg,model,criterion,test_loader,epoch):
     ave_loss = total_loss / len(test_loader)
     print("[Blind: %d | N: %d] Testing results: Ave psnr %2.3e Ave loss %2.3e"%(cfg.blind,cfg.N,ave_psnr,ave_loss))
     return ave_psnr
-
-
-def train_loop_N_half(cfg,model,optimizer,criterion,train_loader,epoch):
-    model.train()
-    model = model.to(cfg.device)
-    N_half = cfg.N//2
-    total_loss = 0
-    running_loss = 0
-
-
-    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(train_loader):
-
-        optimizer.zero_grad()
-        model.zero_grad()
-
-        # reshaping of data
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        inputs,targets = burst_imgs[:N_half],burst_imgs[N_half:]
-        stacked_inputs = torch.cat([inputs[x] for x in range(N_half)],dim=1)
-        # stacked_targets = torch.cat([targets[x] for x in range(N_half)],dim=1)
-
-        # denoising
-        rec_img = model(stacked_inputs)
-
-        # compare with stacked targets
-        rec_img = rec_img.expand(targets.shape)
-        loss = F.mse_loss(targets,rec_img)
-        running_loss += loss.item()
-        total_loss += loss.item()
-
-        # BP and optimize
-        loss.backward()
-        optimizer.step()
-
-        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
-            running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
-            running_loss = 0
-    total_loss /= len(train_loader)
-    return total_loss
-
-def test_loop_N_half(cfg,model,criterion,test_loader,epoch):
-    model.train()
-    model = model.to(cfg.device)
-    N_half = cfg.N//2
-    running_loss = 0
-
-    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(test_loader):
-
-        # reshaping of data
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        inputs,targets = burst_imgs[:N_half],burst_imgs[N_half:]
-        stacked_inputs = torch.cat([inputs[x] for x in range(N_half)],dim=1)
-        # stacked_targets = torch.cat([targets[x] for x in range(N_half)],dim=1)
-
-        # denoising
-        rec_img = model(stacked_inputs)
-        
-        # compare with stacked targets
-        rec_img = rec_img.expand(targets.shape)
-        loss = F.mse_loss(targets,rec_img)
-        running_loss += loss.item()
-
-        # BP and optimize
-        loss.backward()
-        optimizer.step()
-
-        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
-            running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
-            running_loss = 0
-

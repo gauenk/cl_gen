@@ -22,11 +22,10 @@ from learning.utils import save_model
 
 # [this folder] project code
 from .config import get_cfg,get_args
-from .model_io import load_model,load_model_fp
+from .model_io import load_model_kpn,load_model_fp,load_model
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
-from .learn import train_loop,test_loop
-from .learn_n2n import train_loop_n2n,test_loop_n2n
+from .learn_kpn import train_loop,test_loop
 
 def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
@@ -58,22 +57,22 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx]
     cfg.batch_size = 16
-    cfg.init_lr = 1e-3
+    cfg.init_lr = 1e-4
     cfg.unet_channels = 3
-    cfg.input_N = cfg.N-1
+    cfg.input_N = cfg.N
     cfg.epochs = 30
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = 20
+    cfg.dynamic.total_pixels = 10
     cfg.load = False
 
     blind = "blind" if cfg.blind else "nonblind"
     print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
 
     # if blind == "nonblind": return 
-    postfix = Path(f"./dynamic/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    postfix = Path(f"./dynamic_kpn/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
     cfg.model_path = cfg.model_path / postfix
     cfg.optim_path = cfg.optim_path / postfix
     if not cfg.model_path.exists(): cfg.model_path.mkdir(parents=True)
@@ -86,8 +85,8 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
 
     torch.cuda.set_device(gpuid)
 
-    # load model
-    model = load_model(cfg)
+    # -- load model --
+    model,criterion = load_model_kpn(cfg)
     optimizer = load_optimizer(cfg,model)
     scheduler = load_scheduler(cfg,model,optimizer)
     nparams = count_parameters(model)
@@ -98,8 +97,6 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     data,loader = load_dataset(cfg,'dynamic')
     # data,loader = simulate_noisy_dataset(data,loaders,M,N)
 
-    # load criterion
-    criterion = nn.BCELoss()
 
     if cfg.load:
         fp = cfg.model_path / Path("checkpoint_30.tar")
@@ -117,6 +114,7 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
         print("Loaded model.")
         cfg.current_epoch = cfg.epochs
         
+    cfg.global_step = 0
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
         losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
@@ -140,14 +138,14 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     
     save_model(cfg, model, optimizer)
 
-def run_me_Ngrid():
-    ngpus = 3
-    nprocs_per_gpu = 2
+def run_me_grid():
+    ngpus = 2
+    nprocs_per_gpu = 1
     nprocs = ngpus * nprocs_per_gpu 
     Sgrid = [50000]
     # Ggrid = [10,25,50,100,150,200]
     Ggrid = [25]
-    Ngrid = [3,10,20]
+    Ngrid = [10,5,20]
     nNgrid = len(Ngrid)
     nGgrid = len(Ggrid)
     te_losses = dict.fromkeys(Ngrid)
