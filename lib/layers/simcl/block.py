@@ -30,7 +30,7 @@ class ClBlock(nn.Module):
         self.num_transforms = num_transforms
         self.batch_size = batch_size
         
-
+        self.return_three = False # generally this is always False
         self.two_outputs = True
         if isinstance(self.encoder,ResNet):
             # self.two_outputs = False
@@ -48,8 +48,9 @@ class ClBlock(nn.Module):
 
         # encode
         pic_set = pic_set.reshape((N*BS,)+pshape)
+        skips = None
         if self.two_outputs:
-            h,_ = self.encoder(pic_set)
+            h,skips = self.encoder(pic_set)
         else:
             h = self.encoder(pic_set)
 
@@ -57,5 +58,36 @@ class ClBlock(nn.Module):
         proj = self.projector(h).reshape(N,BS,-1)
         
         h = h.reshape(N,BS,-1)
-        return h,proj
+        if self.return_three:
+            return h,proj,skips
+        else:
+            return h,proj
+
+class ClBlockEnc(nn.Module):
+
+    def __init__(self,model,img_size,d_model_attn):
+        super(ClBlockEnc, self).__init__()
+        self.model = model
+        self.model.two_outputs = True
+        self.model.return_three = True
+        self.img_size = img_size
+        self.d_model_attn = d_model_attn
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+
+    def forward(self,pic_set):
+        img_size = self.img_size
+        h,p,skips = self.model(pic_set)
+        N,BS,E = h.shape
+        h = h.view(N,BS,-1,img_size,img_size)
+        agg = [h]
+        for skip in skips[1:]:
+            if skip.shape[-1] != self.img_size:
+                skip = self.up(skip)
+            skip = skip.view(N,BS,-1,img_size,img_size)
+            # print(skip.shape)
+            agg.append(skip)
+        rep = torch.cat(agg,dim=2)
+        rep = rep[:,:,:self.d_model_attn]
+        return rep
+
 

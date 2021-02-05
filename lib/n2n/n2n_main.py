@@ -1,5 +1,6 @@
 
 # python imports
+import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -32,7 +33,7 @@ def get_postfix_str(cfg,blind,noise_level):
     postfix = Path(f"./n2n_main/{cfg.S}/{blind}/{noise_level}/")
     return postfix
 
-def run_me(rank=0,Sgrid=[50000],Ngrid=[2],nNgrid=2,Ggrid=[25],nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     args = get_args()
@@ -40,7 +41,9 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[2],nNgrid=2,Ggrid=[25],nGgrid=1,ngpus=3,i
     cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.use_apex = False
-    gpuid = rank % ngpus # set gpuid
+    # gpuid = rank % ngpus # set gpuid
+    gpuid = 2
+    cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
     grid_idx = idx*(1*ngpus)+rank
@@ -111,6 +114,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[2],nNgrid=2,Ggrid=[25],nGgrid=1,ngpus=3,i
     if cfg.load:
         model = load_model_fp(cfg,model,checkpoint,gpuid)
 
+    print("PID: {}".format(os.getpid()))
     cfg.current_epoch = 0
     te_ave_psnr = {}
     test_before = True

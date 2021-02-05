@@ -1,17 +1,14 @@
 
-# python imports
+# -- python imports --
 from pathlib import Path
 
-# pytorch imports
+# -- pytorch imports --
 import torch
 
-# project imports
+# -- project imports --
 
-def load_optimizer_gen(cfg,model):
+def load_optimizer(cfg,model):
     optimizer = torch.optim.Adam(model.parameters(),lr=cfg.init_lr,betas=(0,0.9))
     return optimizer
 
-def load_optimizer_disc(cfg,model):
-    optimizer = torch.optim.Adam(model.parameters(),lr=cfg.init_lr,betas=(0,0.9))
-    return optimizer
 

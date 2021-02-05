@@ -1,0 +1,16 @@
+-=-=-=-=- 0.1 -=-=-=-=-=-
+- no motion
+
+input features: color one-hot-encoding versus 
+
+
+
+basline; loss on each patch
+- rhs: loss on each patch; detach final recon; add loss of final recon (5 psnr)
+- lhs: loss on each patch thru unet; ( 5 psnr)
+- deeper transformer
+
+
+
+extra noise on middle frame; no middle frame input; 27 psnr; frame shift 6; 3 frames; detach middle
+

@@ -1,5 +1,5 @@
 """
-Configurations for denoising experiments
+Configurations for Transformer experiments
 
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import settings
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Run a Denoising Experiment")
+    parser = argparse.ArgumentParser(description="Run a ATTN Experiment")
     parser.add_argument("--yaml", type=str, default=None,
                         help="Set all arguments using yaml file.")
     parser.add_argument("--name", type=str, default=None,
@@ -258,6 +258,8 @@ def set_cfg(args):
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.dataset.n_classes = 10
     cfg.dataset.name = args.dataset
+    cfg.dataset.load_residual = False
+    cfg.dataset.triplet_loader = True
 
     cfg.batch_size = args.batch_size
     cfg.world_size = args.world_size
@@ -292,8 +294,8 @@ def set_cfg(args):
     # 
 
     dsname = cfg.dataset.name.lower()
-    model_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/model/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/denoise/{dsname}/{cfg.exp_name}/optim/")
+    model_path = Path(f"{settings.ROOT_PATH}/output/attn/{dsname}/{cfg.exp_name}/model/")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/attn/{dsname}/{cfg.exp_name}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.model_path = model_path
     cfg.optim_path = optim_path
@@ -304,6 +306,7 @@ def set_cfg(args):
     cfg.current_epoch = 0
     cfg.checkpoint_interval = 1
     cfg.test_interval = 5
+    cfg.test_log_interval = 250
     cfg.log_interval = 5
     
     # saving
@@ -342,6 +345,17 @@ def set_cfg(args):
     cfg.simcl.n_img_channels = cfg.n_img_channels
     cfg.simcl.activation_hooks = False
 
+    # -- allow for dynamic frame motion --
+    cfg.dynamic = edict()
+    cfg.dynamic.bool = True
+    cfg.dynamic.ppf = 2
+    cfg.dynamic.frames = cfg.N
+    cfg.dynamic.mode = "global"
+    cfg.dynamic.global_mode = "shift"
+    cfg.dynamic.frame_size = 128
+    cfg.dynamic.total_pixels = 20
+    cfg.dynamic.random_eraser = False
+
     # set current config from simcl config
     cfg.enc_size = cfg.simcl.enc_size
     cfg.proj_size = cfg.simcl.proj_size
@@ -349,6 +363,10 @@ def set_cfg(args):
     # to update before model_io call
     cfg.simcl.device = cfg.device
     cfg.simcl.rank = cfg.rank
+
+    # add dataset size as parameter
+    cfg.S = -1
+    cfg.set_worker_seed = False
 
     return cfg
     

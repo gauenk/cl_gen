@@ -152,6 +152,186 @@ class DisentCIFAR10v1(CIFAR10):
 
         return img_set, th_img
 
+class SingleDenoiseCIFAR10(CIFAR10):
+
+    def __init__(self,root,N,noise_type,noise_params,train=False):
+        self.N = N
+        self.noise_type = noise_type
+        self.noise_params = noise_params
+        trans,self.repN = self._get_noise_transform(noise_type,noise_params,N)
+        assert self.repN == False, "Can't handle multiframes yet."
+        th_trans = self._get_th_img_trans()
+        self.__class__.__name__ = "cifar10"
+        super(SingleDenoiseCIFAR10, self).__init__( root, train=train,
+                                              transform=trans)
+        self.th_trans = th_trans
+        self.noise_set = {index:torch.zeros((3,32,32)) for index in range(len(self))}
+        self.create_onetime_noise()
+
+
+    def create_onetime_noise(self):
+        """
+        Creating the noise map for the image
+        
+        Currently, we just assume the noise is additive so we store a dataset of elements
+        to add to each image using the "index" to match 
+
+        Later, we should store a dictionary of functions
+        """
+        for index in range(len(self)):
+            self.noise_set[index] = self._getitem_gen_noisy_(index)
+        
+    def __getitem__(self, index):
+        """
+        Get the item with the fixed noise
+        """
+        img, target = Image.fromarray(self.data[index]), int(self.targets[index])
+        th_img = self.th_trans(img)
+        img_set = th_img
+        # img_set = self.noise_set[index] + th_img
+        return img_set, th_img
+
+    def _getitem_gen_noisy_(self, index):
+        """
+        Args:
+            index (int): Index
+
+        Returns:
+            tuple: (image, target) where target is index of the target class.
+        """
+        img, target = Image.fromarray(self.data[index]), int(self.targets[index])
+        assert self.repN == False, "Can't handle multiple frames yet."
+        if self.repN:
+            img_set = self._apply_transform_N(img)
+        else:
+            img_set = self.transform(img)
+        th_img = self.th_trans(img)
+        return img_set - th_img
+
+    def _apply_transform_N(self,img):
+        t = self.transform
+        imgs = []
+        for _ in range(self.N):
+            # imgs.append(t_img)
+            imgs.append(t(img))
+        imgs = torch.stack(imgs)
+        return imgs
+        
+    def _get_noise_transform(self,noise_type,params,N):
+        if noise_type == "g":
+            return self._get_g_noise(params,N),False
+        elif noise_type == "ll":
+            return self._get_ll_noise(params,N),False
+        elif noise_type == "msg":
+            print("Loading msg transforms")
+            return self._get_msg_noise(params,N),False
+        elif noise_type == "msg_simcl":
+            print("Loading msg_simcl transforms")
+            return self._get_msg_simcl_noise(params,N),True
+        else:
+            raise ValueError(f"Unknown noise_type [{noise_type}]")
+
+    def _get_g_noise(self,params,N):
+        """
+        Noise Type: Gaussian  (LL)
+        - Each N images has Gaussian noise from with same parameters
+        """
+        resize = torchvision.transforms.Resize(size=32)
+        to_tensor = th_transforms.ToTensor()
+        szm = ScaleZeroMean()
+        gaussian_noise = AddGaussianNoiseSet(N,params['mean'],params['stddev'])
+        comp = [resize,to_tensor,szm,gaussian_noise]
+        t = th_transforms.Compose(comp)
+        return t
+
+    def _get_ll_noise(self,params,N):
+        """
+        Noise Type: Low-Light  (LL)
+        - Each N images is a low-light image with same alpha parameter
+        """
+        raise NotImplemented()
+
+    def _get_msg_noise(self,params,N):
+        """
+        Noise Type: Multi-scale Gaussian  (MSG)
+        - Each N images has it's own noise level
+        """
+        resize = torchvision.transforms.Resize(size=32)
+        to_tensor = th_transforms.ToTensor()
+        szm = ScaleZeroMean()
+        gaussian_n2n = AddGaussianNoiseSetN2N(N,(0,50.))
+        comp = [resize,to_tensor,szm,gaussian_n2n]
+        t = th_transforms.Compose(comp)
+        return t
+
+    def _get_msg_simcl_noise(self,params,N):
+        """
+        Noise Type: Multi-scale Gaussian  (MSG)
+        - Each N images has it's own noise level
+
+        plus contrastive learning augs
+        - random crop (flip and resize)
+        - color distortion
+        - gaussian blur
+        """
+        comp = []
+        # -- random resize, crop, and flip --
+        crop = torchvision.transforms.RandomResizedCrop(size=32)
+        comp += [crop]
+
+        # -- flipping --
+        # vflip = torchvision.transforms.RandomVerticalFlip(p=0.5)
+        # comp += [vflip]
+        hflip = torchvision.transforms.RandomHorizontalFlip(p=0.5)
+        comp += [hflip]
+
+        # -- color jitter -- 
+        s = params['s'] 
+        c_jitter_kwargs = {'brightness':0.8*s,
+                           'contrast':0.8*s,
+                           'saturation':0.8*s,
+                           'hue': 0.2*s}
+        cjitter = torchvision.transforms.ColorJitter(**c_jitter_kwargs)
+        cjitter = torchvision.transforms.RandomApply([cjitter], p=0.8)
+        comp += [cjitter]
+
+        # -- convert to gray --
+        # gray = torchvision.transforms.RandomGrayscale(p=0.8)
+        # comp += [gray]
+        
+        # -- gaussian blur --
+        # gblur = GaussianBlur(size=3)
+        # comp += [gblur]
+
+        # -- convert to tensor --
+        to_tensor = th_transforms.ToTensor()
+        comp += [to_tensor]
+
+        # -- center to zero mean, all within [-1,1] --
+        # szm = ScaleZeroMean()
+        # comp += [szm]
+
+        # -- additive gaussian noise --
+        # gaussian_n2n = AddGaussianNoiseRandStd(0,0,50)
+        # comp += [gaussian_n2n]
+
+        t = th_transforms.Compose(comp)
+
+        # def t_n_raw(t,N,img):
+        #     imgs = []
+        #     for _ in range(N):
+        #         imgs.append(t(img))
+        #     imgs = torch.stack(imgs)
+        #     return imgs
+        # t_n = partial(t_n_raw,t,N)
+        return t
+        
+    def _get_th_img_trans(self):
+        t = th_transforms.Compose([torchvision.transforms.Resize(size=32),
+                                   th_transforms.ToTensor()
+        ])
+        return t
+
 class DenoiseCIFAR10(CIFAR10):
 
     def __init__(self,root,N,noise_type,noise_params,train=True):
@@ -317,7 +497,8 @@ class DenoiseCIFAR10(CIFAR10):
 #
 
 def get_cifar10_dataset(cfg,mode):
-    if mode == "denoising" or mode == "simcl" or mode == "simcl_cls":
+
+    if mode == "denoising" or mode == "simcl" or mode == "simcl_cls" or mode == "single_denoising":
         root = cfg.dataset.root
     else:
         root = cfg[mode].dataset.root
@@ -367,6 +548,16 @@ def get_cifar10_dataset(cfg,mode):
         data.val.data = data.val.data[0:2*2048]
         data.val.targets = data.val.targets[0:2*2048]
         data.te = DenoiseCIFAR10(root,N,noise_type,noise_params,train=False)
+    elif mode == "single_denoising":
+        batch_size = cfg.batch_size
+        N = cfg.N
+        noise_type = cfg.noise_type
+        noise_params = cfg.noise_params[noise_type]
+        data.tr = SingleDenoiseCIFAR10(root,N,noise_type,noise_params,train=True)
+        data.val = SingleDenoiseCIFAR10(root,N,noise_type,noise_params,train=False)
+        data.val.data = data.val.data[0:2*2048]
+        data.val.targets = data.val.targets[0:2*2048]
+        data.te = SingleDenoiseCIFAR10(root,N,noise_type,noise_params,train=False)
     else: raise ValueError(f"Unknown CIFAR10 mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)

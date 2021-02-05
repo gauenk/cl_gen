@@ -27,6 +27,9 @@ class ClBlockLoss(nn.Module):
         
 
     def forward(self,z):
+        """
+        z are embeddings shape (N,BS,*)
+        """
         
         # shape info
         N,BS = z.shape[:2]

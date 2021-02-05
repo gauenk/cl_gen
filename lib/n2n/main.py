@@ -1,26 +1,26 @@
 
-# python imports
+# -- python imports --
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
 
-# pytorch import 
+# -- pytorch import --
 import torch
 from torch import nn
 import torchvision.utils as vutils
 import torch.nn.functional as F
 import torch.multiprocessing as mp
 
-# project code
+# -- project code --
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from learning.utils import save_model
 
-# [this folder] project code
+# -- [this folder] project code --
 from .config import get_cfg,get_args
 from .model_io import load_model,load_model_fp
 from .optim_io import load_optimizer
@@ -28,7 +28,7 @@ from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
 
-def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     args = get_args()
@@ -37,6 +37,8 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
+    gpuid = 2
+    cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
     grid_idx = idx*(1*ngpus)+rank
@@ -45,6 +47,10 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     G_grid_idx = grid_idx // (nNgrid * 2) % nGgrid
     S_grid_idx = grid_idx // (nGgrid * nNgrid * 2) 
 
+    # -- force blind --
+    B_grid_idx = 0
+
+    # -- config settings --
     cfg.use_collate = True
     # cfg.dataset.download = False
     # cfg.cls = cfg
@@ -52,28 +58,49 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
     cfg.blind = (B_grid_idx == 0)
+    cfg.blind = True
     cfg.N = Ngrid[N_grid_idx]
+    cfg.N = 3
+    # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
-    noise_level = Ggrid[G_grid_idx]
-    cfg.batch_size = 16
-    cfg.init_lr = 1e-3
+    noise_level = Ggrid[G_grid_idx] # don't worry about
+    cfg.batch_size = 4
+    cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 30
+    cfg.color_cat = True
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
+    cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = 20
+    # cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
+    cfg.dynamic.total_pixels = 6
     cfg.load = False
+
+    cfg.input_noise = False
+    cfg.input_noise_middle_only = False
+    cfg.input_with_middle_frame = True
+
+    cfg.middle_frame_random_erase = False
+    cfg.input_noise_level = noise_level/255.
+    if (cfg.blind == 0): # e.g. supervised is true
+        cfg.input_with_middle_frame = True
+    if cfg.input_with_middle_frame:
+        cfg.input_N = cfg.N
 
     blind = "blind" if cfg.blind else "nonblind"
     print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
 
     # if blind == "nonblind": return 
-    postfix = Path(f"./dynamic/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    dynamic_str = "dynamic_input_noise" if cfg.input_noise else "dynamic"
+    if cfg.input_noise_middle_only: dynamic_str += "_mo"
+    if cfg.input_with_middle_frame: dynamic_str += "_wmf"
+    postfix = Path(f"./{dynamic_str}/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    print(postfix,cfg.dynamic.total_pixels)
     cfg.model_path = cfg.model_path / postfix
     cfg.optim_path = cfg.optim_path / postfix
     if not cfg.model_path.exists(): cfg.model_path.mkdir(parents=True)
@@ -127,6 +154,7 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     epochs,psnr = zip(*te_ave_psnr.items())
     best_index = np.argmax(psnr)
     best_epoch,best_psnr = epochs[best_index],psnr[best_index]
+    print(f"Best Epoch {best_epoch} | Best PSNR {best_psnr} | N: {cfg.N} | Blind: {blind}")
     
     root = Path(f"{settings.ROOT_PATH}/output/n2n/{postfix}/")
     # if cfg.blind: root = root / Path(f"./blind/")
@@ -142,12 +170,12 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
 
 def run_me_Ngrid():
     ngpus = 3
-    nprocs_per_gpu = 2
+    nprocs_per_gpu = 1
     nprocs = ngpus * nprocs_per_gpu 
     Sgrid = [50000]
     # Ggrid = [10,25,50,100,150,200]
     Ggrid = [25]
-    Ngrid = [3,10,20]
+    Ngrid = [3,10,100]
     nNgrid = len(Ngrid)
     nGgrid = len(Ggrid)
     te_losses = dict.fromkeys(Ngrid)

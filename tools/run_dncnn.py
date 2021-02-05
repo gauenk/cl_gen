@@ -9,8 +9,7 @@ matplotlib.use('Agg')
 
 # project imports
 import settings
-from n2n.dncnn import run_me,run_me_Ngrid
+from dncnn.main import run_me
 
 if __name__ == "__main__":
     run_me()
-    # run_me_Ngrid()

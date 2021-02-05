@@ -9,17 +9,9 @@ from torch.optim import lr_scheduler as lr_sched
 # -- project imports --
 
 
-def load_scheduler_gen(cfg,model,optimizer):
+def load_scheduler(cfg,model,optimizer):
     scheduler = lr_sched.ReduceLROnPlateau(optimizer,
                                            mode="min",
                                            patience = 5,
                                            factor=1./np.sqrt(10))
     return scheduler
-
-def load_scheduler_disc(cfg,model,optimizer):
-    scheduler = lr_sched.ReduceLROnPlateau(optimizer,
-                                           mode="min",
-                                           patience = 5,
-                                           factor=1./np.sqrt(10))
-    return scheduler
-

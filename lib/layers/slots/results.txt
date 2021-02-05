@@ -1,0 +1,6 @@
+-> This document is targeted toward a new supervised burst denoising method
+-> This does not directly solve UNSUP burst denoising unless this is the "magical" method. That is if we apply the N2N training scheme, maybe we can get a meaninful answer.
+   -> this might work *much, much* better than KPN
+      since it can handle different motions of direction.
+
+-> 

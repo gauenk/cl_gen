@@ -4,6 +4,7 @@ Pascal voc dataset
 """
 
 # python imports
+import pdb
 from PIL import Image
 from functools import partial
 from easydict import EasyDict as edict
@@ -210,7 +211,7 @@ class DenoiseVOC(VOCDetection):
 
 class DynamicVOC(VOCDetection):
 
-    def __init__(self,root,year,image_set,N,noise_type,noise_params,dynamic,load_res):
+    def __init__(self,root,year,image_set,N,noise_type,noise_params,dynamic,load_res,bw):
         self.N = N
         self.noise_type = noise_type
         self.noise_params = noise_params
@@ -218,6 +219,7 @@ class DynamicVOC(VOCDetection):
         self.size = self.dynamic.frame_size
         self.image_set = image_set
         self.load_res = load_res
+        self.bw = bw
         noisy_N = N if dynamic['bool'] else 1
         noisy_trans = self._get_noise_transform(noise_type,noise_params)
         self.dynamic_trans = self._get_dynamic_transform(dynamic,noisy_trans,load_res)
@@ -230,8 +232,9 @@ class DynamicVOC(VOCDetection):
         path = root
         super(DynamicVOC, self).__init__( path, year, image_set)
         self.th_trans = th_trans
-        self.to_tensor = th_transforms.Compose([th_transforms.RandomResizedCrop((self.size,self.size)),
-                                                th_transforms.ToTensor()])
+        self.to_tensor = th_transforms.Compose([
+            th_transforms.RandomResizedCrop((self.size,self.size)),
+            th_transforms.ToTensor()])
         # create dynamic motion separately.
 
     def __getitem__(self, index):
@@ -242,9 +245,11 @@ class DynamicVOC(VOCDetection):
         Returns:
             tuple: (image, target) where target is index of the target class.
         """
+
         img = Image.open(self.images[index]).convert("RGB")
+        if self.bw: img = img.convert('1')
         target = self.parse_voc_xml(ET.parse(self.annotations[index]).getroot())
-        th_img = self.to_tensor(img)
+        # th_img = self.to_tensor(img)
         img_set,res_set,clean_target = self.dynamic_trans(img)
         return img_set, res_set, clean_target
 
@@ -416,11 +421,12 @@ def get_voc_dataset(cfg,mode):
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
-        data.tr = DynamicVOC(root,"2012","trainval",N,noise_type,noise_params,dynamic,load_res)
-        data.val = DynamicVOC(root,"2012","val",N,noise_type,noise_params,dynamic,load_res)
+        bw = cfg.dataset.bw
+        data.tr = DynamicVOC(root,"2012","trainval",N,noise_type,noise_params,dynamic,load_res,bw)
+        data.val = DynamicVOC(root,"2012","val",N,noise_type,noise_params,dynamic,load_res,bw)
         # data.val.data = data.val.data[0:2*2048]
         # data.val.targets = data.val.targets[0:2*2048]
-        data.te = DynamicVOC(root,"2007","test",N,noise_type,noise_params,dynamic,load_res)
+        data.te = DynamicVOC(root,"2007","test",N,noise_type,noise_params,dynamic,load_res,bw)
     else: raise ValueError(f"Unknown VOC mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)

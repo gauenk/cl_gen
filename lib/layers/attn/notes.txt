@@ -1,0 +1,2 @@
+Determining the utility of a new loss function from single sample, random init + SGD updates
+Includes an experiment searching over the space of loss functions to discover new ones and old ones

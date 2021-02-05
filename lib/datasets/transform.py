@@ -256,6 +256,8 @@ class GlobalCameraMotionTransform():
         self.nframes = dynamic['frames']
         self.ppf = dynamic['ppf']
         self.total_pixels = dynamic['total_pixels']
+        self.random_eraser_bool = dynamic['random_eraser']
+        self.random_eraser = thT.RandomErasing()#scale=(0.40,0.80))
         self.PI = 2*torch.acos(torch.zeros(1)).item() 
         self.frame_size = self.dynamic.frame_size
         self.img_size = 256
@@ -332,6 +334,7 @@ class GlobalCameraMotionTransform():
         pics = torch.stack(pics)
         res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
+        if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
         return pics,res,clean_target
 
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):

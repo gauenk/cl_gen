@@ -1,42 +1,53 @@
 
-# python imports
+# -- python imports --
+import sys,os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
 
-# pytorch import 
+# -- pytorch import --
 import torch
 from torch import nn
 import torchvision.utils as vutils
 import torch.nn.functional as F
 import torch.multiprocessing as mp
 
-# project code
+# -- project code --
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from learning.utils import save_model
 
-# [this folder] project code
+# -- [this folder] project code --
 from .config import get_cfg,get_args
 from .model_io import load_model_kpn,load_model_fp,load_model
-from .optim_io import load_optimizer
+from .optim_io import load_optimizer_kpn as load_optimizer
 from .sched_io import load_scheduler
 from .learn_kpn import train_loop,test_loop
+from .utils import init_record
 
-def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
+    """
+    PSNR 20 = (can equal) = AWGN @ 25
+    PSNR 25 = (can equal) = AWGN @ 14
+    PSNR 28 = (can equal) = AWGN @ 5
+    """
+
     args = get_args()
     args.name = "default"
     cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.use_apex = False
-    gpuid = rank % ngpus # set gpuid
+    gpuid = 1
+    cfg.gpuid = gpuid
+    # gpuid = rank % ngpus # set gpuid
     cfg.device = f"cuda:{gpuid}"
+    
 
     grid_idx = idx*(1*ngpus)+rank
     B_grid_idx = (grid_idx % 2)
@@ -50,29 +61,44 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     cfg.S = Sgrid[S_grid_idx]
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
-    cfg.blind = (B_grid_idx == 0)
+    # cfg.blind = (B_grid_idx == 0)
+    cfg.blind = True
     cfg.N = Ngrid[N_grid_idx]
+    cfg.N = 3
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx]
-    cfg.batch_size = 16
+    cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
-    cfg.input_N = cfg.N
+    cfg.input_N = cfg.N-1
     cfg.epochs = 30
-    cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
+    cfg.log_interval = 100 # int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
-    cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = 10
+    cfg.dynamic.frame_size = 64
+    cfg.dynamic.total_pixels = 2*cfg.N
     cfg.load = False
+    print("KPN.")
+
+    # -- input noise for learning --
+    cfg.input_noise = False
+    cfg.input_noise_middle_only = False
+    cfg.input_with_middle_frame = True
+    cfg.input_noise_level = noise_level/255
+    if cfg.input_with_middle_frame:
+        cfg.input_N = cfg.N
 
     blind = "blind" if cfg.blind else "nonblind"
-    print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
+    print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid,cfg.input_noise,cfg.input_with_middle_frame)
 
     # if blind == "nonblind": return 
-    postfix = Path(f"./dynamic_kpn/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    dynamic_str = "dynamic_input_noise" if cfg.input_noise else "dynamic"
+    if cfg.input_noise_middle_only: dynamic_str += "_mo"
+    if cfg.input_with_middle_frame: dynamic_str += "_wmf"
+    postfix = Path(f"./{dynamic_str}/{cfg.dynamic.frame_size}_{cfg.dynamic.ppf}_{cfg.dynamic.total_pixels}/{cfg.S}/{blind}/{cfg.N}/{noise_level}/")
+    print(postfix)
     cfg.model_path = cfg.model_path / postfix
     cfg.optim_path = cfg.optim_path / postfix
     if not cfg.model_path.exists(): cfg.model_path.mkdir(parents=True)
@@ -81,6 +107,7 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
 
+    print("PID: {}".format(os.getpid()))
     print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
 
     torch.cuda.set_device(gpuid)
@@ -115,18 +142,29 @@ def run_me(rank=0,Sgrid=1,Ngrid=1,nNgrid=1,Ggrid=1,nGgrid=1,ngpus=3,idx=0):
         cfg.current_epoch = cfg.epochs
         
     cfg.global_step = 0
+    use_record = False
+    record = init_record()
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
-        losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
+        print("Running KPN-allKernels unsup, f3, no-recording, unsupKPN, no Temporal loss, yes OT loss xbatch")
+        sys.stdout.flush()
+
+        losses,epoch_record = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
+
+        if use_record:
+            record = record.append(epoch_record)
+            write_record_file(cfg.current_epoch,postfix,record)
+
         ave_psnr = test_loop(cfg,model,criterion,loader.te,epoch)
         te_ave_psnr[epoch] = ave_psnr
         cfg.current_epoch += 1
+
 
     epochs,psnr = zip(*te_ave_psnr.items())
     best_index = np.argmax(psnr)
     best_epoch,best_psnr = epochs[best_index],psnr[best_index]
     
-    root = Path(f"{settings.ROOT_PATH}/output/n2n/{postfix}/")
+    root = Path(f"{settings.ROOT_PATH}/output/n2n-kpn/{postfix}/")
     # if cfg.blind: root = root / Path(f"./blind/")
     # else: root = root / Path(f"./nonblind/")
     fn = Path(f"results.csv")
@@ -157,6 +195,14 @@ def run_me_grid():
     # idx = num_of_grids
     # remainder = num_of_grids % nprocs
     # r = mp.spawn(run_me, nprocs=remainder, args=(Sgrid,Ngrid,nNgrid,Ggrid,nGgrid,ngpus,idx))
+
+def write_record_file(current_epoch,postfix,record):
+    root = Path(f"{settings.ROOT_PATH}/output/n2n-kpn/{postfix}/")
+    if not root.exists(): root.mkdir(parents=True)
+    path = root / f"record_unsupOT-xbatch_plus_unsupMSE_{current_epoch}.csv"
+    print(f"Writing record_losses to {path}")
+    record.to_csv(path)
+
 
 """
 
