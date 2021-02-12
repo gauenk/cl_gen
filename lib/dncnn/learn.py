@@ -1,0 +1,132 @@
+
+# python imports
+import numpy as np
+import numpy.random as npr
+from pathlib import Path
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+# pytorch imports
+import torch
+import torch.nn.functional as F
+import torchvision.utils as vutils
+
+# project code
+import settings
+from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+
+def train_loop(cfg,model,optimizer,criterion,train_loader,epoch):
+    model.train()
+    model = model.to(cfg.device)
+    N = cfg.N
+    total_loss = 0
+    running_loss = 0
+
+    for batch_idx, (burst_imgs, res_imgs, raw_img) in enumerate(train_loader):
+
+        optimizer.zero_grad()
+        model.zero_grad()
+
+        # -- viz burst --
+        # fig,ax = plt.subplots(figsize=(10,10))
+        # imgs = burst_imgs + 0.5
+        # imgs.clamp_(0.,1.)
+        # raw_img = raw_img.expand(burst_imgs.shape)
+        # print(imgs.shape,raw_img.shape)
+        # all_img = torch.cat([imgs,raw_img],dim=1)
+        # print(all_img.shape)
+        # grids = [vutils.make_grid(all_img[i],nrow=16) for i in range(cfg.dynamic.frames)]
+        # ims = [[ax.imshow(np.transpose(i,(1,2,0)), animated=True)] for i in grids]
+        # ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
+        # Writer = animation.writers['ffmpeg']
+        # writer = Writer(fps=1, metadata=dict(artist='Me'), bitrate=1800)
+        # ani.save(f"{settings.ROOT_PATH}/train_loop_voc.mp4", writer=writer)
+        # print("I DID IT!")
+        # return
+        
+        # -- reshaping of data --
+        raw_img = raw_img.cuda(non_blocking=True)
+        burst_imgs = burst_imgs.cuda(non_blocking=True)
+        res_imgs = res_imgs.cuda(non_blocking=True)
+        img0,res0 = burst_imgs[0],res_imgs[0]
+        # img1,res1 = burst_imgs[1],res_imgs[1]
+        
+        # -- predict residual --
+        pred_res = model(img0)
+        rec_img = img0 - pred_res
+
+        # -- compare with stacked burst --
+        loss = F.mse_loss(raw_img,rec_img+0.5)
+        # loss = F.mse_loss(res_imgs[0],pred_res)
+
+        # -- update info --
+        running_loss += loss.item()
+        total_loss += loss.item()
+
+        # -- BP and optimize --
+        loss.backward()
+        optimizer.step()
+
+        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
+
+            # -- compute mse for fun --
+            BS = raw_img.shape[0]            
+            raw_img = raw_img.cuda(non_blocking=True)
+            mse_loss = F.mse_loss(raw_img,rec_img+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            psnr = np.mean(mse_to_psnr(mse_loss))
+            running_loss /= cfg.log_interval
+            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.3e"%(epoch, cfg.epochs, batch_idx,
+                                                         len(train_loader),
+                                                         running_loss,psnr))
+            running_loss = 0
+    total_loss /= len(train_loader)
+    return total_loss
+
+
+def test_loop(cfg,model,criterion,test_loader,epoch):
+    model.eval()
+    model = model.to(cfg.device)
+    total_psnr = 0
+    total_loss = 0
+    with torch.no_grad():
+        for batch_idx, (burst_imgs, res_img, raw_img) in enumerate(test_loader):
+
+            BS = raw_img.shape[0]
+
+            # reshaping of data
+            raw_img = raw_img.cuda(non_blocking=True)
+            burst_imgs = burst_imgs.cuda(non_blocking=True)
+            img0 = burst_imgs[0]
+
+            # denoising
+            pred_res = model(img0)
+            rec_img = img0 - pred_res
+
+            # compare with stacked targets
+            rec_img = rescale_noisy_image(rec_img).detach()
+            loss = F.mse_loss(raw_img,rec_img,reduction='none').reshape(BS,-1)
+            # loss = F.mse_loss(burst_imgs[0]+0.5,raw_img,reduction='none').reshape(BS,-1)
+            loss = torch.mean(loss,1).detach().cpu().numpy()
+            psnr = mse_to_psnr(loss)
+
+            total_psnr += np.mean(psnr)
+            total_loss += np.mean(loss)
+
+            if (batch_idx % cfg.test_log_interval) == 0:
+                root = Path(f"{settings.ROOT_PATH}/output/n2n/rec_imgs/e{epoch}")
+                if not root.exists(): root.mkdir(parents=True)
+                fn = root / Path(f"b{batch_idx}.png")
+                nrow = int(np.sqrt(cfg.batch_size))
+                rec_img = rec_img.detach().cpu()
+                grid_imgs = vutils.make_grid(rec_img, padding=2, normalize=True, nrow=nrow)
+                plt.imshow(grid_imgs.permute(1,2,0))
+                plt.savefig(fn)
+                plt.close('all')
+  
+
+    ave_psnr = total_psnr / len(test_loader)
+    ave_loss = total_loss / len(test_loader)
+    print("Testing results: Ave psnr %2.3e Ave loss %2.3e"%(ave_psnr,ave_loss))
+    return ave_psnr
+

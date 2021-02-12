@@ -1,1 +1,1 @@
-from .default import Net as STN_Net
+from .default import STN,STNPairs,STNBurst

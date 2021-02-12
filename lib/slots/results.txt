@@ -1,0 +1,63 @@
+
+-=-=- exp .1 overview -=-=-
+
+- no motion
+- small batch sizes (8 and 32)
+- N = 5
+- middle frame target
+- no middle input frame
+
+[image size 32] -> 33.38 PSNR @ 11 epochs (33.39 @ 20)
+[image size 16] -> 33.46 PSNR @ 47 epochs (33.22 @ 15) (33.69 @ 273)
+
+we notice there is edge effects from the combination of blocks
+
+[proposed change]: adding conv layer at end.
+- this changes how we compute loss since it is through a convolution layer across attention
+- adding a conv at end and computing loss of recon image -> 5.26 PSNR @ 1
+
+[proposed change]: expand source receptive field (or shrink target field)
+- to maintain seq length, we opt to keep the src receptive field at 16x16
+- the output receptive field is then 8x8
+- the number of patches for a 16x16 image goes from 1 to 4
+- the number of patches for a 32x32 imge goes from 4 to 16
+
+- input field size is 24; output is 16; BS = 1 (OOM)
+- [optimize loss over all image]: 5.0 - 6.0 PSNR @ 5 epochs
+- [optimize loss over each patch]: 18.44 PSNR @ 1 epoch | 17.57 PSNR @ 2 epochs
+
+- input field size is 16; output is 8; BS = 1 (OOM)
+- [modify conv to reduce image dim]: from Conv2d(ic,3,1) -> Conv2d(ic,3,3,2,1)
+  - 21.43 PSNR @ 5 epochs; (20.07 PSNR @ 3 iterations)
+
+- IMG_SIZE = 16; input field size is 16; output is 16; BS = 16
+- [static; modify conv to reduce image dim]: from Conv2d(ic,3,1) -> Conv2d(ic,3,3,2,1);
+  - 33.35 PSNR @ 29 epochs
+- IMG_SIZE = 16; input field size is 16; output is 16; BS = 24
+- [**dynamic** ts 20; modify conv to reduce image dim]: Conv2d(ic,3,1) -> Conv2d(ic,3,3,2,1); 
+  - [ WITHOUT input noise WITHOUT middle frame]:
+    - 23.28 PSNR @ 3 epochs (24.48 @ 8 epochs)
+  - [ WITH input noise WITHOUT middle frame]:
+    - ? PSNR @ ? epochs
+  - [ WITH input noise WITH middle frame]:
+    - 24.99 PSNR @ 74 epochs
+
+- IMG_SIZE = 16; input field size is 16; output is 16; BS = 24; d_model = 512
+- [**dynamic** ts **5**; modify conv to reduce image dim]: Conv2d(ic,3,1) -> Conv2d(ic,3,3,2,1); 
+  - [ WITHOUT input noise WITHOUT middle frame]:
+    - ? PSNR @ ? epochs
+  - [ WITH input noise WITHOUT middle frame]:
+    - ? PSNR @ ? epochs
+  - [ WITH input noise WITH middle frame]:
+    - ? PSNR @ ? epochs
+
+-=-=- exp .2 overview -=-=-
+
+- small or no motion
+- small batch sizes (1 to 16)
+- N = 5
+- middle frame target
+- no middle input frame
+- input is pixel quantization of dim 512
+
+

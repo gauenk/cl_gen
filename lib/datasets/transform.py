@@ -93,6 +93,72 @@ class AddGaussianNoise(object):
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
 
+
+class AddLowLightNoiseBW(object):
+
+    def __init__(self,alpha,read_noise,nbits=3,seed=None):
+        self.alpha = alpha
+        self.read_noise = read_noise
+        self.nbits = nbits
+        self.seed = seed
+
+    def __call__(self,pic):
+        """
+        :params pic: input image shaped [...,C,H,W]
+        
+        we assume C = 3 and then we convert it to BW. 
+        """
+        pix_max = 2**self.nbits-1
+        pic_bw = tvF.rgb_to_grayscale(pic,1)
+        ll_pic = torch.poisson(self.alpha*pic_bw,generator=self.seed)
+        ll_pic += self.read_noise*torch.randn(ll_pic.shape)
+        if pic.shape[-3] == 3: ll_pic = self._add_color_channel(ll_pic)
+        ll_pic = torch.round(ll_pic)
+        ll_pic = torch.clamp(ll_pic,0, pix_max)
+        ll_pic /= self.alpha
+        return ll_pic
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(alpha={0})'.format(self.alpha)
+
+    def _add_color_channel(self,ll_pic):
+        repeat = [1 for i in ll_pic.shape]
+        repeat[-3] = 3
+        ll_pic = ll_pic.repeat(*(repeat))
+        return ll_pic
+        
+class AddPoissonNoiseBW(object):
+
+    def __init__(self,alpha,seed=None):
+        self.alpha = alpha
+        self.seed = seed
+
+    def __call__(self,pic):
+        pic_bw = tvF.rgb_to_grayscale(pic,1)
+        poisson_pic = torch.poisson(self.alpha*pic_bw,generator=self.seed)/self.alpha
+        if pic.shape[-3] == 3:
+            repeat = [1 for i in pic.shape]
+            repeat[-3] = 3
+            poisson_pic = poisson_pic.repeat(*(repeat))
+        return poisson_pic
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(alpha={0})'.format(self.alpha)
+
+class AddPoissonNoise(object):
+
+    def __init__(self,alpha,seed=None):
+        self.alpha = alpha
+        self.seed = seed
+
+    def __call__(self,pic):
+        poisson_pic = torch.poisson(self.alpha*pic,generator=self.seed)/self.alpha
+        return poisson_pic
+
+    def __repr__(self):
+        return self.__class__.__name__ + '(alpha={0})'.format(self.alpha)
+
+
 class AddGaussianNoiseRandStd(object):
     def __init__(self, mean=0., min_std=0,max_std=50):
         self.mean = mean
@@ -274,8 +340,8 @@ class GlobalCameraMotionTransform():
         clean_target = None
         middle_index = self.nframes // 2
         w,h = pic.size
-        d = self.sample_direction()
-        tl = self.init_coordinate(d,h,w)
+        direction = self.sample_direction()
+        tl = self.init_coordinate(direction,h,w)
 
         out_frame_size = (self.frame_size,self.frame_size)
         # tl_init = tl.clone()
@@ -302,7 +368,7 @@ class GlobalCameraMotionTransform():
         # -- create list of indices -- 
         tl_list = [tl.clone()]
         for i in range(self.nframes-1):
-            step = (torch.round((i+1) * d * ppf)).type(torch.int)
+            step = (torch.round((i+1) * direction * ppf)).type(torch.int)
             tl_i = tl + step
             tl_list.append(tl_i)
         # a = tl_list[0].type(torch.float)
@@ -335,7 +401,8 @@ class GlobalCameraMotionTransform():
         res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
         if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
-        return pics,res,clean_target
+        directions = torch.stack([direction],dim=0)
+        return pics,res,clean_target,directions
 
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
         tl = tl_list[i]
@@ -357,12 +424,16 @@ class GlobalCameraMotionTransform():
     def sample_direction(self):
         if self.reset_seed:
             torch.manual_seed(0)
-        # r = torch.sqrt(torch.rand(1))
-        r = 1
+        radius = 1
         rand_int = torch.rand(1)
-        # print("rand_int",rand_int)
         theta = rand_int * 2 * self.PI
-        direction = torch.FloatTensor([r * torch.cos(theta),r * torch.sin(theta)])
+        
+        # -- simplify motion --
+        # perm = torch.randperm(4)
+        # choices = torch.FloatTensor([0,self.PI/2.,self.PI,3*self.PI/2.])
+        # theta = choices[perm[0]]
+
+        direction = torch.FloatTensor([radius * torch.cos(theta), radius * torch.sin(theta)])
         # direction = torch.FloatTensor([1.,0.])
         return direction
 

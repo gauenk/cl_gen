@@ -1,0 +1,39 @@
+Other methds:
+- Denoising Single Middle Image
+- Using Burst with UNet
+- Using Burst with UNet-3d
+- Using Burst with KPN Net
+- Using Burst with CNN-Shallow
+- Using Burst with CNN-Deep
+- VBM3D, CBM3D
+
+Unsupervised Single Image Methods
+- N2N
+- NAC
+
+Supervised Burst Methods
+- KPN
+
+
+
+Big goals are consistency, terminating conditions, and quality for "tough" images.
+
+Questions: Which images do the methods struggle with? How does training impact rec quality (e.g. load from trained each time)? Rather than use "mse_loss" between noisy and rec images, why not use previous rec image vs current rec image to determine "alignment" penalty?
+
+For each noisy burst I want to know:
+- Image Index in the Dataset
+- Single image denoising PSNR of middle frame
+- Baseline: Averaging over burst PSNR
+
+For each method on each image I want to know:
+- Peak PSNR overall
+- Init and Final PSNR
+- Std of Peak PSNR over different model init
+- Iteration # of Peak PSNR
+- Loss function and PSNR as a function of iterations
+- Loss @ (a) init and (b) peak psnr
+- Std of PSNR for small region around loss @ peak PSNR (how indicative is Loss for PSNR?)
+
+
+
+

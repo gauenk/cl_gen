@@ -16,7 +16,7 @@ import torchvision.utils as tv_utils
 # -- project imports --
 import settings
 from layers.simcl import ClBlockLoss
-from layers.stn import STN_Net
+from layers.stn import STN
 from layers.unet import UNet_small
 
 # -- [local] project imports --

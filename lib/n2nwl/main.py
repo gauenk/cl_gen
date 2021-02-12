@@ -20,11 +20,10 @@ import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
-from learning.utils import save_model
 
 # -- [this folder] project code --
 from .config import get_cfg,get_args
-from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_model
+from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2n_model,load_burst_kpn_model,save_burst_model
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
@@ -32,6 +31,10 @@ from .learn_kpn import train_loop as train_loop_kpn
 from .learn_kpn import test_loop as test_loop_kpn
 from .learn_burst import train_loop as train_loop_burst
 from .learn_burst import test_loop as test_loop_burst
+from .learn_burst_nc import train_loop as train_loop_burst_nc
+from .learn_burst_nc import test_loop as test_loop_burst_nc
+
+
 
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
@@ -63,30 +66,46 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.S = Sgrid[S_grid_idx]
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
+    cfg.supervised = False
     cfg.blind = (B_grid_idx == 0)
-    cfg.blind = True
+    cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 9
+    cfg.N = 6
+    cfg.kpn_frame_size = 15
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 4
+    cfg.batch_size = 8
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
     cfg.color_cat = True
-    cfg.log_interval = int(int(50000 / cfg.batch_size) / 500)
+    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.save_interval = 1
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 64
-    # cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
-
     cfg.dynamic.total_pixels = 2*cfg.N
-    cfg.load = False
+    
+    # -- load previous experiment --
+    cfg.load_epoch = 3
+    cfg.load = cfg.load_epoch > 0
+
+    # -- experiment info --
+    name = "burst"
+    sup_str = "sup" if cfg.supervised else "unsup"
+    frame_str = "n{}".format(cfg.N)
+    framesize_str = "f{}".format(cfg.dynamic.frame_size)
+    filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
+    misc = "kpnCls-1_kpnLoss_recOTOnly_otG_noise25_noAlignment"
+    cfg.exp_name = f"{sup_str}_{name}_{frame_str}_{framesize_str}_{filtersize_str}_{misc}"
+    print(f"Experiment name: {cfg.exp_name}")
+    cfg.desc = "Desc: unsup burstPipeline-kpnCls-6frames-1filterSized15, f64, kpnLoss-sched, recOTOnly, ot Gaussian, noise25, no alignment"
+    print(f"Description: [{cfg.desc}]")
 
     # -- attn params --
     cfg.patch_sizes = [128,128]
@@ -126,7 +145,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     # load model
     # model = load_unet_model(cfg)
-    model,criterion = load_burst_model(cfg)
+    # model,criterion = load_burst_n2n_model(cfg)
+    model,noise_critic,criterion = load_burst_kpn_model(cfg)
     # model,criterion = load_model_kpn(cfg)
     optimizer = load_optimizer(cfg,model)
     scheduler = load_scheduler(cfg,model,optimizer)
@@ -143,14 +163,21 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # criterion = nn.BCELoss()
 
     if cfg.load:
-        fp = cfg.model_path / Path("checkpoint_30.tar")
+        name = "denoiser"
+        fp = cfg.model_path / Path("{}/checkpoint_{}.tar".format(name,cfg.load_epoch))
         model = load_model_fp(cfg,model,fp,0)
+        name = "critic"
+        fp = cfg.model_path / Path("{}/checkpoint_{}.tar".format(name,cfg.load_epoch))
+        noise_critic.disc = load_model_fp(cfg,noise_critic.disc,fp,0)
+        cfg.current_epoch = cfg.load_epoch
+        cfg.global_step = cfg.load_epoch * 120
+    else:
+        cfg.current_epoch = 0
 
-    cfg.current_epoch = 0
     te_ave_psnr = {}
     test_before = False
     if test_before:
-        ave_psnr = test_loop(cfg,model,criterion,loader.te,-1)
+        ave_psnr,_ = test_loop_burst(cfg,model,criterion,loader.te,-1)
         print("PSNR before training {:2.3e}".format(ave_psnr))
         return 
     if checkpoint.exists() and cfg.load:
@@ -159,19 +186,27 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         cfg.current_epoch = cfg.epochs
         
     record_losses = pd.DataFrame({'kpn':[],'ot':[],'psnr':[],'psnr_std':[]})
+    use_record = False
     loss_type = "sup_r_ot"
     for epoch in range(cfg.current_epoch,cfg.epochs):
-        print("KPN + N2N model: using 9 frames, unsup kpn (rec), rec_img for losses (no gt_img)")
+        print(cfg.desc)
         sys.stdout.flush()
 
         losses,record_losses = train_loop_burst(cfg,model,optimizer,criterion,loader.tr,epoch,record_losses)
-        write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
-
-        ave_psnr,record_test = test_loop_burst(cfg,model,criterion,loader.te,epoch)
-        write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
-        te_ave_psnr[epoch] = ave_psnr
+        # losses,record_losses = train_loop_burst_nc(cfg,model,noise_critic,optimizer,criterion,loader.tr,epoch,record_losses)
+        if use_record:
+            write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
 
         cfg.current_epoch += 1
+        if epoch % cfg.save_interval == 0:
+            save_burst_model(cfg,"denoiser",model,optimizer)
+            save_burst_model(cfg,"critic",noise_critic.disc,noise_critic.optim)
+
+        ave_psnr,record_test = test_loop_burst(cfg,model,criterion,loader.te,epoch)
+        if use_record:        
+            write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
+        te_ave_psnr[epoch] = ave_psnr
+
 
 
     epochs,psnr = zip(*te_ave_psnr.items())

@@ -28,8 +28,9 @@ from .optim_io import load_optimizer_kpn as load_optimizer
 from .sched_io import load_scheduler
 from .learn_kpn import train_loop,test_loop
 from .utils import init_record
+from .test_ot_loss import run_test_xbatch,run_ot_v_displacement
 
-def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     """
@@ -43,11 +44,14 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.use_apex = False
-    gpuid = 1
+    gpuid = 0
     cfg.gpuid = gpuid
     # gpuid = rank % ngpus # set gpuid
     cfg.device = f"cuda:{gpuid}"
     
+    # -- experiment info --
+    cfg.exp_name = "unsup_kpn-nmlz_1filterSize9_f128_kpnLoss_klLoss"
+    cfg.desc = "Desc: unsup kpn-nmlz 1 filterSized9, f128, kpnLoss, klLoss"
 
     grid_idx = idx*(1*ngpus)+rank
     B_grid_idx = (grid_idx % 2)
@@ -62,25 +66,29 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
     # cfg.blind = (B_grid_idx == 0)
-    cfg.blind = True
+    cfg.supervised = False
+    cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 3
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    # cfg.noise_type = 'll'
+    # cfg.noise_params['ll']['alpha'] = 255*0.015
+    # cfg.noise_params['ll']['read_noise'] = 0.25
+    # cfg.recon_l1 = True
     noise_level = Ggrid[G_grid_idx]
     cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
-    cfg.epochs = 30
+    cfg.epochs = 100
     cfg.log_interval = 100 # int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
-    cfg.dynamic.frame_size = 64
+    cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = 2*cfg.N
     cfg.load = False
-    print("KPN.")
 
     # -- input noise for learning --
     cfg.input_noise = False
@@ -144,9 +152,13 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     cfg.global_step = 0
     use_record = False
     record = init_record()
+    # run_test_xbatch(cfg,criterion,loader.tr)
+    # run_ot_v_displacement(cfg,criterion,loader.tr)
+    # exit()
+
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
-        print("Running KPN-allKernels unsup, f3, no-recording, unsupKPN, no Temporal loss, yes OT loss xbatch")
+        print(cfg.desc)
         sys.stdout.flush()
 
         losses,epoch_record = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)

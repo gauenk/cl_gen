@@ -103,7 +103,7 @@ def get_args():
         'msg': each_image (bool), stddev_range (tuple)
     """
     defaults = '{"g":{"mean":0.0,"stddev":10},\
-    "ll":{"alpha":0.5},\
+    "ll":{"alpha":0.5,"read_noise":0.25},\
     "msg":{"each_image":0,"stddev_rand":[0,50]}\
     }'
     parser.add_argument("--noise-params", type=jloads,
@@ -356,6 +356,9 @@ def set_cfg(args):
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = 20
     cfg.dynamic.random_eraser = False
+
+    # -- use l1 or l2 loss --
+    cfg.recon_l1 = False
 
     # set current config from simcl config
     cfg.enc_size = cfg.simcl.enc_size

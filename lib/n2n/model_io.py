@@ -3,6 +3,7 @@
 import torch
 
 # -- project imports --
+from layers.stn import STNBurst
 from layers.ame_kpn.KPN import KPN as KPN_model,LossFunc
 from layers.ame_kpn.KPN_1f import KPN_1f as KPN_1f_model
 from layers.unet import UNetN_v2,UNet_n2n,UNet_Git,UNet_Git3d
@@ -45,6 +46,10 @@ def load_model_field(cfg,rank,model,field):
     #     model = DDP(model, device_ids=[rank])
     return model
 
+def load_model_stn(cfg):
+    img_shape = (cfg.dynamic.frame_size,cfg.dynamic.frame_size,3)
+    return STNBurst(img_shape),LossFunc(tensor_grad=~cfg.blind)
+    
 def load_model_kpn(cfg):
-    # return KPN_1f_model(color=True,burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=False)
-    return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=False)
+    return KPN_1f_model(color=True,kernel_size=[9],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+    # return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,recon_l1=cfg.recon_l1)

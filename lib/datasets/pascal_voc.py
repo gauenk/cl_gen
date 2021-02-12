@@ -20,12 +20,13 @@ from torch.utils.data import Dataset
 from torchvision.datasets import VOCDetection
 from torch.utils.data import DataLoader
 from torchvision import transforms as th_transforms
+from torchvision.transforms import functional as tvxF
 from torch.utils.data.distributed import DistributedSampler
 
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoiseRandStd,GlobalCameraMotionTransform,AddGaussianNoise
+from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoiseRandStd,GlobalCameraMotionTransform,AddGaussianNoise,AddPoissonNoiseBW,AddLowLightNoiseBW
 
 
 class DenoiseVOC(VOCDetection):
@@ -250,8 +251,8 @@ class DynamicVOC(VOCDetection):
         if self.bw: img = img.convert('1')
         target = self.parse_voc_xml(ET.parse(self.annotations[index]).getroot())
         # th_img = self.to_tensor(img)
-        img_set,res_set,clean_target = self.dynamic_trans(img)
-        return img_set, res_set, clean_target
+        img_set,res_set,clean_target,directions = self.dynamic_trans(img)
+        return img_set, res_set, clean_target, directions
 
     def _apply_transform_N(self,img):
         t = self.transform
@@ -298,12 +299,17 @@ class DynamicVOC(VOCDetection):
         t = th_transforms.Compose(comp)
         return t
 
-    def _get_ll_noise(self,params,N):
+    def _get_ll_noise(self,params):
         """
         Noise Type: Low-Light  (LL)
         - Each N images is a low-light image with same alpha parameter
         """
-        raise NotImplemented()
+        to_tensor = th_transforms.ToTensor()
+        lowlight_noise = AddLowLightNoiseBW(params['alpha'],params['read_noise'])
+        szm = ScaleZeroMean()
+        comp = [to_tensor,lowlight_noise,szm]
+        t = th_transforms.Compose(comp)
+        return t
 
     def _get_msg_noise(self,params,N):
         """
@@ -470,11 +476,12 @@ def collate_fn(batch):
     return noisy,clean
 
 def collate_triplet_fn(batch):
-    noisy,res,clean = zip(*batch)
+    noisy,res,clean,directions = zip(*batch)
     noisy = torch.stack(noisy,dim=1)
     res = torch.stack(res,dim=1)
     clean = torch.stack(clean,dim=0)
-    return noisy,res,clean
+    directions = torch.stack(directions,dim=0)
+    return noisy,res,clean,directions
 
 def set_torch_seed(worker_id):
     torch.manual_seed(0)
@@ -495,9 +502,9 @@ def get_loader_serial(cfg,data,batch_size,mode):
 
     loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)
-    loader_kwargs['drop_last'] = False
+    loader_kwargs['drop_last'] = True
     loader.val = DataLoader(data.val,**loader_kwargs)
-    loader_kwargs['shuffle'] = False
+    loader_kwargs['shuffle'] = True
     loader.te = DataLoader(data.te,**loader_kwargs)
     return loader
 

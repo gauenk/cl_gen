@@ -7,9 +7,9 @@ import numpy as np
 import numpy.random as npr
 from einops import rearrange, repeat, reduce
 
-
 # -- pytorch imports --
 import torch
+from torch import autograd
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -18,16 +18,14 @@ import torch.nn.functional as F
 # from layers.kpn.KPN import LossBasic,LossAnneal,TensorGradient
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 
-class BurstAlign(nn.Module):
+class BurstAlignSG(nn.Module):
 
-    def __init__(self, kpn, unet_info, noise_critic, skip_middle = True):
-        super(BurstAlign, self).__init__()
+    def __init__(self, kpn, denoiser_info, skip_middle = True):
+        super(BurstAlignSG, self).__init__()
         self.kpn = kpn
-        self.unet_info = unet_info
-        self.noise_critic = noise_critic
+        self.denoiser_info = denoiser_info
         self.skip_middle = skip_middle
         self.global_step = 0
-        self.one = torch.FloatTensor([1.]).to(self.noise_critic.one.device)
         # self.ot_loss = LossOT()
 
     def forward(self, burst):
@@ -41,28 +39,92 @@ class BurstAlign(nn.Module):
         kpn_cat = rearrange(burst,'n b c h w -> b (n c) h w')
 
         # -- align images --
-        aligned,aligned_ave = self.kpn(kpn_cat,kpn_stack)
+        aligned,aligned_ave,temporal_loss,filters = self.kpn(kpn_cat,kpn_stack)
 
         # -- denoise --
-        denoised = torch.stack([self.unet_info.model(aligned[:,i]) for i in range(N)],dim=0)
-        rec = torch.mean(denoised,dim=0)
+        aligned_stack = aligned#.detach()
+        aligned_cat = rearrange(aligned_stack,'b n c h w -> b (n c) h w')
+        denoised,denoised_ave,dn_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
+        # denoised,denoised_ave,dn_filters = self.denoiser_info.model(kpn_cat,kpn_stack)
+
+        # -- no error back to unet --
+        # rec = rec.detach()
+
+        # -- update unet --
+        # if self.training: self.update_unet(aligned,residual)
+
+        # -- update global step --
+        if self.training:
+            self.global_step += 1
+
+        # -- return all components --
+        return aligned,aligned_ave,denoised,denoised_ave,filters
+
+    def denoise(self, x):
+        recs,rec = self.kpn(x,x)
+        self.unet(recs[i] for i in range(N))
+        
+    def _select_pairs(self, S, N):
+        if self.skip_middle:
+            pairs = list(set([(i,j) for i in range(N) for j in range(N) if i != N//2 and j != N//2]))
+        else:
+            pairs = list(set([(i,j) for i in range(N) for j in range(N)]))
+        P = len(pairs)
+        if S is None: S = P
+        r_idx = npr.choice(range(P),S)
+        s_pairs = [pairs[idx] for idx in r_idx]
+        return s_pairs,S
+
+class BurstAlignN2N(nn.Module):
+
+    def __init__(self, kpn, unet_info, noise_critic, skip_middle = True):
+        super(BurstAlignN2N, self).__init__()
+        self.kpn = kpn
+        self.unet_info = unet_info
+        self.skip_middle = skip_middle
+        self.global_step = 0
+        self.one = torch.FloatTensor([1.]).to(self.noise_critic.one.device)
+        self.unet_start_iter = 15 * 1000
+        self.unet_interval_iter = 1
+        # self.ot_loss = LossOT()
+
+    def forward(self, burst):
+        """
+        :param burst: burst[:,1] ~ burst[:,N], shape: [N, batch, 3, height, width]
+        """
+        # -- init --
+        CRITIC_UD = 1
+        N,B,C,H,W = burst.shape
+        kpn_stack = rearrange(burst,'n b c h w -> b n c h w')
+        kpn_cat = rearrange(burst,'n b c h w -> b (n c) h w')
+
+        # -- align images --
+        aligned,aligned_ave,temporal_loss,filters = self.kpn(kpn_cat,kpn_stack)
+
+        # -- denoise --
+        aligned_d = aligned.detach()
+        denoised = torch.stack([self.unet_info.model(aligned_d[:,i]) for i in range(N)],dim=1)
+        rec = torch.mean(denoised,dim=1)
 
         # -- no error back to unet --
         rec = rec.detach()
 
-        # -- critic loss for noise --
-        residual = aligned - rec.unsqueeze(1).repeat(1,N,1,1,1)
-        if self.training and (self.global_step % CRITIC_UD) == 0: self.noise_critic.update_disc(residual)
-
         # -- update unet --
-        if self.training: self.update_unet(aligned,residual)
+        if self.update_unet_iter(): self.update_unet(aligned,residual)
 
         # -- update global step --
-        self.global_step += 1
+        if self.training:
+            self.global_step += 1
 
         # -- return all components --
-        return aligned,aligned_ave,rec
+        return aligned,aligned_ave,denoised,rec,filters
 
+    def update_unet_iter(self):
+        update_bool = self.training
+        update_bool = update_bool and (self.global_step > self.unet_start_iter)
+        update_bool = update_bool and (self.global_step % self.unet_interval_iter) == 0
+        return update_bool
+        
     def update_unet(self, attached_aligned, residual):
 
         #
@@ -88,14 +150,6 @@ class BurstAlign(nn.Module):
         optim = self.unet_info.optim
         S = self.unet_info.S
         B,N,C,H,W = aligned.shape
-
-        #
-        # -- check if the frames were actually aligned; pos = real, neg = fake --
-        #
-
-        raw_score = self.noise_critic.compute_fake_loss(residual,False).detach()
-        zo_coeff = torch.sigmoid(raw_score).detach()
-        zo_coeff = rearrange(zo_coeff,'(b n) -> b n',b=B)
         
         #
         # -- train n2n model --
@@ -113,9 +167,6 @@ class BurstAlign(nn.Module):
 
             # -- compute loss --
             loss = torch.mean(F.mse_loss(pred,aj,reduction='none'),(1,2,3))
-            
-            # -- compute lr coeff --
-            lr_coeff = torch.min(torch.stack([zo_coeff[:,i],zo_coeff[:,j]],dim=0),dim=0)[0]
 
             # -- optim step --
             # loss.backward(lr_coeff)
@@ -147,14 +198,13 @@ Loss Functions
 
 """
 
-class AlignLoss(nn.Module):
+class BurstRecLoss(nn.Module):
     """
     loss function of KPN
     """
-    def __init__(self, noise_critic, coeff_ave=1.0, coeff_burst=1.0, coeff_ot=100.0, gradient_L1=True,
+    def __init__(self, coeff_ave=1.0, coeff_burst=100.0, coeff_ot=100.0, gradient_L1=True,
                  alpha=0.9998, beta=0.9772, reg=0.5, S=None):
-        super(AlignLoss, self).__init__()
-        self.noise_critic = noise_critic
+        super(BurstRecLoss, self).__init__()
         self.coeff_ave = coeff_ave
         self.coeff_burst = coeff_burst
         self.coeff_ot = coeff_ot
@@ -163,53 +213,29 @@ class AlignLoss(nn.Module):
         use_tensor_grad = False # experiment using unsup, blind, no OT, rec_img for losses (no gt_img), noise critic, [with & without tensor_grad] show 23.46 v 25.71 PSNR
         self.loss_rec = LossRec(gradient_L1,use_tensor_grad)
         self.loss_burst = LossRecBurst(gradient_L1,use_tensor_grad)
-        self.loss_ot = LossOT(reg,S)
 
-    def forward(self, aligned, aligned_ave, rec_img, ground_truth, sm_raw_img, global_step):
+    def forward(self, burst, burst_ave, ground_truth, global_step):
         """
         forward function of loss_func
-        :param aligned: frame_1 ~ frame_N, shape: [batch, N, 3, height, width]
-        :param aligned_ave: \frac{1}{N} \sum_i^N frame_i, shape: [batch, 3, height, width]
-        :param rec_img: \frac{1}{N} \sum_i^N denoised(frame_i), shape: [batch, 3, height, width]
+        :param burst: frame_1 ~ frame_N, shape: [batch, N, 3, height, width]
+        :param burst_ave: \frac{1}{N} \sum_i^N frame_i, shape: [batch, 3, height, width]
         :param ground_truth: shape [batch, 3, height, width]
         :param global_step: int
         :return: loss
         """
         # -- init --
-        CRITIC_UD = 10
-        B,N,C,H,W = aligned.shape
-
-        # -- decaying coefficients --
-        coeff_anneal_f = self._anneal_fast_coeff(global_step)
-        if coeff_anneal_f < 0.1: coeff_anneal_f = 0.1
-        coeff_anneal_s = self._anneal_slow_coeff(global_step)
+        CRITIC_UD = 1
+        B,N,C,H,W = burst.shape
 
         # -- alignment averages loss via MSE --
-        loss_ave = self.loss_rec(aligned_ave, rec_img)
-        # loss_ave = self.loss_rec(aligned_ave, rec_img)
-        # loss_ave = coeff_anneal_f * coeff_anneal_s * self.coeff_ave * self.loss_rec(aligned_ave, ground_truth)
-        # loss_ave = self.coeff_ave * self.loss_rec(aligned_ave, ground_truth)
+        loss_ave = self.loss_rec(burst_ave, ground_truth)
+        loss_ave *= self.coeff_ave
 
         # -- alignment loss for each frame via MSE --
-        loss_burst = self.coeff_burst * self.loss_burst(aligned, rec_img)
-        
-        # -- noise pattern loss using sinkhorn --
-        # loss_ot = self.coeff_ot * self.loss_ot(aligned, ground_truth)
-        # loss_ot = self.coeff_ot * self.loss_ot(aligned, rec_img)
-        loss_ot = 0 * self.loss_rec(aligned_ave, rec_img)
+        loss_burst = self.loss_burst(burst, ground_truth)
+        loss_burst *= self.coeff_burst
 
-        # -- noise pattern loss using critic --
-        residual = aligned - sm_raw_img.unsqueeze(1).repeat(1,N,1,1,1)
-        loss_nc = 0 * self.noise_critic.compute_fake_loss(residual)
-        if (global_step % CRITIC_UD) != 0: loss_nc *= 0
-
-        return loss_nc, loss_ave, loss_burst, loss_ot
-
-    def _anneal_slow_coeff(self, global_step):
-        return self.alpha ** global_step        
-
-    def _anneal_fast_coeff(self, global_step):
-        return self.beta ** global_step        
+        return loss_ave, loss_burst
 
 class LossRec(nn.Module):
     """
@@ -274,10 +300,10 @@ class TensorGradient(nn.Module):
 
 class LossOT(nn.Module):
 
-    def __init__(self,reg=0.5,S=None,skip_middle=False):
+    def __init__(self,reg=0.5,K=3,skip_middle=False):
         super(LossOT,self).__init__()
         self.reg = reg
-        self.S = 10
+        self.K = K
         self.skip_middle = skip_middle
 
     def forward(self,burst,gt_img):
@@ -291,7 +317,9 @@ class LossOT(nn.Module):
         r_gt_img = gt_img.unsqueeze(1).repeat(1,N,1,1,1)
         diffs = r_gt_img - burst
         diffs = rearrange(diffs,'b n c h w -> b n (h w) c')
+        return self.ot_frame_pairwise_xbatch_bp(diffs)
         
+    def ot_frame_pairwise_bp(self,diffs):
         ot_loss = 0
         for b in range(BS):
             pairs,S = self._select_pairs(S,N)
@@ -301,31 +329,78 @@ class LossOT(nn.Module):
                 ot_loss += sink_stabilized(M, self.reg)
         ot_loss /= S*BS
         return ot_loss
-
         
-    def _select_pairs(self,S,N):
-        if self.skip_middle:
-            pairs = list(set([(i,j) for i in range(N) for j in range(N) if i<j and i != N//2 and j != N//2]))
-        else:
-            pairs = list(set([(i,j) for i in range(N) for j in range(N) if i<j]))
-        P = len(pairs)
+    def ot_frame_pairwise_xbatch_bp(self,residuals,reg=0.5,K=3):
+        """
+        :param residuals: shape [B N D C]
+        """
+        
+        # -- init --
+        B,N,D,C = residuals.shape
+    
+        # -- create triplets
+        S = B*K
+        indices,S = create_ot_indices(B,N,S)
+    
+        # -- compute losses --
+        ot_loss = 0
+        for (bi,bj,i,j) in indices:
+            ri,rj = residuals[bi,i],residuals[bj,j]
+            M = torch.sum(torch.pow(ri.unsqueeze(1) - rj,2),dim=-1)
+            loss = sink_stabilized(M,reg)
+            weight = ( torch.mean(ri) + torch.mean(rj) ) / 2
+            ot_loss += loss * weight.item()
+        return ot_loss / len(indices)
+    
+    def create_ot_indices(B,N,S):
+        indices = []
+        for i in range(N):
+            for j in range(N):
+                if i > j: continue
+                for bi in range(B):
+                    for bj in range(B):
+                        if bi > bj: continue
+                        index = (bi,bj,i,j)
+                        indices.append(index)
+    
+        P = len(indices)
+        indices = list(set(indices))
+        assert P == len(indices), "We only created the list with unique elements"
         if S is None: S = P
         r_idx = npr.choice(range(P),S)
-        s_pairs = [pairs[idx] for idx in r_idx]        
-        return s_pairs,S
+        s_indices = [indices[idx] for idx in r_idx]
+        return s_indices,S
+        
         
 
 class NoiseCriticModel():
 
-    def __init__(self,disc,optim,sim_params,device):
+    def __init__(self,disc,optim,sim_params,device,p_lambda):
         self.disc = disc
         self.optim = optim
         self.sim_params = sim_params
         self.device = device
+        self.p_lambda = p_lambda
         self.one = torch.FloatTensor([1.]).to(device)
         self.mone= -1 * self.one
+        self.global_step = 0
+
+    def compute_residual_loss(self,denoised,noisy_img,use_mean=True):
+        """
+        :params denoised: the (B,N,C,H,W) denoised images
+        :params gt_img: the (B,C,H,W) noisy image to compare with
+        """
+        N = denoised.shape[1]
+        residuals = denoised - noisy_img.unsqueeze(1).repeat(1,N,1,1,1)
+        return self.compute_fake_loss(residuals,use_mean=use_mean)
 
     def compute_fake_loss(self,fake,use_mean=True):
+
+        # -- freeze params --
+        self.disc.zero_grad()
+        for p in self.disc.parameters():
+            p.requires_grad = False
+
         # -- reshape fake data --
         fake = rearrange(fake,'b n c h w -> (b n) c h w')
 
@@ -337,16 +412,94 @@ class NoiseCriticModel():
         if use_mean: error_gen = output.mean(0).view(1)
         else: error_gen = output
 
-        # -- steps done outside this function --
-        # error_gen.backward(one)
-        # optimizer_gen.step()
+        # -- un-freeze params --
+        self.disc.zero_grad()
+        for p in self.disc.parameters():
+            p.requires_grad = True
 
-        return error_gen
+        return -error_gen
+
+    def calc_gradient_penalty(self, fake, real=None):
+
+        # -- shape info --
+        device = self.device
+        B,C,H,W = fake.shape
+        if real is None: real = self.sim_noise(fake.shape)
+
+        # -- compute alpha for interpolation --
+        alpha = torch.rand(B, 1)
+        alpha = alpha.expand(B, int(real.nelement()/B) ).contiguous()
+        alpha = alpha.view(B, C, H, W)
+        alpha = alpha.to(device)
+
+        # -- interpolate data --
+        interpolates = alpha * real.detach() + ((1 - alpha) * fake.detach())
+        interpolates = interpolates.to(device)
+        interpolates.requires_grad_(True)
+
+        # -- forward thru critic --
+        disc_interpolates = self.disc(interpolates)
+
+        # -- compute the gradients --
+        gradients = autograd.grad(outputs=disc_interpolates, inputs=interpolates,
+                                  grad_outputs=torch.ones(disc_interpolates.size()).to(device),
+                                  create_graph=True, retain_graph=True, only_inputs=True)[0]
+        gradients = gradients.view(gradients.size(0), -1)                              
+        # gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * self.p_lambda
+        gradient_penalty = ((gradients.norm(2, dim=1)) ** 2).mean() * self.p_lambda
+
+        # -- return norm --
+        return gradient_penalty
 
     def update_disc(self,fake,real=None):
         """
         Maximize Discriminator
         """
+        # -- init learn --
+        self.disc.zero_grad()
+        self.optim.zero_grad()
+
+        # -- reshape fake data --
+        fake = rearrange(fake,'b n c h w -> (b n) c h w')
+
+        # -- init info --
+        B,C,H,W = fake.shape
+        one,mone = self.one,self.mone
+        if real is None: real = self.sim_noise(fake.shape)
+        
+        # -- (i) real samples --
+        output = self.disc(real).view(-1)
+        err_disc_real = output.mean(0).view(1)
+        D_x = output.mean().item()
+
+        # -- (ii) fake samples --
+        output = self.disc(fake.detach()).view(-1)
+        err_disc_fake = output.mean(0).view(1)
+        D_G_z1 = output.mean().item()
+        
+        # -- (iii) compute gradient penalty --
+        gradient_penalty = self.calc_gradient_penalty(fake,real)
+
+        # -- compute difference --
+        error_disc = err_disc_real - err_disc_fake + gradient_penalty
+        error_disc.backward(one)
+        self.optim.step()
+
+        # -- re-init learn --
+        self.disc.zero_grad()
+        self.optim.zero_grad()
+
+        return error_disc.item()
+
+
+    def update_disc_wgan(self,fake,real=None):
+        """
+        Maximize Discriminator
+        """
+        # -- init learn --
+        self.disc.zero_grad()
+        self.optim.zero_grad()
+
         # -- reshape fake data --
         fake = rearrange(fake,'b n c h w -> (b n) c h w')
 
@@ -371,10 +524,20 @@ class NoiseCriticModel():
         error_disc = err_disc_real - err_disc_fake
         self.optim.step()
 
+        # # -- print to stdout --
+        # if self.global_step % 1 == 0:
+        #     print(f"NoiseCritic: [{error_disc.item()}]")
+
         # -- simplify function (WGan) --
         for p in self.disc.parameters():
             p.data.clamp_(-0.01, 0.01)
         
+        # -- re-init learn --
+        self.disc.zero_grad()
+        self.optim.zero_grad()
+
+        return error_disc.item()
+
     def sim_noise(self,shape):
         if self.sim_params.noise_type == "gaussian":
             return self.sim_gaussian(shape)

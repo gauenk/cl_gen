@@ -27,8 +27,9 @@ from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
+from .test_ot_loss import *
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[0.001],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     args = get_args()
@@ -58,7 +59,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
     cfg.blind = (B_grid_idx == 0)
-    cfg.blind = True
+    cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 3
     # cfg.N = 30
@@ -66,7 +67,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 4
+    cfg.batch_size = 300
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
@@ -144,6 +145,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         print("Loaded model.")
         cfg.current_epoch = cfg.epochs
         
+    run_ot_v_displacement(cfg,criterion,loader.te)
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
         losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
