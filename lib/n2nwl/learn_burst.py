@@ -24,10 +24,11 @@ from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
 from datasets.transform import ScaleZeroMean
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
-from layers.burst import BurstRecLoss
+from layers.burst import BurstRecLoss,EntropyLoss
 
 # -- [local] project code --
-from .dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp
+from .dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp
+from .plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 
 def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
@@ -46,7 +47,6 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     szm = ScaleZeroMean()
     blocksize = 128
     unfold = torch.nn.Unfold(blocksize,1,0,blocksize)
-    D = 5 * 10**3
     use_record = False
     if record_losses is None: record_losses = pd.DataFrame({'burst':[],'ave':[],'ot':[],'psnr':[],'psnr_std':[]})
 
@@ -74,6 +74,7 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     alignmentLossMSE = BurstRecLoss()
     denoiseLossMSE = BurstRecLoss()
     # denoiseLossOT = BurstResidualLoss()
+    entropyLoss = EntropyLoss()
 
     # -=-=-=-=-=-=-=-=-=-=-
     #
@@ -86,7 +87,8 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     switch = True
     if use_timer: clock = Timer()
     train_iter = iter(train_loader)
-    steps_per_epoch = D #len(train_loader)
+    D = 5 * 10**3
+    steps_per_epoch = len(train_loader)
 
     # -=-=-=-=-=-=-=-=-=-=-
     #
@@ -143,6 +145,16 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #
+        #    Entropy Loss for Filters
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        filters_shaped = rearrange(filters,'b n k2 1 1 1 -> (b n) k2',n=N)
+        filters_entropy = entropyLoss(filters_shaped)
+        filters_entropy_coeff = 10.
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
         #    Alignment Losses (MSE)
         #
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -162,7 +174,7 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
         losses = criterion(denoised,denoised_ave,gt_img,cfg.global_step)
         ave_loss,burst_loss = [loss.item() for loss in losses]
         rec_mse = np.sum(losses)
-        rec_mse_coeff = 1.
+        rec_mse_coeff = 0.9997**cfg.global_step
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #
@@ -180,7 +192,9 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
         # -- computation --
         residuals = denoised - mid_img.unsqueeze(1).repeat(1,N,1,1,1)
         residuals = rearrange(residuals,'b n c h w -> b n (h w) c')
-        rec_ot_pair_loss_v1 = ot_pairwise2gaussian_bp(residuals,K=6,reg=reg)
+        # rec_ot_pair_loss_v1 = w_gaussian_bp(residuals,noise_level)
+        rec_ot_pair_loss_v1 = kl_gaussian_bp(residuals,noise_level)
+        # rec_ot_pair_loss_v1 = ot_pairwise2gaussian_bp(residuals,K=6,reg=reg)
         # rec_ot_pair_loss_v2 = ot_pairwise_bp(residuals,K=3)
         rec_ot_pair_loss_v2 = torch.FloatTensor([0.]).to(cfg.device)
         rec_ot_pair = (rec_ot_pair_loss_v1 + rec_ot_pair_loss_v2)/2.
@@ -195,7 +209,8 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
         align_loss = align_mse_coeff * align_mse
         rec_loss = rec_ot_pair_coeff * rec_ot_pair + rec_mse_coeff * rec_mse
-        final_loss = align_loss + rec_loss
+        entropy_loss = filters_entropy_coeff * filters_entropy
+        final_loss = align_loss + rec_loss + entropy_loss
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #
@@ -309,14 +324,14 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
             # -- write to stdout --
             write_info = (epoch, cfg.epochs, batch_idx,len(train_loader),running_loss,
                           psnr,psnr_std,psnr_denoised_ave,psnr_denoised_std,psnr_aligned_ave,
-                          psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,bm3d_nb_std,
-                          rec_mse_ave,rec_ot_ave)
+                          psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,
+                          bm3d_nb_std,rec_mse_ave,rec_ot_ave)
             print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
             running_loss = 0
 
         # -- write examples --
         if write_examples and (batch_idx % write_examples_iter) == 0 and (batch_idx > 0 or cfg.global_step == 0):
-            write_input_output(cfg,stacked_burst,aligned,denoised,filters,directions)
+            write_input_output(cfg,model,stacked_burst,aligned,denoised,filters,directions)
 
         if use_timer: clock.toc()
         if use_timer: print(clock)
@@ -403,11 +418,12 @@ def test_loop(cfg,model,criterion,test_loader,epoch):
     return psnr_ave,record_test
 
 
-def write_input_output(cfg,burst,aligned,denoised,filters,directions):
+def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
 
     """
     :params burst: input images to the model, :shape [B, N, C, H, W]
-    :params aligned: output images from the model, :shape [B, N, C, H, W]
+    :params aligned: output images from the alignment layers, :shape [B, N, C, H, W]
+    :params denoised: output images from the denoiser, :shape [B, N, C, H, W]
     :params filters: filters used by model, :shape [B, N, K2, 1, Hf, Wf] with Hf = (H or 1)
     """
 
@@ -419,7 +435,16 @@ def write_input_output(cfg,burst,aligned,denoised,filters,directions):
     B,N,C,H,W = burst.shape
 
     # -- save histogram of residuals --
-    plot_historgram_batch(burst,cfg.global_step,path,rand_name=True)
+    denoised_np = denoised.detach().cpu().numpy()
+    plot_histogram_residuals_batch(denoised_np,cfg.global_step,path,rand_name=False)
+
+    # -- save histogram of gradients --
+    denoiser = model.denoiser_info.model
+    plot_histogram_gradients(denoiser,cfg.global_step,path,rand_name=False)
+
+    # -- save gradient norm by layer --
+    denoiser = model.denoiser_info.model
+    plot_histogram_gradient_norms(denoiser,cfg.global_step,path,rand_name=False)
 
     # -- save file per burst --
     for b in range(B):
@@ -448,6 +473,7 @@ def write_input_output(cfg,burst,aligned,denoised,filters,directions):
 
 
     print(f"Wrote example images to file at [{path}]")
+    plt.close("all")
 
 
 

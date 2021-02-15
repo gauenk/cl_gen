@@ -66,7 +66,7 @@ def load_burst_kpn_model(cfg):
     # -- load unet info --
     denoiser_info = edict()
     denoiser_info.model,_ = load_model_kpn(cfg)
-    cfg.init_lr = 1e-4
+    # cfg.init_lr = 1e-4
     denoiser_info.optim = load_optimizer_gan(cfg,denoiser_info.model)
     denoiser_info.S = None
 
@@ -133,9 +133,9 @@ def load_model_field(cfg,rank,model,field):
 
 def load_model_kpn_1f_cls(cfg):
     if cfg.dynamic.frame_size == 64:
-        return KPN_1f_cls_fs64(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+        return KPN_1f_cls_fs64(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     elif cfg.dynamic.frame_size == 32:
-        return KPN_1f_cls_fs32(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+        return KPN_1f_cls_fs32(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     else:
         raise KeyError("Uknown frame size [{cfg.dynamic.frame_size}]")
 

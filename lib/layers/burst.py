@@ -255,6 +255,20 @@ class LossRec(nn.Module):
         return loss
                
 
+class EntropyLoss(nn.Module):
+    """
+    Compute the Entropy of the Module
+    """
+
+    def __init__(self):
+        super(EntropyLoss, self).__init__()
+
+    def forward(self, x):
+        eps = 1e-8
+        b = x * torch.log(x + eps)
+        b = -1.0 * b.sum(dim=1)
+        return b.mean()
+
 class LossRecBurst(nn.Module):
     """
     anneal loss function

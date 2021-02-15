@@ -24,6 +24,7 @@ from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
 from datasets.transform import ScaleZeroMean
 from layers.ot_pytorch import sink_stabilized
+from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 
 # -- [local] project code --
 from .utils import init_record
@@ -119,9 +120,9 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
         
         # -- direct denoising --
         mis_ave = torch.mean(stacked_burst,dim=1)
-        aligned,rec_img,temporal_loss,filters = model(cat_burst,stacked_burst)
-        # aligned,rec_img,filters = model(cat_burst,stacked_burst)
-        # temporal_loss = torch.FloatTensor([-1.]).to(cfg.device)
+        # aligned,rec_img,temporal_loss,filters = model(cat_burst,stacked_burst)
+        aligned,rec_img,filters = model(cat_burst,stacked_burst)
+        temporal_loss = torch.FloatTensor([-1.]).to(cfg.device)
 
         # print("(a) [m: %2.2e] [std: %2.2e] vs [tgt: %2.2e]" % (torch.mean(mid_img - raw_img_zm).item(),F.mse_loss(mid_img,raw_img_zm).item(),(25./255)**2) )
         # r_raw_img_zm = raw_img_zm.unsqueeze(1).repeat(1,N,1,1,1)
@@ -141,7 +142,7 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
         loss = np.sum(losses) #+ sf_loss + temporal_loss
         # loss = losses[1]
         kpn_loss = loss
-        kpn_coeff = .9997**cfg.global_step
+        kpn_coeff = 1. # .9997**cfg.global_step
         # temporal_loss = temporal_loss.item()
         # mse_loss = F.mse_loss(rec_img,mid_img)
 
@@ -162,7 +163,8 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
 
         # -- final loss --
         # loss = ot_coeff * ot_loss + kpn_loss
-        loss = kl_coeff * kl_loss + kpn_coeff * kpn_loss
+        # loss = kl_coeff * kl_loss + kpn_coeff * kpn_loss
+        loss = kpn_coeff * kpn_loss
             
         # -- update info --
         running_loss += loss.item()
@@ -248,7 +250,7 @@ def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
 
         # -- write examples --
         if write_examples and (batch_idx % write_examples_iter) == 0:
-            write_input_output(cfg,stacked_burst,aligned,filters,directions)
+            write_input_output(cfg,model,stacked_burst,aligned,filters,directions)
 
         cfg.global_step += 1
     total_loss /= len(train_loader)
@@ -538,7 +540,7 @@ def merge_records(*args):
         record.update(d)
     return record
 
-def write_input_output(cfg,burst,aligned,filters,directions):
+def write_input_output(cfg,model,burst,aligned,filters,directions):
 
     """
     :params burst: input images to the model, :shape [B, N, C, H, W]
@@ -552,6 +554,16 @@ def write_input_output(cfg,burst,aligned,filters,directions):
 
     # -- init --
     B,N,C,H,W = burst.shape
+
+    # -- save histogram of residuals --
+    denoised_np = aligned.detach().cpu().numpy()
+    plot_histogram_residuals_batch(denoised_np,cfg.global_step,path,rand_name=False)
+
+    # -- save histogram of gradients --
+    plot_histogram_gradients(model,cfg.global_step,path,rand_name=False)
+
+    # -- save gradient norm by layer --
+    plot_histogram_gradient_norms(model,cfg.global_step,path,rand_name=False)
 
     # -- save file per burst --
     for b in range(B):
@@ -577,9 +589,8 @@ def write_input_output(cfg,burst,aligned,filters,directions):
         arrows = create_arrow_image(directions[b],pad=2)
         tv_utils.save_image([arrows],fn)
 
-
+    plt.close("all")
     print(f"Wrote example images to file at [{path}]")
-
 
 
 def create_arrow_image(directions,pad=2):

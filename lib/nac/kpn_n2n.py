@@ -1,6 +1,5 @@
 
 # -- python imports --
-import sys,os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -27,10 +26,8 @@ from .model_io import load_model_kpn,load_model_fp,load_model
 from .optim_io import load_optimizer_kpn as load_optimizer
 from .sched_io import load_scheduler
 from .learn_kpn import train_loop,test_loop
-from .utils import init_record
-from .test_ot_loss import run_test_xbatch,run_ot_v_displacement
 
-def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     """
@@ -49,9 +46,6 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,i
     # gpuid = rank % ngpus # set gpuid
     cfg.device = f"cuda:{gpuid}"
     
-    # -- experiment info --
-    cfg.exp_name = "sup_n9_kpn-standard-filterSize15_f128_kpnLoss"
-    cfg.desc = "Desc: sup kpn-standard-filterSized15, f128, kpnLoss"
 
     grid_idx = idx*(1*ngpus)+rank
     B_grid_idx = (grid_idx % 2)
@@ -66,31 +60,24 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,i
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
     # cfg.blind = (B_grid_idx == 0)
-    cfg.supervised = True
-    cfg.blind = not cfg.supervised
+    cfg.blind = True
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 6
-    cfg.kpn_filter_onehot = True
-    cfg.kpn_frame_size = 15
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
-    # cfg.noise_type = 'll'
-    # cfg.noise_params['ll']['alpha'] = 255*0.015
-    # cfg.noise_params['ll']['read_noise'] = 0.25
-    # cfg.recon_l1 = True
     noise_level = Ggrid[G_grid_idx]
     cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
-    cfg.epochs = 100
-    cfg.log_interval = 50 # int(int(50000 / cfg.batch_size) / 100)
+    cfg.epochs = 30
+    cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = 2*cfg.N
+    cfg.dynamic.total_pixels = 6
     cfg.load = False
+    print("KPN.")
 
     # -- input noise for learning --
     cfg.input_noise = False
@@ -117,7 +104,6 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,i
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
 
-    print("PID: {}".format(os.getpid()))
     print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
 
     torch.cuda.set_device(gpuid)
@@ -152,27 +138,12 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,i
         cfg.current_epoch = cfg.epochs
         
     cfg.global_step = 0
-    use_record = False
-    record = init_record()
-    # run_test_xbatch(cfg,criterion,loader.tr)
-    # run_ot_v_displacement(cfg,criterion,loader.tr)
-    # exit()
-
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
-        print(cfg.desc)
-        sys.stdout.flush()
-
-        losses,epoch_record = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
-
-        if use_record:
-            record = record.append(epoch_record)
-            write_record_file(cfg.current_epoch,postfix,record)
-
+        losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
         ave_psnr = test_loop(cfg,model,criterion,loader.te,epoch)
         te_ave_psnr[epoch] = ave_psnr
         cfg.current_epoch += 1
-
 
     epochs,psnr = zip(*te_ave_psnr.items())
     best_index = np.argmax(psnr)
@@ -209,14 +180,6 @@ def run_me_grid():
     # idx = num_of_grids
     # remainder = num_of_grids % nprocs
     # r = mp.spawn(run_me, nprocs=remainder, args=(Sgrid,Ngrid,nNgrid,Ggrid,nGgrid,ngpus,idx))
-
-def write_record_file(current_epoch,postfix,record):
-    root = Path(f"{settings.ROOT_PATH}/output/n2n-kpn/{postfix}/")
-    if not root.exists(): root.mkdir(parents=True)
-    path = root / f"record_unsupOT-xbatch_plus_unsupMSE_{current_epoch}.csv"
-    print(f"Writing record_losses to {path}")
-    record.to_csv(path)
-
 
 """
 

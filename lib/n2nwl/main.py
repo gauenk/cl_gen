@@ -46,7 +46,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 1
+    gpuid = 2
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -71,19 +71,20 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 6
+    cfg.kpn_filter_onehot = False
     cfg.kpn_frame_size = 15
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 8
-    cfg.init_lr = 1e-4
+    cfg.batch_size = 4
+    cfg.init_lr = 5e-6
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
     cfg.color_cat = True
-    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.log_interval = 100 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 1
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2
@@ -92,7 +93,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.total_pixels = 2*cfg.N
     
     # -- load previous experiment --
-    cfg.load_epoch = 3
+    cfg.load_epoch = 0
     cfg.load = cfg.load_epoch > 0
 
     # -- experiment info --
@@ -101,10 +102,10 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     frame_str = "n{}".format(cfg.N)
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
-    misc = "kpnCls-1_kpnLoss_recOTOnly_otG_noise25_noAlignment"
+    misc = "kpn_klLoss_annealMSE_smallLR"
     cfg.exp_name = f"{sup_str}_{name}_{frame_str}_{framesize_str}_{filtersize_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
-    cfg.desc = "Desc: unsup burstPipeline-kpnCls-6frames-1filterSized15, f64, kpnLoss-sched, recOTOnly, ot Gaussian, noise25, no alignment"
+    cfg.desc = "Desc: unsup, 6 frames, filter size 15, kl loss, anneal mse"
     print(f"Description: [{cfg.desc}]")
 
     # -- attn params --

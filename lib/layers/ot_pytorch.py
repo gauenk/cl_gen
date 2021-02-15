@@ -59,7 +59,7 @@ def sink(M, reg, numItermax=1000, stopThr=1e-9, cuda = True):
     return torch.sum(u.view((-1, 1)) * K * v.view((1, -1)) * M)
 
 
-def sink_stabilized(M, reg, numItermax=100, tau=1e2, stopThr=1e-9, warmstart=None, print_period=5, cuda=True, print_me=False):
+def sink_stabilized(M, reg, numItermax=80, tau=1e2, stopThr=1e-9, warmstart=None, print_period=5, cuda=True, print_me=False):
 
     if cuda:
         a = Variable(torch.ones((M.size()[0],)) / M.size()[0]).cuda()

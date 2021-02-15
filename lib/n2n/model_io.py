@@ -51,5 +51,5 @@ def load_model_stn(cfg):
     return STNBurst(img_shape),LossFunc(tensor_grad=~cfg.blind)
     
 def load_model_kpn(cfg):
-    return KPN_1f_model(color=True,kernel_size=[9],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
-    # return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,recon_l1=cfg.recon_l1)
+    # return KPN_1f_model(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+    return KPN_model(color=True,kernel_size=[cfg.kpn_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,recon_l1=cfg.recon_l1)

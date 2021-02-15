@@ -1,5 +1,5 @@
 """
-Configurations for N2N experiments
+Configurations for N2N Wasserstein Loss experiments
 
 """
 
@@ -12,7 +12,7 @@ from pathlib import Path
 import settings
 
 def get_args():
-    parser = argparse.ArgumentParser(description="Run a NAC Experiment")
+    parser = argparse.ArgumentParser(description="Run a N2N-WL Experiment")
     parser.add_argument("--yaml", type=str, default=None,
                         help="Set all arguments using yaml file.")
     parser.add_argument("--name", type=str, default=None,
@@ -28,8 +28,8 @@ def get_args():
     parser.add_argument("--new",  action='store_true', help=msg)
     parser.add_argument("--epochs", type=int, default=350,
                         help="how many epochs do we train for?")
-    parser.add_argument("--epoch-num", type=int, default=-1,
-                        help="resume training from epoch-num")
+    parser.add_argument("--load-epoch", type=int, default=-1,
+                        help="resume training from load-epoch")
     parser.add_argument("--mode", type=str, default="train",
                         help="train or test models")
     parser.add_argument("--N", type=int, default=2,
@@ -167,7 +167,7 @@ def set_cfg(args):
     Expected argument fields:
 
     name (str): name of experiment, usually a uuid
-    epoch_num (int): if loading from previous results, which model do we load from?
+    load_epoch (int): if loading from previous results, which model do we load from?
     dataset (str): determine experiment's dataset
     noise_level (float): the amount of noise, to be replaced by "noise_params"
     N (int): the number of noise images used in the forward pass
@@ -249,8 +249,8 @@ def set_cfg(args):
         cfg.exp_name = str(uuid.uuid4())
     cfg.epochs = args.epochs
     cfg.load_name = args.load_name
-    cfg.load = args.epoch_num > 0
-    cfg.epoch_num = args.epoch_num
+    cfg.load = args.load_epoch > 0
+    cfg.load_epoch = args.load_epoch
     cfg.mode = args.mode
     cfg.N = args.N
 
@@ -295,8 +295,8 @@ def set_cfg(args):
     # 
 
     dsname = cfg.dataset.name.lower()
-    model_path = Path(f"{settings.ROOT_PATH}/output/nac/{dsname}/{cfg.exp_name}/model/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/nac/{dsname}/{cfg.exp_name}/optim/")
+    model_path = Path(f"{settings.ROOT_PATH}/output/n2n_wl/{dsname}/{cfg.exp_name}/model/")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/n2n_wl/{dsname}/{cfg.exp_name}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.model_path = model_path
     cfg.optim_path = optim_path
@@ -337,6 +337,7 @@ def set_cfg(args):
     cfg.simcl.enc_size = 2048
     cfg.simcl.proj_size = 64
     cfg.simcl.load = True
+    cfg.simcl.load_epoch = 100
     cfg.simcl.epoch_num = 100
     cfg.simcl.N = cfg.N
     cfg.simcl.batch_size = cfg.batch_size

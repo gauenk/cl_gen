@@ -1,276 +1,511 @@
 
 # -- python imports --
+import bm3d
+import pandas as pd
 import numpy as np
 import numpy.random as npr
 from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+from einops import rearrange, repeat, reduce
+
+# -- just to draw an fing arrow --
+from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
+from matplotlib.figure import Figure
 
 # -- pytorch imports --
 import torch
 import torch.nn.functional as F
-import torchvision.utils as vutils
-import torchvision.transforms as th_trans
+import torchvision.utils as tv_utils
 
 # -- project code --
 import settings
+from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
 from datasets.transform import ScaleZeroMean
+from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
+from layers.burst import BurstRecLoss,EntropyLoss
+
+# -- [local] project code --
+from .dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp
+from .plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
+
+def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
 
-def train_loop(cfg,model,optimizer,criterion,train_loader,epoch):
-    return train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch)
+    # -=-=-=-=-=-=-=-=-=-=-
+    #
+    #    Setup for epoch
+    #
+    # -=-=-=-=-=-=-=-=-=-=-
 
-def test_loop(cfg,model,criterion,test_loader,epoch):
-    return test_loop_offset(cfg,model,criterion,test_loader,epoch)
-
-
-def train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch):
     model.train()
     model = model.to(cfg.device)
     N = cfg.N
     total_loss = 0
     running_loss = 0
     szm = ScaleZeroMean()
-    # random_eraser = th_trans.RandomErasing(scale=(0.40,0.80))
-    random_eraser = th_trans.RandomErasing(scale=(0.02,0.33))
+    blocksize = 128
+    unfold = torch.nn.Unfold(blocksize,1,0,blocksize)
+    use_record = False
+    if record_losses is None: record_losses = pd.DataFrame({'burst':[],'ave':[],'ot':[],'psnr':[],'psnr_std':[]})
 
-    # if cfg.N != 5: return
-    for batch_idx, (burst_imgs, res_img, raw_img) in enumerate(train_loader):
-    # for batch_idx, (burst_imgs, raw_img) in enumerate(train_loader):
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #      Init Record Keeping
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
+    align_mse_losses,align_mse_count = 0,0
+    rec_mse_losses,rec_mse_count = 0,0
+    rec_ot_losses,rec_ot_count = 0,0
+    running_loss,total_loss = 0,0
+
+    write_examples = True
+    write_examples_iter = 800
+    noise_level = cfg.noise_params['g']['stddev']
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #      Init Loss Functions
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    alignmentLossMSE = BurstRecLoss()
+    denoiseLossMSE = BurstRecLoss()
+    # denoiseLossOT = BurstResidualLoss()
+    entropyLoss = EntropyLoss()
+
+    # -=-=-=-=-=-=-=-=-=-=-
+    #
+    #    Final Configs
+    #
+    # -=-=-=-=-=-=-=-=-=-=-
+
+    use_timer = False
+    one = torch.FloatTensor([1.]).to(cfg.device)
+    switch = True
+    if use_timer: clock = Timer()
+    train_iter = iter(train_loader)
+    D = 5 * 10**3
+    steps_per_epoch = len(train_loader)
+
+    # -=-=-=-=-=-=-=-=-=-=-
+    #
+    #     Start Epoch
+    #
+    # -=-=-=-=-=-=-=-=-=-=-
+
+    for batch_idx in range(steps_per_epoch):
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #      Setting up for Iteration
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        # -- setup iteration timer --
+        if use_timer: clock.tic()
+
+        # -- zero gradients; ready 2 go --
         optimizer.zero_grad()
         model.zero_grad()
+        model.denoiser_info.optim.zero_grad()
 
-        # fig,ax = plt.subplots(figsize=(10,10))
-        # imgs = burst_imgs + 0.5
-        # imgs.clamp_(0.,1.)
-        # raw_img = raw_img.expand(burst_imgs.shape)
-        # print(imgs.shape,raw_img.shape)
-        # all_img = torch.cat([imgs,raw_img],dim=1)
-        # print(all_img.shape)
-        # grids = [vutils.make_grid(all_img[i],nrow=16) for i in range(cfg.dynamic.frames)]
-        # ims = [[ax.imshow(np.transpose(i,(1,2,0)), animated=True)] for i in grids]
-        # ani = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
-        # Writer = animation.writers['ffmpeg']
-        # writer = Writer(fps=1, metadata=dict(artist='Me'), bitrate=1800)
-        # ani.save(f"{settings.ROOT_PATH}/train_loop_voc.mp4", writer=writer)
-        # print("I DID IT!")
-        # return
+        # -- grab data batch --
+        burst, res_imgs, raw_img, directions = next(train_iter)
 
-        # -- reshaping of data --
-        # raw_img = raw_img.cuda(non_blocking=True)
-        input_order = np.arange(cfg.N)
-        # print("pre",input_order,cfg.blind,cfg.N)
-        middle_img_idx = -1
-        if not cfg.input_with_middle_frame:
-            middle = len(input_order) // 2
-            # print(middle)
-            middle_img_idx = input_order[middle]
-            input_order = np.r_[input_order[:middle],input_order[middle+1:]]
-        else:
-            middle = len(input_order) // 2
-            middle_img_idx = input_order[middle]
-            input_order = np.arange(cfg.N)
-        # print("post",cfg.blind,cfg.N,cfg.input_N,input_order,middle_img_idx)
+        # -- getting shapes of data --
+        N,BS,C,H,W = burst.shape
+        burst = burst.cuda(non_blocking=True)
 
-        # -- add input noise --
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        burst_imgs_noisy = burst_imgs.clone()
-        if cfg.input_noise:
-            # noise = np.random.rand() * 
-            noise = cfg.input_noise_level
-            burst_imgs_noisy[middle_img_idx] = torch.normal(burst_imgs_noisy[middle_img_idx],noise)
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #      Formatting Images for FP
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-        # if cfg.middle_frame_random_erase:
-        #     for i in range(burst_imgs_noisy[middle_img_idx].shape[0]):
-        #         tmp = random_eraser(burst_imgs_noisy[middle_img_idx][i])
-        #         burst_imgs_noisy[middle_img_idx][i] = tmp
-        # burst_imgs_noisy = torch.normal(burst_imgs_noisy,noise)
-        # print(torch.sum(burst_imgs_noisy[middle_img_idx] - burst_imgs[middle_img_idx]))
-
-        # print(cfg.N,cfg.blind,[input_order[x] for x in range(cfg.input_N)])
-        stacked_burst = torch.cat([burst_imgs_noisy[input_order[x]] for x in range(cfg.input_N)],
-                                  dim=1)
-        # print("stacked_burst",stacked_burst.shape)
-
-        # if cfg.input_noise:
-        #     stacked_burst = torch.normal(stacked_burst,noise)
+        # -- creating some transforms --
+        stacked_burst = rearrange(burst,'n b c h w -> b n c h w')
+        cat_burst = rearrange(burst,'n b c h w -> (b n) c h w')
 
         # -- extract target image --
-        if cfg.blind:
-            t_img = burst_imgs[middle_img_idx]
-        else:
-            t_img = szm(raw_img.cuda(non_blocking=True))
+        mid_img =  burst[N//2]
+        raw_zm_img = szm(raw_img.cuda(non_blocking=True))
+        if cfg.supervised: gt_img = raw_zm_img
+        else: gt_img = mid_img
 
-        # -- denoising --
-        rec_res = model(stacked_burst)
-        assert cfg.input_N == 1, "We must be single frame."
-        rec_img = stacked_burst - rec_res
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #           Foward Pass
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-        # -- compute loss --
-        loss = F.mse_loss(t_img,rec_img)
+        aligned,aligned_ave,denoised,denoised_ave,filters = model(burst)
 
-        # -- dncnn denoising --
-        # rec_res = model(stacked_burst)
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #    Entropy Loss for Filters
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-        # -- compute loss --
-        # t_res = t_img - burst_imgs[middle_img_idx]
-        # loss = F.mse_loss(t_res,rec_res)
+        filters_shaped = rearrange(filters,'b n k2 1 1 1 -> (b n) k2',n=N)
+        filters_entropy = entropyLoss(filters_shaped)
+        filters_entropy_coeff = 10.
 
-        # -- update info --
-        running_loss += loss.item()
-        total_loss += loss.item()
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #    Alignment Losses (MSE)
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-        # -- BP and optimize --
-        loss.backward()
+        losses = alignmentLossMSE(aligned,aligned_ave,gt_img,cfg.global_step)
+        ave_loss,burst_loss = [loss.item() for loss in losses]
+        align_mse = np.sum(losses)
+        align_mse_coeff = 0 #.933**cfg.global_step if cfg.global_step < 100 else 0
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #   Reconstruction Losses (MSE)
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        denoised_ave_d = denoised_ave.detach()
+        losses = criterion(denoised,denoised_ave,gt_img,cfg.global_step)
+        ave_loss,burst_loss = [loss.item() for loss in losses]
+        rec_mse = np.sum(losses)
+        rec_mse_coeff = 0.9997**cfg.global_step
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #    Reconstruction Losses (Distribution)
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        # -- regularization scheduler --
+        if cfg.global_step < 100: reg = 0.5
+        elif cfg.global_step < 200: reg = 0.25
+        elif cfg.global_step < 5000: reg = 0.15
+        elif cfg.global_step < 10000: reg = 0.1
+        else: reg = 0.05
+
+        # -- computation --
+        residuals = denoised - mid_img.unsqueeze(1).repeat(1,N,1,1,1)
+        residuals = rearrange(residuals,'b n c h w -> b n (h w) c')
+        # rec_ot_pair_loss_v1 = w_gaussian_bp(residuals,noise_level)
+        rec_ot_pair_loss_v1 = kl_gaussian_bp(residuals,noise_level)
+        # rec_ot_pair_loss_v1 = ot_pairwise2gaussian_bp(residuals,K=6,reg=reg)
+        # rec_ot_pair_loss_v2 = ot_pairwise_bp(residuals,K=3)
+        rec_ot_pair_loss_v2 = torch.FloatTensor([0.]).to(cfg.device)
+        rec_ot_pair = (rec_ot_pair_loss_v1 + rec_ot_pair_loss_v2)/2.
+        rec_ot_pair_coeff = 100# - .997**cfg.global_step
+
+            
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #              Final Losses
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        align_loss = align_mse_coeff * align_mse
+        rec_loss = rec_ot_pair_coeff * rec_ot_pair + rec_mse_coeff * rec_mse
+        entropy_loss = filters_entropy_coeff * filters_entropy
+        final_loss = align_loss + rec_loss + entropy_loss
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #              Record Keeping
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        # -- alignment MSE --
+        align_mse_losses += align_mse.item()
+        align_mse_count += 1
+
+        # -- reconstruction MSE --
+        rec_mse_losses += rec_mse.item()
+        rec_mse_count += 1
+
+        # -- reconstruction Dist. --
+        rec_ot_losses += rec_ot_pair.item()
+        rec_ot_count += 1
+
+        # -- total loss --
+        running_loss += final_loss.item()
+        total_loss += final_loss.item()
+
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #        Gradients & Backpropogration
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        # -- compute the gradients! --
+        final_loss.backward()
+
+        # -- backprop now. --
+        model.denoiser_info.optim.step()
         optimizer.step()
 
-        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
-            running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
-            running_loss = 0
-    total_loss /= len(train_loader)
-    return total_loss
 
-def test_loop_offset(cfg,model,criterion,test_loader,epoch):
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        #
+        #            Printing to Stdout
+        #
+        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
+
+            # -- compute mse for fun --
+            BS = raw_img.shape[0]            
+            raw_img = raw_img.cuda(non_blocking=True)
+
+            # -- psnr for [average of aligned frames] --
+            mse_loss = F.mse_loss(raw_img,aligned_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            psnr_aligned_ave = np.mean(mse_to_psnr(mse_loss))
+            psnr_aligned_std = np.std(mse_to_psnr(mse_loss))
+
+            # -- psnr for [average of input, misaligned frames] --
+            mis_ave = torch.mean(stacked_burst,dim=1)
+            mse_loss = F.mse_loss(raw_img,mis_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            psnr_misaligned_ave = np.mean(mse_to_psnr(mse_loss))
+            psnr_misaligned_std = np.std(mse_to_psnr(mse_loss))
+
+            # -- psnr for [bm3d] --
+            bm3d_nb_psnrs = []
+            for b in range(BS):
+                bm3d_rec = bm3d.bm3d(mid_img[b].cpu().transpose(0,2)+0.5,
+                                     sigma_psd=noise_level/255,
+                                     stage_arg=bm3d.BM3DStages.ALL_STAGES)
+                bm3d_rec = torch.FloatTensor(bm3d_rec).transpose(0,2)
+                b_loss = F.mse_loss(raw_img[b].cpu(),bm3d_rec,reduction='none').reshape(1,-1)
+                b_loss = torch.mean(b_loss,1).detach().cpu().numpy()
+                bm3d_nb_psnr = np.mean(mse_to_psnr(b_loss))
+                bm3d_nb_psnrs.append(bm3d_nb_psnr)
+            bm3d_nb_ave = np.mean(bm3d_nb_psnrs)
+            bm3d_nb_std = np.std(bm3d_nb_psnrs)
+
+            # -- psnr for aligned + denoised --
+            raw_img_repN = raw_img.unsqueeze(1).repeat(1,N,1,1,1)
+            mse_loss = F.mse_loss(raw_img_repN,denoised+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            psnr_denoised_ave = np.mean(mse_to_psnr(mse_loss))
+            psnr_denoised_std = np.std(mse_to_psnr(mse_loss))
+
+            # -- psnr for [model output image] --
+            mse_loss = F.mse_loss(raw_img,denoised_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            psnr = np.mean(mse_to_psnr(mse_loss))
+            psnr_std = np.std(mse_to_psnr(mse_loss))
+
+            # -- update losses --
+            running_loss /= cfg.log_interval
+
+            # -- alignment MSE --
+            align_mse_ave = align_mse_losses / align_mse_count
+            align_mse_losses,align_mse_count = 0,0
+
+            # -- reconstruction MSE --
+            rec_mse_ave = rec_mse_losses / rec_mse_count
+            rec_mse_losses,rec_mse_count = 0,0
+
+            # -- reconstruction Dist. --
+            rec_ot_ave = rec_ot_losses / rec_ot_count 
+            rec_ot_losses,rec_ot_count = 0,0
+
+            # -- write record --
+            if use_record:
+                info = {'burst':burst_loss,'ave':ave_loss,'ot':rec_ot_ave,
+                        'psnr':psnr,'psnr_std':psnr_std}
+                record_losses = record_losses.append(info,ignore_index=True)
+                
+            # -- write to stdout --
+            write_info = (epoch, cfg.epochs, batch_idx,len(train_loader),running_loss,
+                          psnr,psnr_std,psnr_denoised_ave,psnr_denoised_std,psnr_aligned_ave,
+                          psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,
+                          bm3d_nb_std,rec_mse_ave,rec_ot_ave)
+            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
+            running_loss = 0
+
+        # -- write examples --
+        if write_examples and (batch_idx % write_examples_iter) == 0 and (batch_idx > 0 or cfg.global_step == 0):
+            write_input_output(cfg,model,stacked_burst,aligned,denoised,filters,directions)
+
+        if use_timer: clock.toc()
+        if use_timer: print(clock)
+        cfg.global_step += 1
+    total_loss /= len(train_loader)
+    return total_loss,record_losses
+
+def test_loop(cfg,model,criterion,test_loader,epoch):
     model.eval()
     model = model.to(cfg.device)
     total_psnr = 0
     total_loss = 0
+    psnrs = np.zeros( (len(test_loader),cfg.batch_size) )
+    use_record = False
+    record_test = pd.DataFrame({'psnr':[]})
+
     with torch.no_grad():
-        for batch_idx, (burst_imgs, res_img, raw_img) in enumerate(test_loader):
-        # for batch_idx, (burst_imgs, raw_img) in enumerate(test_loader):
-    
+        for batch_idx, (burst, res_imgs, raw_img, directions) in enumerate(test_loader):
             BS = raw_img.shape[0]
             
             # -- selecting input frames --
             input_order = np.arange(cfg.N)
             # print("pre",input_order)
-            # if cfg.blind or True:
             middle_img_idx = -1
             if not cfg.input_with_middle_frame:
                 middle = cfg.N // 2
                 # print(middle)
                 middle_img_idx = input_order[middle]
-                input_order = np.r_[input_order[:middle],input_order[middle+1:]]
+                # input_order = np.r_[input_order[:middle],input_order[middle+1:]]
             else:
-                # input_order = np.arange(cfg.N)
                 middle = len(input_order) // 2
-                middle_img_idx = input_order[middle]
                 input_order = np.arange(cfg.N)
-            # print("post",cfg.blind,cfg.N,cfg.input_N,input_order,middle_img_idx)
+                middle_img_idx = input_order[middle]
+                # input_order = np.arange(cfg.N)
+            
             # -- reshaping of data --
             raw_img = raw_img.cuda(non_blocking=True)
-            burst_imgs = burst_imgs.cuda(non_blocking=True)
-            stacked_burst = torch.cat([burst_imgs[input_order[x]] for
-                                       x in range(cfg.input_N)],dim=1)
+            burst = burst.cuda(non_blocking=True)
+            stacked_burst = torch.stack([burst[input_order[x]] for x in range(cfg.input_N)],dim=1)
+            cat_burst = torch.cat([burst[input_order[x]] for x in range(cfg.input_N)],dim=1)
     
-            # -- direct denoising --
-            rec_res = model(stacked_burst)
-            rec_img = stacked_burst - rec_res
+            # -- denoising --
+            aligned,aligned_ave,denoised,denoised_ave,filters = model(burst)
+            denoised_ave = denoised_ave.detach()
 
-            
-            # -- dncnn denoising --
-            # rec_res = model(stacked_burst)
-            # rec_img = burst_imgs[middle_img_idx] + rec_res
+            # if not cfg.input_with_middle_frame:
+            #     denoised_ave = model(cat_burst,stacked_burst)[1]
+            # else:
+            #     denoised_ave = model(cat_burst,stacked_burst)[0][middle_img_idx]
+
+            # denoised_ave = burst[middle_img_idx] - rec_res
             
             # -- compare with stacked targets --
-            rec_img = rescale_noisy_image(rec_img)        
-            loss = F.mse_loss(raw_img,rec_img,reduction='none').reshape(BS,-1)
+            denoised_ave = rescale_noisy_image(denoised_ave)        
+
+            # -- compute psnr --
+            loss = F.mse_loss(raw_img,denoised_ave,reduction='none').reshape(BS,-1)
+            # loss = F.mse_loss(raw_img,burst[cfg.input_N//2]+0.5,reduction='none').reshape(BS,-1)
             loss = torch.mean(loss,1).detach().cpu().numpy()
             psnr = mse_to_psnr(loss)
-
+            psnrs[batch_idx,:] = psnr
+                        
+            if use_record:
+                record_test = record_test.append({'psnr':psnr},ignore_index=True)
             total_psnr += np.mean(psnr)
             total_loss += np.mean(loss)
 
-            if (batch_idx % cfg.test_log_interval) == 0:
-                root = Path(f"{settings.ROOT_PATH}/output/n2n/offset_out_noise/rec_imgs/N{cfg.N}/e{epoch}")
-                if not root.exists(): root.mkdir(parents=True)
-                fn = root / Path(f"b{batch_idx}.png")
-                nrow = int(np.sqrt(cfg.batch_size))
-                rec_img = rec_img.detach().cpu()
-                grid_imgs = vutils.make_grid(rec_img, padding=2, normalize=True, nrow=nrow)
-                plt.imshow(grid_imgs.permute(1,2,0))
-                plt.savefig(fn)
-                plt.close('all')
+            # if (batch_idx % cfg.test_log_interval) == 0:
+            #     root = Path(f"{settings.ROOT_PATH}/output/n2n/offset_out_noise/denoised_aves/N{cfg.N}/e{epoch}")
+            #     if not root.exists(): root.mkdir(parents=True)
+            #     fn = root / Path(f"b{batch_idx}.png")
+            #     nrow = int(np.sqrt(cfg.batch_size))
+            #     denoised_ave = denoised_ave.detach().cpu()
+            #     grid_imgs = tv_utils.make_grid(denoised_ave, padding=2, normalize=True, nrow=nrow)
+            #     plt.imshow(grid_imgs.permute(1,2,0))
+            #     plt.savefig(fn)
+            #     plt.close('all')
+            if batch_idx % 100 == 0: print("[%d/%d] Test PSNR: %2.2f" % (batch_idx,len(test_loader),total_psnr / (batch_idx+1)))
 
-    ave_psnr = total_psnr / len(test_loader)
+    psnr_ave = np.mean(psnrs)
+    psnr_std = np.std(psnrs)
     ave_loss = total_loss / len(test_loader)
-    print("[Blind: %d | N: %d] Testing results: Ave psnr %2.3e Ave loss %2.3e"%(cfg.blind,cfg.N,ave_psnr,ave_loss))
-    return ave_psnr
+    print("[N: %d] Testing: [psnr: %2.2f +/- %2.2f] [ave loss %2.3e]"%(cfg.N,psnr_ave,psnr_std,ave_loss))
+    return psnr_ave,record_test
 
 
-def train_loop_N_half(cfg,model,optimizer,criterion,train_loader,epoch):
-    model.train()
-    model = model.to(cfg.device)
-    N_half = cfg.N//2
-    total_loss = 0
-    running_loss = 0
+def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
 
+    """
+    :params burst: input images to the model, :shape [B, N, C, H, W]
+    :params aligned: output images from the alignment layers, :shape [B, N, C, H, W]
+    :params denoised: output images from the denoiser, :shape [B, N, C, H, W]
+    :params filters: filters used by model, :shape [B, N, K2, 1, Hf, Wf] with Hf = (H or 1)
+    """
 
-    for batch_idx, (burst_imgs, raw_img) in enumerate(train_loader):
+    # -- file path --
+    path = Path(f"./output/n2nwl/io_examples/{cfg.exp_name}/")
+    if not path.exists(): path.mkdir(parents=True)
 
-        optimizer.zero_grad()
-        model.zero_grad()
+    # -- init --
+    B,N,C,H,W = burst.shape
 
-        # reshaping of data
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        inputs,targets = burst_imgs[:N_half],burst_imgs[N_half:]
-        stacked_inputs = torch.cat([inputs[x] for x in range(N_half)],dim=1)
-        # stacked_targets = torch.cat([targets[x] for x in range(N_half)],dim=1)
+    # -- save histogram of residuals --
+    denoised_np = denoised.detach().cpu().numpy()
+    plot_histogram_residuals_batch(denoised_np,cfg.global_step,path,rand_name=False)
 
-        # denoising
-        rec_res = model(stacked_inputs)
+    # -- save histogram of gradients --
+    denoiser = model.denoiser_info.model
+    plot_histogram_gradients(denoiser,cfg.global_step,path,rand_name=False)
 
-        # compare with stacked targets
-        rec_img = rec_img.expand(targets.shape)
-        loss = F.mse_loss(targets,rec_img)
-        running_loss += loss.item()
-        total_loss += loss.item()
+    # -- save gradient norm by layer --
+    denoiser = model.denoiser_info.model
+    plot_histogram_gradient_norms(denoiser,cfg.global_step,path,rand_name=False)
 
-        # BP and optimize
-        loss.backward()
-        optimizer.step()
-
-        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
-            running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
-            running_loss = 0
-    total_loss /= len(train_loader)
-    return total_loss
-
-def test_loop_N_half(cfg,model,criterion,test_loader,epoch):
-    model.train()
-    model = model.to(cfg.device)
-    N_half = cfg.N//2
-    running_loss = 0
-
-    for batch_idx, (burst_imgs, raw_img) in enumerate(test_loader):
-
-        # reshaping of data
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        inputs,targets = burst_imgs[:N_half],burst_imgs[N_half:]
-        stacked_inputs = torch.cat([inputs[x] for x in range(N_half)],dim=1)
-        # stacked_targets = torch.cat([targets[x] for x in range(N_half)],dim=1)
-
-        # denoising
-        rec_img = model(stacked_inputs)
+    # -- save file per burst --
+    for b in range(B):
         
-        # compare with stacked targets
-        rec_img = rec_img.expand(targets.shape)
-        loss = F.mse_loss(targets,rec_img)
-        running_loss += loss.item()
+        # -- save images --
+        fn = path / Path(f"{cfg.global_step}_{b}.png")
+        burst_b = torch.cat([burst[b][[N//2]] - burst[b][[0]],burst[b],burst[b][[N//2]] - burst[b][[-1]]],dim=0)
+        aligned_b = torch.cat([aligned[b][[N//2]] - aligned[b][[0]],aligned[b],aligned[b][[N//2]] - aligned[b][[-1]]],dim=0)
+        denoised_b = torch.cat([denoised[b][[N//2]] - denoised[b][[0]],denoised[b],denoised[b][[N//2]] - denoised[b][[-1]]],dim=0)
+        imgs = torch.cat([burst_b,aligned_b,denoised_b],dim=0) # 2N,C,H,W
+        tv_utils.save_image(imgs,fn,nrow=N+2,normalize=True,range=(-0.5,0.5))
 
-        # BP and optimize
-        loss.backward()
-        optimizer.step()
+        # -- save filters --
+        fn = path / Path(f"filters_{cfg.global_step}_{b}.png")
+        K = int(np.sqrt(filters.shape[2]))
+        if filters.shape[-1] > 1:
+            S = npr.permutation(filters.shape[-1])[:10]
+            filters_b = filters[b,:,:,0,S,S].view(N*10,1,K,K)
+        else: filters_b = filters[b,:,:,0,0,0].view(N,1,K,K)
+        tv_utils.save_image(filters_b,fn,nrow=N,normalize=True)
 
-        if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
-            running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
-            running_loss = 0
+        # -- save direction image --
+        fn = path / Path(f"arrows_{cfg.global_step}_{b}.png")
+        arrows = create_arrow_image(directions[b],pad=2)
+        tv_utils.save_image([arrows],fn)
+
+
+    print(f"Wrote example images to file at [{path}]")
+    plt.close("all")
+
+
+
+def create_arrow_image(directions,pad=2):
+    D = len(directions)
+    assert D == 1,"Only one direction right now."
+    W = 100
+    S = (W + pad) * D + pad
+    arrows = np.zeros((S,W+2*pad,3))
+    direction = directions[0]
+    for i in range(D):
+        col_i = (pad+W)*i+pad
+        canvas = arrows[col_i:col_i+W,pad:pad+W,:]
+        start_point = (0,0)
+        x_end = direction[0].item()
+        y_end = direction[1].item()
+        end_point = (x_end,y_end)
+
+        fig = Figure(dpi=300)
+        plt_canvas = FigureCanvas(fig)
+        ax = fig.gca()
+        ax.annotate("",
+                    xy=end_point, xycoords='data',
+                    xytext=start_point, textcoords='data',
+                    arrowprops=dict(arrowstyle="->",connectionstyle="arc3"),
+        )
+        ax.set_xlim([-1,1])
+        ax.set_ylim([-1,1])
+        plt_canvas.draw()       # draw the canvas, cache the renderer
+        canvas = np.array(plt_canvas.buffer_rgba())[:,:,:]
+        arrows = canvas
+    arrows = torch.Tensor(arrows.astype(np.uint8)).transpose(0,2).transpose(1,2)
+    return arrows
+
 
