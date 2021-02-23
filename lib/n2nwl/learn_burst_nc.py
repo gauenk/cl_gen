@@ -116,6 +116,7 @@ def train_loop(cfg,model,noise_critic,optimizer,criterion,train_loader,epoch,rec
             # -- zero gradients --
             optimizer.zero_grad()
             model.zero_grad()
+            model.denoiser_info.model.zero_grad()
             model.denoiser_info.optim.zero_grad()
             noise_critic.disc.zero_grad()
             noise_critic.optim.zero_grad()

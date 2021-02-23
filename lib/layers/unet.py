@@ -4,6 +4,12 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# -- asd --
+from .unet_comps import DoubleConv as DoubleConv_v2
+from .unet_comps import Down as Down_v2
+from .unet_comps import Up as Up_v2
+from .unet_comps import OutConv as OutConv_v2
+
 class UNet(nn.Module):
     def __init__(self, n_channels, verbose = False ):
         super(UNet, self).__init__()
@@ -143,6 +149,84 @@ class UNet_n2n(nn.Module):
             print(*msg)
 
 
+class UNet_n2n_2layer(nn.Module):
+    def __init__(self, n_channels, k_size = 3, o_channels=3, verbose = False):
+        super(UNet_n2n_2layer, self).__init__()
+        self.n_channels = n_channels
+        self.verbose = False
+
+        self.conv1 = DoubleConv(3*n_channels, 96, kernel_size=k_size, padding=2)
+        self.conv2 = SingleConv(96, 2*96, 1, kernel_size=3)
+        self.conv3 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv4 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv5 = SingleConv(48, 48, 1, kernel_size=3)
+        self.conv6 = SingleConv(48, 48, 1, kernel_size=3, use_pool=False)
+
+        self.up1 = Up(96,96,kernel_size=3)
+        self.up2 = Up(144,96,kernel_size=3)
+        self.up3 = Up(144,96,kernel_size=3)
+        self.up4 = Up(3*96,96,kernel_size=3)
+        self.up5 = Up(96+3*n_channels,32,64,kernel_size=k_size)
+        
+        self.out_conv = SingleConv(32,32,kernel_size=3,
+                                   padding=1,use_pool=False,use_relu=False)
+        self.out_conv_2 = SingleConv(32,o_channels,kernel_size=3,
+                                     padding=1,use_pool=False,use_relu=False)
+
+        # self.end1 = SingleConv(32,32, 1, 3, 1)
+        # self.end2 = SingleConv(32, 1, 0, 1, 1)
+
+    def forward(self, x):
+        self.vprint("fwd")
+        self.vprint('x',x.shape)
+        x1 = self.conv1(x)
+        self.vprint('x1',x1.shape)
+        x2 = self.conv2(x1)
+        self.vprint('x2',x2.shape)
+        # x3 = self.conv3(x2)
+        # self.vprint('x3',x3.shape)
+        # x4 = self.conv4(x3)
+        # self.vprint('x4',x4.shape)
+        # x5 = self.conv5(x4)
+        # self.vprint('x5',x5.shape)
+        # x6 = self.conv6(x5)
+        # self.vprint('x6',x6.shape)
+        
+        # u1 = self.up1(x6)
+        # self.vprint(u1.shape)
+        # u2 = self.up2(torch.cat([x5,u1],dim=1))
+        # self.vprint(u2.shape)
+        # u3 = self.up3(torch.cat([x4,u2],dim=1))
+        # self.vprint(u3.shape)
+        # u4 = self.up4(torch.cat([x3,u3],dim=1))
+        # self.vprint('u4',u4.shape)
+        # u5 = self.up5(torch.cat([x2,u4],dim=1))
+        # self.vprint('u5',u5.shape)
+        # u6 = self.up6(torch.cat([x1,u5],dim=1))
+        # self.vprint('u6',u6.shape)
+        
+        # u1 = self.up1(x6,x4)
+        # self.vprint('u1',u1.shape)
+        # u2 = self.up2(u1,x3)
+        # self.vprint('u2',u2.shape)
+        # u3 = self.up3(u2,x2)
+        # self.vprint('u3',u3.shape)
+        u4 = self.up4(x2,x1)
+        self.vprint('u4',u4.shape)
+        u5 = self.up5(x1,x)
+        self.vprint('u5',u5.shape)
+        u6 = self.out_conv(u5)
+        self.vprint('u6',u6.shape)
+        u7 = self.out_conv_2(u6)
+        self.vprint('u7',u7.shape)
+
+        return u7
+
+    def vprint(self,*msg):
+        if self.verbose:
+            print(*msg)
+
+
 
 #
 # Parts of UNet Model
@@ -168,7 +252,8 @@ class SingleConv(nn.Module):
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None, kernel_size=3, padding=1, stride=1, use_bn = False, use_pool = True):
+    def __init__(self, in_channels, out_channels, mid_channels=None,
+                 kernel_size=3, padding=1, stride=1, use_bn = False, use_pool = True):
         super().__init__()
         if not mid_channels: mid_channels = out_channels
         layers = []
@@ -726,3 +811,39 @@ class UNet_Git3d(nn.Module):
     
 
 
+
+class UNet2(nn.Module):
+    def __init__(self, n_channels, n_classes, bilinear=False,
+                 residual=False, activation_type="relu", use_bn=True):
+        super(UNet2, self).__init__()
+
+        if activation_type == "leaky_relu":
+            activation = nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        elif activation_type == "relu":
+            activation = nn.ReLU(inplace=True)
+        else:
+            raise TypeError
+
+        self.n_channels = n_channels
+        self.n_classes = n_classes
+        self.bilinear = bilinear
+
+        self.inc = DoubleConv_v2(n_channels, 96, activation, use_bn=use_bn)
+        self.down1 = Down_v2(96, 96*2, activation, use_bn=use_bn)
+        self.down2 = Down_v2(96*2, 96*4, activation, use_bn=use_bn)
+
+        self.up1 = Up_v2(96*4, 96*2, activation, use_bn=use_bn)
+        self.up2 = Up_v2(96*2, 96*1, activation, use_bn=use_bn)
+        self.outc = OutConv_v2(96, n_classes)
+        self.residual = residual
+
+    def forward(self, input):
+        x1 = self.inc(input)
+        x2 = self.down1(x1)
+        x3 = self.down2(x2)
+        x = self.up1(x3, x2)
+        x = self.up2(x, x1)
+        x = self.outc(x)
+        if self.residual:
+            x = input + x
+        return x

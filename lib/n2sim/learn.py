@@ -13,24 +13,32 @@ from einops import rearrange, repeat, reduce
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
 
+# -- faiss imports --
+import faiss
+import faiss.contrib.torch_utils
+
 # -- pytorch imports --
 import torch
 import torch.nn.functional as F
 import torchvision.utils as tv_utils
+import torchvision.transforms as tvT
+import torchvision.transforms.functional as tvF
 
 # -- project code --
 import settings
 from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
-from datasets.transform import ScaleZeroMean
+from datasets.transform import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
 
 # -- [local] project code --
-from .dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp
-from .plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
+from n2nwl.dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp,kl_gaussian_bp_patches
+from n2nwl.misc import AlignmentFilterHooks
+from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
+from .sim_search import compute_similar_bursts,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods
 
-def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
+def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
 
 
     # -=-=-=-=-=-=-=-=-=-=-
@@ -39,8 +47,14 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     #
     # -=-=-=-=-=-=-=-=-=-=-
 
-    model.train()
-    model = model.to(cfg.device)
+    model.align_info.model.train()
+    model.denoiser_info.model.train()
+    model.unet_info.model.train()
+    model.denoiser_info.model = model.denoiser_info.model.to(cfg.device)
+    model.align_info.model = model.align_info.model.to(cfg.device)
+    model.unet_info.model = model.unet_info.model.to(cfg.device)
+
+
     N = cfg.N
     total_loss = 0
     running_loss = 0
@@ -61,9 +75,30 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     rec_ot_losses,rec_ot_count = 0,0
     running_loss,total_loss = 0,0
 
-    write_examples = True
+    write_examples = False
     write_examples_iter = 800
     noise_level = cfg.noise_params['g']['stddev']
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #      Dataset Augmentation
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    transforms = [tvF.vflip,tvF.hflip,tvF.rotate]
+    aug = RandomChoice(transforms)
+    def apply_transformations(burst,gt_img):
+        N,B = burst.shape[:2]
+        gt_img_rs = rearrange(gt_img,'b c h w -> 1 b c h w')
+        all_images = torch.cat([gt_img_rs,burst],dim=0)
+        all_images = rearrange(all_images,'n b c h w -> (n b) c h w')
+        tv_utils.save_image(all_images,'aug_original.png',nrow=N+1,normalize=True)
+        aug_images = aug(all_images)
+        tv_utils.save_image(aug_images,'aug_augmented.png',nrow=N+1,normalize=True)
+        aug_images = rearrange(aug_images,'(n b) c h w -> n b c h w',b=B)
+        aug_gt_img = aug_images[0]
+        aug_burst = aug_images[1:]
+        return aug_burst,aug_gt_img
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
@@ -72,9 +107,23 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
     alignmentLossMSE = BurstRecLoss()
-    denoiseLossMSE = BurstRecLoss()
+    denoiseLossMSE = BurstRecLoss(alpha=1.0,gradient_L1=~cfg.supervised)
     # denoiseLossOT = BurstResidualLoss()
     entropyLoss = EntropyLoss()
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #    Add hooks for epoch
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-
+
+    align_hook = AlignmentFilterHooks(cfg.N)
+    align_hooks = []
+    for kpn_module in model.align_info.model.children():
+        for name,layer in kpn_module.named_children():
+            if name == "filter_cls":
+                align_hook_handle = layer.register_forward_hook(align_hook)
+                align_hooks.append(align_hook_handle)
 
     # -=-=-=-=-=-=-=-=-=-=-
     #
@@ -86,9 +135,11 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
     one = torch.FloatTensor([1.]).to(cfg.device)
     switch = True
     if use_timer: clock = Timer()
+    K = 8
     train_iter = iter(train_loader)
-    D = 5 * 10**3
     steps_per_epoch = len(train_loader)
+    write_examples_iter = steps_per_epoch//3
+    all_filters = []
 
     # -=-=-=-=-=-=-=-=-=-=-
     #
@@ -107,146 +158,179 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
         # -- setup iteration timer --
         if use_timer: clock.tic()
 
-        # -- zero gradients; ready 2 go --
-        optimizer.zero_grad()
-        model.zero_grad()
-        model.denoiser_info.optim.zero_grad()
-
         # -- grab data batch --
         burst, res_imgs, raw_img, directions = next(train_iter)
 
         # -- getting shapes of data --
-        N,BS,C,H,W = burst.shape
+        N,B,C,H,W = burst.shape
         burst = burst.cuda(non_blocking=True)
-
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #      Formatting Images for FP
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-        # -- creating some transforms --
-        stacked_burst = rearrange(burst,'n b c h w -> b n c h w')
-        cat_burst = rearrange(burst,'n b c h w -> (b n) c h w')
-
-        # -- extract target image --
-        mid_img =  burst[N//2]
         raw_zm_img = szm(raw_img.cuda(non_blocking=True))
-        if cfg.supervised: gt_img = raw_zm_img
-        else: gt_img = mid_img
+        burst_og = burst.clone()
+        mid_img_og = burst[N//2]
 
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #           Foward Pass
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        # -- spoof noise2noise --
+        # assert K == 1, "spoofing noise2noise requires K == 1 patches"
+        # sim_burst = raw_zm_img.unsqueeze(0).unsqueeze(2).repeat(1,1,K,1,1,1)
+        # sim_burst = torch.normal(sim_burst,noise_level/255.)
+        # sim_burst = torch.cat([burst.unsqueeze(2),sim_burst],dim=2)
+        # k_ins = np.zeros(K).astype(np.int)
+        # k_outs = np.arange(K)+1
 
-        aligned,aligned_ave,denoised,denoised_ave,filters = model(burst)
+        # -- get similar images --
+        def compare_sim_computation_times():
+            # compare_sim_patches_methods(cfg,burst,K,patchsize=3)
+            # compare_sim_images_methods(cfg,burst,K,patchsize=3)
+            t_a,t_b = Timer(),Timer()
+            t_a.tic()
+            sim_bursts_a = compute_similar_bursts_n2sim(cfg,burst,K,patchsize=3)
+            t_a.toc()
 
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #    Entropy Loss for Filters
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            t_b.tic()
+            sim_burst = compute_similar_bursts(cfg,burst,K,patchsize=3)
+            t_b.toc()
 
-        filters_shaped = rearrange(filters,'b n k2 1 1 1 -> (b n) k2',n=N)
-        filters_entropy = entropyLoss(filters_shaped)
-        filters_entropy_coeff = 10.
+            print(t_a)
+            print(t_b)
 
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #    Alignment Losses (MSE)
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+        # compare_sim_computation_times()
+        sim_burst = compute_similar_bursts(cfg,burst,K,patchsize=3)
+        k_ins,k_outs = create_k_grid(sim_burst,K+1,shuffle=True,L=K)
 
-        losses = alignmentLossMSE(aligned,aligned_ave,gt_img,cfg.global_step)
-        ave_loss,burst_loss = [loss.item() for loss in losses]
-        align_mse = np.sum(losses)
-        align_mse_coeff = 0 #.933**cfg.global_step if cfg.global_step < 100 else 0
+        for k_in,k_out in zip(k_ins,k_outs):
+            if k_in == k_out: continue
 
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #   Reconstruction Losses (MSE)
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            # -- zero gradients; ready 2 go --
+            model.align_info.model.zero_grad()
+            model.align_info.optim.zero_grad()
+            model.denoiser_info.model.zero_grad()
+            model.denoiser_info.optim.zero_grad()
+            model.unet_info.model.zero_grad()
+            model.unet_info.optim.zero_grad()
 
-        denoised_ave_d = denoised_ave.detach()
-        losses = criterion(denoised,denoised_ave,gt_img,cfg.global_step)
-        ave_loss,burst_loss = [loss.item() for loss in losses]
-        rec_mse = np.sum(losses)
-        rec_mse_coeff = 0.997**cfg.global_step
-
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #    Reconstruction Losses (Distribution)
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-        # -- regularization scheduler --
-        if cfg.global_step < 100: reg = 0.5
-        elif cfg.global_step < 200: reg = 0.25
-        elif cfg.global_step < 5000: reg = 0.15
-        elif cfg.global_step < 10000: reg = 0.1
-        else: reg = 0.05
-
-        # -- computation --
-        residuals = denoised - mid_img.unsqueeze(1).repeat(1,N,1,1,1)
-        residuals = rearrange(residuals,'b n c h w -> b n (h w) c')
-        # rec_ot_pair_loss_v1 = w_gaussian_bp(residuals,noise_level)
-        rec_ot_pair_loss_v1 = kl_gaussian_bp(residuals,noise_level)
-        # rec_ot_pair_loss_v1 = ot_pairwise2gaussian_bp(residuals,K=6,reg=reg)
-        # rec_ot_pair_loss_v2 = ot_pairwise_bp(residuals,K=3)
-        rec_ot_pair_loss_v2 = torch.FloatTensor([0.]).to(cfg.device)
-        rec_ot_pair = (rec_ot_pair_loss_v1 + rec_ot_pair_loss_v2)/2.
-        rec_ot_pair_coeff = 100# - .997**cfg.global_step
-
+            # -- compute input/output data --
+            burst = sim_burst[:,:,k_in]
+            mid_img =  sim_burst[N//2,:,k_out]
+            # mid_img =  sim_burst[N//2,:]
+            # print(burst.shape,mid_img.shape)
+            # print(F.mse_loss(burst,mid_img).item())
+            if cfg.supervised: gt_img = raw_zm_img
+            else: gt_img = mid_img
+            # gt_img = torch.normal(raw_zm_img,noise_level/255.)
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #        Dataset Augmentation
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #              Final Losses
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            # burst,gt_img = apply_transformations(burst,gt_img)
 
-        align_loss = align_mse_coeff * align_mse
-        rec_loss = rec_ot_pair_coeff * rec_ot_pair + rec_mse_coeff * rec_mse
-        entropy_loss = filters_entropy_coeff * filters_entropy
-        final_loss = align_loss + rec_loss + entropy_loss
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #      Formatting Images for FP
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            stacked_burst = rearrange(burst,'n b c h w -> b n c h w')
+            cat_burst = rearrange(burst,'n b c h w -> (b n) c h w')
 
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #              Record Keeping
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-        # -- alignment MSE --
-        align_mse_losses += align_mse.item()
-        align_mse_count += 1
-
-        # -- reconstruction MSE --
-        rec_mse_losses += rec_mse.item()
-        rec_mse_count += 1
-
-        # -- reconstruction Dist. --
-        rec_ot_losses += rec_ot_pair.item()
-        rec_ot_count += 1
-
-        # -- total loss --
-        running_loss += final_loss.item()
-        total_loss += final_loss.item()
-
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-        #
-        #        Gradients & Backpropogration
-        #
-        # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-
-        # -- compute the gradients! --
-        final_loss.backward()
-
-        # -- backprop now. --
-        model.denoiser_info.optim.step()
-        optimizer.step()
-
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #           Foward Pass
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            outputs = model(burst)
+            aligned,aligned_ave,denoised,denoised_ave = outputs[:4]
+            aligned_filters,denoised_filters = outputs[4:]
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            # 
+            #    Decrease Entropy within a Kernel
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            filters_entropy = 0
+            filters_entropy_coeff = 0. # 1000.
+            all_filters = []
+            L = len(align_hook.filters)
+            iter_filters = align_hook.filters if L > 0 else [aligned_filters]
+            for filters in iter_filters:
+                filters_shaped = rearrange(filters,'b n k2 c h w -> (b n c h w) k2',n=N)
+                filters_entropy += one #entropyLoss(filters_shaped)
+                all_filters.append(filters)
+            if L > 0: filters_entropy /= L 
+            all_filters = torch.stack(all_filters,dim=1)
+            align_hook.clear()
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #   Reconstruction Losses (MSE)
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            losses = denoiseLossMSE(denoised,denoised_ave,gt_img,cfg.global_step)
+            losses = [ one, one ]
+            # ave_loss,burst_loss = [loss.item() for loss in losses]
+            rec_mse = np.sum(losses)
+            rec_mse = F.mse_loss(denoised_ave,gt_img)
+            rec_mse_coeff = 1.
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #    Reconstruction Losses (Distribution)
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            residuals = denoised - gt_img.unsqueeze(1).repeat(1,N,1,1,1)
+            rec_ot = torch.FloatTensor([0.]).to(cfg.device)
+            # rec_ot = kl_gaussian_bp_patches(residuals,noise_level,flip=True,patchsize=16)
+            if torch.any(torch.isnan(rec_ot)): rec_ot = torch.FloatTensor([0.]).to(cfg.device)
+            if torch.any(torch.isinf(rec_ot)): rec_ot = torch.FloatTensor([0.]).to(cfg.device)
+            # print(rec_ot)
+            rec_ot_coeff = 0.
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #              Final Losses
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            rec_loss = rec_mse_coeff * rec_mse + rec_ot_coeff * rec_ot
+            final_loss = rec_loss
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #              Record Keeping
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            # -- reconstruction MSE --
+            rec_mse_losses += rec_mse.item()
+            rec_mse_count += 1
+    
+            # -- reconstruction Dist. --
+            rec_ot_losses += rec_ot.item()
+            rec_ot_count += 1
+    
+            # -- total loss --
+            running_loss += final_loss.item()
+            total_loss += final_loss.item()
+    
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
+            #        Gradients & Backpropogration
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    
+            # -- compute the gradients! --
+            final_loss.backward()
+    
+            # -- backprop now. --
+            model.align_info.optim.step()
+            model.denoiser_info.optim.step()
+            model.unet_info.optim.step()
+            scheduler.step()
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #
@@ -254,29 +338,37 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
         #
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
+
         if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
 
+
+            # -- recompute model output for original images --
+            outputs = model(burst_og)
+            aligned,aligned_ave,denoised,denoised_ave = outputs[:4]
+            aligned_filters,denoised_filters = outputs[4:]
+
             # -- compute mse for fun --
-            BS = raw_img.shape[0]            
+            B = raw_img.shape[0]            
             raw_img = raw_img.cuda(non_blocking=True)
 
             # -- psnr for [average of aligned frames] --
-            mse_loss = F.mse_loss(raw_img,aligned_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = F.mse_loss(raw_img,aligned_ave+0.5,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_aligned_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_aligned_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [average of input, misaligned frames] --
             mis_ave = torch.mean(stacked_burst,dim=1)
-            mse_loss = F.mse_loss(raw_img,mis_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = F.mse_loss(raw_img,mis_ave+0.5,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_misaligned_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_misaligned_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [bm3d] --
             bm3d_nb_psnrs = []
-            for b in range(BS):
-                bm3d_rec = bm3d.bm3d(mid_img[b].cpu().transpose(0,2)+0.5,
+            M = 10 if B > 10 else B
+            for b in range(B):
+                bm3d_rec = bm3d.bm3d(mid_img_og[b].cpu().transpose(0,2)+0.5,
                                      sigma_psd=noise_level/255,
                                      stage_arg=bm3d.BM3DStages.ALL_STAGES)
                 bm3d_rec = torch.FloatTensor(bm3d_rec).transpose(0,2)
@@ -289,23 +381,19 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
             # -- psnr for aligned + denoised --
             raw_img_repN = raw_img.unsqueeze(1).repeat(1,N,1,1,1)
-            mse_loss = F.mse_loss(raw_img_repN,denoised+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = F.mse_loss(raw_img_repN,denoised+0.5,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_denoised_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_denoised_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [model output image] --
-            mse_loss = F.mse_loss(raw_img,denoised_ave+0.5,reduction='none').reshape(BS,-1)
+            mse_loss = F.mse_loss(raw_img,denoised_ave+0.5,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr = np.mean(mse_to_psnr(mse_loss))
             psnr_std = np.std(mse_to_psnr(mse_loss))
 
             # -- update losses --
             running_loss /= cfg.log_interval
-
-            # -- alignment MSE --
-            align_mse_ave = align_mse_losses / align_mse_count
-            align_mse_losses,align_mse_count = 0,0
 
             # -- reconstruction MSE --
             rec_mse_ave = rec_mse_losses / rec_mse_count
@@ -322,7 +410,7 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
                 record_losses = record_losses.append(info,ignore_index=True)
                 
             # -- write to stdout --
-            write_info = (epoch, cfg.epochs, batch_idx,len(train_loader),running_loss,
+            write_info = (epoch, cfg.epochs, batch_idx, steps_per_epoch,running_loss,
                           psnr,psnr_std,psnr_denoised_ave,psnr_denoised_std,psnr_aligned_ave,
                           psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,
                           bm3d_nb_std,rec_mse_ave,rec_ot_ave)
@@ -331,16 +419,23 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
 
         # -- write examples --
         if write_examples and (batch_idx % write_examples_iter) == 0 and (batch_idx > 0 or cfg.global_step == 0):
-            write_input_output(cfg,model,stacked_burst,aligned,denoised,filters,directions)
+            write_input_output(cfg,model,stacked_burst,aligned,denoised,all_filters,directions)
 
         if use_timer: clock.toc()
         if use_timer: print(clock)
         cfg.global_step += 1
+
+    # -- remove hooks --
+    for hook in align_hooks: hook.remove()
+
     total_loss /= len(train_loader)
     return total_loss,record_losses
 
-def test_loop(cfg,model,criterion,test_loader,epoch):
+def test_loop(cfg,model,test_loader,epoch):
     model.eval()
+    model.align_info.model.eval()
+    model.denoiser_info.model.eval()
+    model.unet_info.model.eval()
     model = model.to(cfg.device)
     total_psnr = 0
     total_loss = 0
@@ -350,7 +445,7 @@ def test_loop(cfg,model,criterion,test_loader,epoch):
 
     with torch.no_grad():
         for batch_idx, (burst, res_imgs, raw_img, directions) in enumerate(test_loader):
-            BS = raw_img.shape[0]
+            B = raw_img.shape[0]
             
             # -- selecting input frames --
             input_order = np.arange(cfg.N)
@@ -374,7 +469,7 @@ def test_loop(cfg,model,criterion,test_loader,epoch):
             cat_burst = torch.cat([burst[input_order[x]] for x in range(cfg.input_N)],dim=1)
     
             # -- denoising --
-            aligned,aligned_ave,denoised,denoised_ave,filters = model(burst)
+            aligned,aligned_ave,denoised,denoised_ave,a_filters,d_filters = model(burst)
             denoised_ave = denoised_ave.detach()
 
             # if not cfg.input_with_middle_frame:
@@ -388,8 +483,8 @@ def test_loop(cfg,model,criterion,test_loader,epoch):
             denoised_ave = rescale_noisy_image(denoised_ave)        
 
             # -- compute psnr --
-            loss = F.mse_loss(raw_img,denoised_ave,reduction='none').reshape(BS,-1)
-            # loss = F.mse_loss(raw_img,burst[cfg.input_N//2]+0.5,reduction='none').reshape(BS,-1)
+            loss = F.mse_loss(raw_img,denoised_ave,reduction='none').reshape(B,-1)
+            # loss = F.mse_loss(raw_img,burst[cfg.input_N//2]+0.5,reduction='none').reshape(B,-1)
             loss = torch.mean(loss,1).detach().cpu().numpy()
             psnr = mse_to_psnr(loss)
             psnrs[batch_idx,:] = psnr
@@ -424,11 +519,11 @@ def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
     :params burst: input images to the model, :shape [B, N, C, H, W]
     :params aligned: output images from the alignment layers, :shape [B, N, C, H, W]
     :params denoised: output images from the denoiser, :shape [B, N, C, H, W]
-    :params filters: filters used by model, :shape [B, N, K2, 1, Hf, Wf] with Hf = (H or 1)
+    :params filters: filters used by model, :shape [B, L, N, K2, 1, Hf, Wf] with Hf = (H or 1) for L = number of cascaded filters
     """
 
     # -- file path --
-    path = Path(f"./output/n2nwl/io_examples/{cfg.exp_name}/")
+    path = Path(f"./output/n2sim/io_examples/{cfg.exp_name}/")
     if not path.exists(): path.mkdir(parents=True)
 
     # -- init --
@@ -438,15 +533,27 @@ def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
     denoised_np = denoised.detach().cpu().numpy()
     plot_histogram_residuals_batch(denoised_np,cfg.global_step,path,rand_name=False)
 
-    # -- save histogram of gradients --
-    denoiser = model.denoiser_info.model
-    plot_histogram_gradients(denoiser,cfg.global_step,path,rand_name=False)
+    # -- save histogram of gradients (denoiser) --
+    if not model.use_unet_only:
+        denoiser = model.denoiser_info.model
+        plot_histogram_gradients(denoiser,"denoiser",cfg.global_step,path,rand_name=False)
 
-    # -- save gradient norm by layer --
-    denoiser = model.denoiser_info.model
-    plot_histogram_gradient_norms(denoiser,cfg.global_step,path,rand_name=False)
+    # -- save histogram of gradients (alignment) --
+    if model.use_alignment:
+        alignment = model.align_info.model
+        plot_histogram_gradients(alignment,"alignment",cfg.global_step,path,rand_name=False)
 
-    # -- save file per burst --
+    # -- save gradient norm by layer (denoiser) --
+    if not model.use_unet_only:
+        denoiser = model.denoiser_info.model
+        plot_histogram_gradient_norms(denoiser,"denoiser",cfg.global_step,path,rand_name=False)
+
+    # -- save gradient norm by layer (alignment) --
+    if model.use_alignment:
+        alignment = model.align_info.model
+        plot_histogram_gradient_norms(alignment,"alignment",cfg.global_step,path,rand_name=False)
+
+    if B > 4: B = 4
     for b in range(B):
         
         # -- save images --
@@ -459,11 +566,12 @@ def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
 
         # -- save filters --
         fn = path / Path(f"filters_{cfg.global_step}_{b}.png")
-        K = int(np.sqrt(filters.shape[2]))
+        K = int(np.sqrt(filters.shape[3]))
+        L = filters.shape[1]
         if filters.shape[-1] > 1:
             S = npr.permutation(filters.shape[-1])[:10]
-            filters_b = filters[b,:,:,0,S,S].view(N*10,1,K,K)
-        else: filters_b = filters[b,:,:,0,0,0].view(N,1,K,K)
+            filters_b = filters[b,...,0,S,S].view(N*10*L,1,K,K)
+        else: filters_b = filters[b,...,0,0,0].view(N*L,1,K,K)
         tv_utils.save_image(filters_b,fn,nrow=N,normalize=True)
 
         # -- save direction image --

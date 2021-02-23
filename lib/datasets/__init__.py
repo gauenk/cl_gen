@@ -3,6 +3,7 @@ from .mnist import get_mnist_dataset
 from .celeba import get_celeba_dataset
 from .imagenet import get_imagenet_dataset
 from .pascal_voc import get_voc_dataset
+from .cbsd68 import get_cbsd68_dataset
 from .transform import TransformsSimCLR,LowLight,BlockGaussian
 
 
@@ -26,6 +27,8 @@ def get_dataset(cfg,cfg_type):
         return get_imagenet_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "voc":
         return get_voc_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "cbsd68":
+        return get_cbsd68_dataset(cfg,cfg_type)
     else:
         raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 

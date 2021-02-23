@@ -387,96 +387,34 @@ def w_gaussian_bp(residuals,raw_std=25):
 
     # -- residual info --
     res_mean = residuals.mean()
-    res_std = (residuals**2).mean() # second moment; not standard deviation
+    res_std = residuals.std()
 
     # -- final loss --
     w_loss = ( tgt_mean - res_mean )**2 + ( tgt_std - res_std )**2
-    # w_loss = ( tgt_std - res_std )**2
 
-    return w_loss
+    return torch.exp(w_loss)
 
+def kl_gaussian_bp(residuals,raw_std=25):
 
-def compute_kl(res_mean,res_std,tgt_mean,tgt_std,eps=1e-15):
+    # -- target info --
+    tgt_mean = 0.
+    tgt_std = raw_std / 255.
+
+    # -- residual info --
+    res_mean = residuals.mean()
+    res_std = residuals.std()
 
     # -- each term --
+    eps = 1e-15
     kl_loss_term1 = torch.log( res_std / tgt_std  + eps)
     kl_loss_term2 = ( tgt_std**2 + (tgt_mean - res_mean)**2 ) / ( 2 * res_std**2 )
     kl_loss_term3 = 0.5
 
     # -- final loss --
     kl_loss = kl_loss_term1 + kl_loss_term2 - kl_loss_term3
-    kl_loss = torch.mean(kl_loss)
 
-    return kl_loss
+    return torch.exp(kl_loss)
 
-def kl_gaussian_pair_bp(residuals):
-
-    """
-    :params residuals: shape: [B, N, C, H, W]
-    """
-
-    # -- reshape --
-    if len(residuals.shape) > 2:
-        residuals = rearrange(residuals,'b n c h w -> (b n) (c h w)')
-    
-    # -- dist stats --
-    M = residuals.shape[0]
-    bn_mean = torch.mean(residuals,dim=1)
-    bn_std = torch.std(residuals,dim=1)
-    js_loss = 0
-    for i in range(M):
-        for j in range(M):
-            if i > j: continue
-            mi,si = bn_mean[i],bn_std[i]
-            mj,sj = bn_mean[j],bn_std[j]
-            js_loss += (compute_kl(mi,si,mj,sj) + compute_kl(mj,sj,mi,si))/2.
-    return js_loss / M**2
-
-def kl_gaussian_bp(residuals,raw_std=25,flip=False):
-
-    """
-    :params residuals: shape: [B, N, C, H, W]
-    """
-
-    # -- reshape --
-    if len(residuals.shape) > 2:
-        residuals = rearrange(residuals,'b n c h w -> (b n) (c h w)')
-    
-    # -- dist stats --
-    if flip:
-        res_mean = 0
-        res_std = raw_std / 255.
-        tgt_mean = torch.mean(residuals,dim=1)
-        tgt_std = torch.std(residuals,dim=1)
-    else:
-        res_mean = torch.mean(residuals,dim=1)
-        res_std = torch.std(residuals,dim=1)
-        tgt_mean = 0.
-        tgt_std = raw_std / 255.
-
-    return compute_kl(res_mean,res_std,tgt_mean,tgt_std,eps=1e-15)
-
-def kl_gaussian_bp_patches(residuals,noise_level,flip=False,patchsize=16):
-    """
-    :params residuals: shape: [B, N, C, H, W]
-    """
-    # unfold = torch.nn.Unfold(patchsize,1,0,patchsize)
-    # unfold = torch.nn.Unfold(patchsize,1,0,patchsize//2)
-    unfold = torch.nn.Unfold(patchsize,1,0,1)
-    residuals_patch = unfold(rearrange(residuals,'b n c h w -> (b n) c h w'))
-    residuals_patch = rearrange(residuals_patch,'m l r -> (m r) l')
-    return kl_gaussian_bp(residuals_patch,raw_std=25,flip=flip)
-    
-def w_gaussian_bp_patches(residuals,noise_level,patchsize=8):
-    """
-    :params residuals: shape: [B, N, C, H, W]
-    """
-    # unfold = torch.nn.Unfold(patchsize,1,0,patchsize)
-    # unfold = torch.nn.Unfold(patchsize,1,0,patchsize//2)
-    unfold = torch.nn.Unfold(patchsize,1,0,patchsize)
-    residuals_patch = unfold(rearrange(residuals,'b n c h w -> (b n) c h w'))
-    residuals_patch = rearrange(residuals_patch,'m l r -> (m r) l')
-    return w_gaussian_bp(residuals_patch,raw_std=25)
 
 def kl_pairwise_bp(residuals,bins=255,K=10,supervised=True):
     """

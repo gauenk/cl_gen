@@ -23,16 +23,11 @@ from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 
 # -- [this folder] project code --
 from .config import get_cfg,get_args
-from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2n_model,load_burst_kpn_model,save_burst_model
+from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2n_model,load_burst_kpn_model,save_burst_model,load_burst_stn_model
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
-from .learn import train_loop,test_loop
-from .learn_kpn import train_loop as train_loop_kpn
-from .learn_kpn import test_loop as test_loop_kpn
-from .learn_burst import train_loop as train_loop_burst
-from .learn_burst import test_loop as test_loop_burst
-from .learn_burst_nc import train_loop as train_loop_burst_nc
-from .learn_burst_nc import test_loop as test_loop_burst_nc
+from .learn_burst_stn import train_loop,test_loop
+
 
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
@@ -43,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 2
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -67,33 +62,30 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 1
+    cfg.N = 5
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
-    cfg.kpn_1f_frame_size = 2
-    cfg.kpn_frame_size = 2
+    cfg.kpn_1f_frame_size = 6
+    cfg.kpn_frame_size = 6
     cfg.kpn_cascade = False
     cfg.kpn_cascade_num = 1
-    cfg.burst_use_alignment = False
-    cfg.burst_use_unet = True
-    cfg.burst_use_unet_only = True
     
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 16
+    cfg.batch_size = 4
     cfg.init_lr = 5e-5
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 300
     cfg.color_cat = True
-    cfg.log_interval = 50 #int(int(50000 / cfg.batch_size) / 500)
-    cfg.save_interval = 10
+    cfg.log_interval = 30 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.save_interval = 3
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 1
+    cfg.dynamic.ppf = 2
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
@@ -104,20 +96,17 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.restart_after_load = True
 
     # -- experiment info --
-    name = "burst"
+    name = "burst_stn"
     sup_str = "sup" if cfg.supervised else "unsup"
     bs_str = "b{}".format(cfg.batch_size)
-    align_str = "yesAlignNet" if cfg.burst_use_alignment else "noAlignNet"
-    unet_str = "yesUnet" if cfg.burst_use_unet else "noUnet"
     kpn_cascade_str = "cascade{}".format(cfg.kpn_cascade_num) if cfg.kpn_cascade else "noCascade"
     frame_str = "n{}".format(cfg.N)
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
     misc = "kpn_klLoss_annealMSE_noalignkpn"
-    cfg.exp_name = f"{sup_str}_{name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{misc}"
+    cfg.exp_name = f"{sup_str}_{name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
-    desc_fmt = (frame_str,kpn_cascade_str,framesize_str,filtersize_str,cfg.init_lr,align_str)
-    cfg.desc = "Desc: unsup, frames {}, cascade {}, framesize {}, filter size {}, lr {}, {}, kl loss, anneal mse".format(*desc_fmt)
+    cfg.desc = "Desc: unsup, frames {}, cascade {}, framesize {}, filter size {}, lr {}, kl loss, anneal mse".format(frame_str,kpn_cascade_str,framesize_str,filtersize_str,cfg.init_lr)
     print(f"Description: [{cfg.desc}]")
 
     # -- attn params --
@@ -163,13 +152,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     
-    # load model
-    # model = load_unet_model(cfg)
-    # model,criterion = load_burst_n2n_model(cfg)
-    model,noise_critic,criterion = load_burst_kpn_model(cfg)
-    # model,criterion = load_model_kpn(cfg)
-    # optimizer = load_optimizer(cfg,model)
-    # scheduler = load_scheduler(cfg,model,optimizer)
+    model,noise_critic,criterion = load_burst_stn_model(cfg)
     nparams = count_parameters(model)
     print("Number of Trainable Parameters: {}".format(nparams))
     print("PID: {}".format(os.getpid()))
@@ -239,8 +222,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         print(cfg.desc)
         sys.stdout.flush()
 
-        losses,record_losses = train_loop_burst(cfg,model,loader.tr,epoch,record_losses)
-        # losses,record_losses = train_loop_burst_nc(cfg,model,noise_critic,optimizer,criterion,loader.tr,epoch,record_losses)
+        losses,record_losses = train_loop(cfg,model,loader.tr,epoch,record_losses)
         if use_record:
             write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
 
@@ -250,7 +232,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
             save_burst_model(cfg,"denoiser",model.denoiser_info.model,model.denoiser_info.optim)
             save_burst_model(cfg,"critic",noise_critic.disc,noise_critic.optim)
 
-        ave_psnr,record_test = test_loop_burst(cfg,model,loader.te,epoch)
+        ave_psnr,record_test = test_loop(cfg,model,loader.te,epoch)
         if use_record:        
             write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
         te_ave_psnr[epoch] = ave_psnr

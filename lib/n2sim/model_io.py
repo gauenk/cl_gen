@@ -12,13 +12,14 @@ from torch import nn
 from layers.attn import TransformerNetwork32_v5
 from layers.ame_kpn.KPN import KPN as KPN_model,LossFunc
 from layers.ame_kpn.KPN_1f import KPN_1f,KPN_1f_fs64,KPN_1f_cls_fs32,KPN_1f_cls
-from layers.unet import UNetN_v2,UNet_n2n,UNet_Git,UNet_Git3d,UNet2
+from layers.unet import UNetN_v2,UNet_n2n,UNet_Git,UNet_Git3d,UNet_n2n_2layer,UNet2
 from layers import UNetGP
 from layers.burst import BurstAlignN2N,BurstAlignSG,BurstRecLoss,NoiseCriticModel
 from layers.stn import STNBurst
 from layers.denoise_gan import DCGAN_D
 from .optim_io import load_optimizer,load_optimizer_kpn,load_optimizer_gan
 from learning.utils import save_model
+from layers.csbdeep import CSBDeepBN,init_net
 
 def load_burst_n2n_model(cfg):
 
@@ -64,20 +65,22 @@ def load_burst_kpn_model(cfg):
     # -- load alignment model --
     align_info = edict()
     align_info.model,_ = load_model_kpn_1f_cls_cascade(cfg)
-    align_info.optim = load_optimizer_kpn(cfg,align_info.model)
+    align_info.optim = load_optimizer(cfg,align_info.model)
     align_info.S = None
 
     # -- load denoising model --
     denoiser_info = edict()
     denoiser_info.model,_ = load_model_kpn(cfg)
-    denoiser_info.optim = load_optimizer_kpn(cfg,denoiser_info.model)
+    denoiser_info.optim = load_optimizer(cfg,denoiser_info.model)
     denoiser_info.S = None
 
     # -- load unet model --
     unet_info = edict()
-    unet_info.model = load_model_unet(cfg)
+    unet_info.model = load_model_unet(cfg).to(cfg.device)
+    # unet_info.model = load_model_unet(cfg).to(cfg.device)
+    # unet_info.model = init_net(unet_info.model)
     # unet_info.model,_ = load_model_kpn(cfg)
-    unet_info.optim = load_optimizer_kpn(cfg,unet_info.model)
+    unet_info.optim = load_optimizer(cfg,unet_info.model)
     unet_info.S = None
 
     # -- create burstaligned model --
@@ -224,7 +227,7 @@ def load_model_stn(cfg):
     return STNBurst(img_size)
 
 def load_model_kpn(cfg):
-    return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True,kernel_size=[cfg.kpn_frame_size]),LossFunc()
+    return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True,kernel_size=[cfg.kpn_frame_size]),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
 
 def load_attn_model(cfg,unet):
     simclr = None #load_model_simclr(cfg)
@@ -241,6 +244,8 @@ def load_attn_model(cfg,unet):
     return model
 
 def load_model_unet(cfg):
+    # return CSBDeepBN( 3*cfg.N, 3*cfg.N)
+    # return UNet_n2n_2layer( 1*cfg.N, 3)
     return UNet2(3,3)
     # return UNet_n2n( cfg.N,3,3*(cfg.N) )
     # return UNet_n2n( 1, 3, 3)

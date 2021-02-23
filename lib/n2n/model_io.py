@@ -11,7 +11,7 @@ from layers import UNetGP
 
 def load_model(cfg):
 
-    model = UNet_n2n(cfg.input_N,5)
+    model = UNet_n2n(1,5)
     cfg.color_cat = True
 
     # model = UNet_Git(3*cfg.input_N,3)

@@ -1,25 +1,3 @@
-
--- static scene; image size 128 --
-
-[n2n WITH input noise @ N(0,25./255) WITHOUT middle frame] -> 33.42 PSNR @ 25 epochs
-[n2n WITH input noise @ N(0,25./255) WITH middle frame] -> 33.86 PSNR @ 30 epochs ( 33.74  @ 9 )
-[n2n WITHOUT input noise WITHOUT middle frame] -> 33.69 PSNR @ 15 epochs
-[n2n WITHOUT input noise WITH middle frame] -> ~22 PSNR
-
--- dynamic scene; image size 128; 20 total pixels --
-
-[n2n WITH input noise @ N(0,25./255) WITHOUT middle frame] -> ?
-[n2n WITH input noise @ N(0,25./255) WITH middle frame] -> 18.21 PSNR @ 30 epochs
-[n2n WITHOUT input noise WITHOUT middle frame] -> 
-
-
--- dynamic scene; image size 128; 10 total pixels --
-
-[10 frames; 29 PSNR @ 30 epochs | norm loss coeff 1000 | alignment coeff 1
-   | rec_mse coeff 0.95**global_step | filter within kern entropy 10 
-   | filter loss between batch kern 0. | rec ot coeff 50 | rec ot = kl & flipped ] ->
-
-
 -=-=-=-=-=-=-=-=-=-=-=-
     "Good" Losses 
 -=-=-=-=-=-=-=-=-=-=-=-
@@ -52,14 +30,14 @@ Motivation: Remove "large" movement the next model can not account for.
 Issues: Causes blur in the aligned images. Removing this results in no meaningful learning of the KPN single frame model. 
 Next Steps: Use the distribution loss for the "centered" images. The global motion means we can not properly account for edges in this model; the sides are cut-off. However, we can assume there is a middle patch we can align. 
 
--=-=- KPN-single-filter Within-Kernel Entropy Loss -=-=-
+-=-=- KPN-single-filter Within-Kernel Loss -=-=-
 
 Desc: Penalize spread across the kernel; we want a single dot per kernel.
 Motivation: We want to shift the image, not introduce blur.
 Issue: This does not remove the blur from the alignment loss and may contribute to this model's inability to learn alignment.
-Solution: See "alignment loss" + "across-batch entropy loss" + more guessing
+Solution: See "alignment loss" + "kpn-single-filter across-batch loss" + more guessing
 
--=-=- KPN-single-filter Across-Batch Entropy Loss -=-=-
+-=-=- KPN-single-filter Across-Batch Loss -=-=-
 
 Desc: Penalize the model using the same kernels for each image in the batch;
 Motivation: Each image in the batch uses different dynamics. Thus, each set of filters should not be the same.

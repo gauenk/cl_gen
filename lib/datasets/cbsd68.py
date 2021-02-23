@@ -4,14 +4,13 @@ Pascal voc dataset
 """
 
 # python imports
-import pdb
+import pdb,glob
 from PIL import Image
 from functools import partial
 from easydict import EasyDict as edict
 import numpy.random as npr
 from pathlib import Path
 import numpy as np
-
 import xml.etree.ElementTree as ET
 
 # pytorch imports
@@ -210,39 +209,41 @@ class DenoiseBSD68(DatasetFolder):
         return t
 
 
-class DynamicBSD68(DatasetFolder):
+class DynamicBSD68():
 
-    def __init__(self,root,year,image_set,N,noise_type,noise_params,dynamic,load_res,bw):
-        super(DynamicBSD68, self).__init__( path, year, image_set)
-        
-        # -- asdf --
+    def __init__(self,path,N,noise_type,noise_params,dynamic):
+
+        # -- create dynamic bsd68 --
+        self.path = path
         self.N = N
         self.noise_type = noise_type
         self.noise_params = noise_params
         self.dynamic = dynamic
         self.size = self.dynamic.frame_size
-        self.image_set = image_set
-        self.load_res = load_res
-        self.bw = bw
 
-        # -- asdf --
+        # -- augmentations --
         noisy_N = N if dynamic['bool'] else 1
         noisy_trans = self._get_noise_transform(noise_type,noise_params)
-        self.dynamic_trans = self._get_dynamic_transform(dynamic,noisy_trans,load_res)
+        self.dynamic_trans = self._get_dynamic_transform(dynamic,noisy_trans,True)
         th_trans = self._get_th_img_trans()
-        self.__class__.__name__ = "pascal_bsd68"
-        if year == "2012":
-            path = root / Path("./BSD68devkit/BSD682012/")
-        elif year == "2007":
-            path = root / Path("./BSD68devkit/BSD682007/")
-        path = root
-
         self.th_trans = th_trans
-        self.to_tensor = th_transforms.Compose([
-            th_transforms.RandomResizedCrop((self.size,self.size)),
-            th_transforms.ToTensor()])
-        # create dynamic motion separately.
 
+        # -- load list of files --
+        self.filenames = []
+        search_path = path / Path("*.png")
+        for filename in glob.glob(str(search_path)):
+            self.filenames.append(filename)            
+        self.filenames = sorted(self.filenames)
+
+        # -- load all images --
+        self.images = []
+        for filename in self.filenames:
+            image = Image.open(filename).convert("RGB")
+            self.images.append(image)
+
+    def __len__(self):
+        return len(self.filenames)
+        
     def __getitem__(self, index):
         """
         Args:
@@ -251,13 +252,11 @@ class DynamicBSD68(DatasetFolder):
         Returns:
             tuple: (image, target) where target is index of the target class.
         """
-
-        img = Image.open(self.images[index]).convert("RGB")
-        if self.bw: img = img.convert('1')
-        target = self.parse_bsd68_xml(ET.parse(self.annotations[index]).getroot())
+        # img = Image.open(self.images[index]).convert("RGB")
+        img = self.images[index]
         # th_img = self.to_tensor(img)
-        img_set,res_set,clean_target = self.dynamic_trans(img)
-        return img_set, res_set, clean_target
+        img_set,res_set,clean_target,direction = self.dynamic_trans(img)
+        return img_set, res_set, clean_target, direction
 
     def _apply_transform_N(self,img):
         t = self.transform
@@ -398,9 +397,9 @@ class DynamicBSD68(DatasetFolder):
 # Loading the datasets in a project
 #
 
-def get_bsd68_dataset(cfg,mode):
+def get_cbsd68_dataset(cfg,mode):
     root = cfg.dataset.root
-    root = Path(root)/Path("./cbsd68/CBSD68-dataset/CBSD68/")
+    root = Path(root)/Path("./cbsd68/CBSD68-dataset/CBSD68/original_png/")
     data = edict()
     if mode == 'cl':
         batch_size = cfg.cl.batch_size
@@ -428,8 +427,7 @@ def get_bsd68_dataset(cfg,mode):
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
         bw = cfg.dataset.bw
-        data.tr = DynamicBSD68(root,N,noise_type,
-                               noise_params,dynamic,load_res,bw)
+        data.tr = DynamicBSD68(root,N,noise_type,noise_params,dynamic)
         # data.val = DynamicBSD68(root,N,noise_type,noise_params,dynamic,load_res,bw)
         # data.val.data = data.val.data[0:2*2048]
         # data.val.targets = data.val.targets[0:2*2048]
@@ -478,11 +476,12 @@ def collate_fn(batch):
     return noisy,clean
 
 def collate_triplet_fn(batch):
-    noisy,res,clean = zip(*batch)
+    noisy,res,clean,directions = zip(*batch)
     noisy = torch.stack(noisy,dim=1)
     res = torch.stack(res,dim=1)
     clean = torch.stack(clean,dim=0)
-    return noisy,res,clean
+    directions = torch.stack(directions,dim=0)
+    return noisy,res,clean,directions
 
 def set_torch_seed(worker_id):
     torch.manual_seed(0)
@@ -503,9 +502,7 @@ def get_loader_serial(cfg,data,batch_size,mode):
 
     loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)
-    loader_kwargs['drop_last'] = False
     loader.val = DataLoader(data.val,**loader_kwargs)
-    loader_kwargs['shuffle'] = False
     loader.te = DataLoader(data.te,**loader_kwargs)
     return loader
 

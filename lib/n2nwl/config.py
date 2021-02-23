@@ -251,6 +251,7 @@ def set_cfg(args):
     cfg.load_name = args.load_name
     cfg.load = args.load_epoch > 0
     cfg.load_epoch = args.load_epoch
+    cfg.restart_after_load = False
     cfg.mode = args.mode
     cfg.N = args.N
 
@@ -347,6 +348,12 @@ def set_cfg(args):
     cfg.simcl.n_img_channels = cfg.n_img_channels
     cfg.simcl.activation_hooks = False
 
+    # -- kpn params --
+    cfg.kpn_frame_size = 9
+    cfg.kpn_cascade = True
+    cfg.kpn_cascade_num = 3
+    cfg.kpn_cascade_output = False # use for each kpn loaded
+    
     # -- allow for dynamic frame motion --
     cfg.dynamic = edict()
     cfg.dynamic.bool = True

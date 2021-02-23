@@ -7,6 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
+from easydict import EasyDict as edict
 
 # -- pytorch import --
 import torch
@@ -25,14 +26,8 @@ from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from .config import get_cfg,get_args
 from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2n_model,load_burst_kpn_model,save_burst_model
 from .optim_io import load_optimizer
-from .sched_io import load_scheduler
+from .sched_io import load_scheduler,make_lr_scheduler
 from .learn import train_loop,test_loop
-from .learn_kpn import train_loop as train_loop_kpn
-from .learn_kpn import test_loop as test_loop_kpn
-from .learn_burst import train_loop as train_loop_burst
-from .learn_burst import test_loop as test_loop_burst
-from .learn_burst_nc import train_loop as train_loop_burst_nc
-from .learn_burst_nc import test_loop as test_loop_burst_nc
 
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
@@ -43,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 2
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -62,49 +57,58 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # cfg.cls = cfg
     cfg.S = Sgrid[S_grid_idx]
     # cfg.dataset.name = "cifar10"
+    # cfg.dataset.name = "cbsd68"
     cfg.dataset.name = "voc"
     cfg.supervised = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 1
+    cfg.N = 6
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
     cfg.kpn_1f_frame_size = 2
-    cfg.kpn_frame_size = 2
+    cfg.kpn_frame_size = 9
     cfg.kpn_cascade = False
+    cfg.kpn_cascade_output = False
     cfg.kpn_cascade_num = 1
     cfg.burst_use_alignment = False
-    cfg.burst_use_unet = True
-    cfg.burst_use_unet_only = True
+    cfg.burst_use_unet = False
+    cfg.burst_use_unet_only = False
     
+
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
     cfg.batch_size = 16
-    cfg.init_lr = 5e-5
+    cfg.init_lr = 5e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 300
     cfg.color_cat = True
-    cfg.log_interval = 50 #int(int(50000 / cfg.batch_size) / 500)
-    cfg.save_interval = 10
+    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.save_interval = 2
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 1
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
     
+    # -- asdf --
+    cfg.solver = edict()
+    cfg.solver.max_iter = cfg.epochs*500
+    cfg.solver.ramp_up_fraction = 0.1
+    cfg.solver.ramp_down_fraction = 0.3
+
     # -- load previous experiment --
     cfg.load_epoch = 0
     cfg.load = cfg.load_epoch > 0
     cfg.restart_after_load = True
 
     # -- experiment info --
-    name = "burst"
+    name = "n2sim_burst"
     sup_str = "sup" if cfg.supervised else "unsup"
     bs_str = "b{}".format(cfg.batch_size)
     align_str = "yesAlignNet" if cfg.burst_use_alignment else "noAlignNet"
@@ -113,8 +117,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     frame_str = "n{}".format(cfg.N)
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
-    misc = "kpn_klLoss_annealMSE_noalignkpn"
-    cfg.exp_name = f"{sup_str}_{name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{misc}"
+    misc = "unet_mse_noKL"
+    cfg.exp_name = f"{sup_str}_{name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{unet_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
     desc_fmt = (frame_str,kpn_cascade_str,framesize_str,filtersize_str,cfg.init_lr,align_str)
     cfg.desc = "Desc: unsup, frames {}, cascade {}, framesize {}, filter size {}, lr {}, {}, kl loss, anneal mse".format(*desc_fmt)
@@ -170,6 +174,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # model,criterion = load_model_kpn(cfg)
     # optimizer = load_optimizer(cfg,model)
     # scheduler = load_scheduler(cfg,model,optimizer)
+    # scheduler = make_lr_scheduler(cfg,model.unet_info.optim)
+    scheduler = make_lr_scheduler(cfg,model.denoiser_info.optim)
     nparams = count_parameters(model)
     print("Number of Trainable Parameters: {}".format(nparams))
     print("PID: {}".format(os.getpid()))
@@ -236,21 +242,22 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
     for epoch in range(cfg.current_epoch,cfg.epochs):
+        lr = model.denoiser_info.optim.param_groups[0]["lr"]
         print(cfg.desc)
+        print("Learning Rate: %2.2e"% (lr))
         sys.stdout.flush()
 
-        losses,record_losses = train_loop_burst(cfg,model,loader.tr,epoch,record_losses)
-        # losses,record_losses = train_loop_burst_nc(cfg,model,noise_critic,optimizer,criterion,loader.tr,epoch,record_losses)
+        losses,record_losses = train_loop(cfg,model,scheduler,loader.tr,epoch,record_losses)
         if use_record:
             write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
 
         cfg.current_epoch += 1
-        if epoch % cfg.save_interval == 0:
+        if epoch % cfg.save_interval == 0 and epoch > 0:
             save_burst_model(cfg,"align",model.align_info.model,model.align_info.optim)
             save_burst_model(cfg,"denoiser",model.denoiser_info.model,model.denoiser_info.optim)
             save_burst_model(cfg,"critic",noise_critic.disc,noise_critic.optim)
 
-        ave_psnr,record_test = test_loop_burst(cfg,model,loader.te,epoch)
+        ave_psnr,record_test = test_loop(cfg,model,loader.te,epoch)
         if use_record:        
             write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
         te_ave_psnr[epoch] = ave_psnr
@@ -262,7 +269,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     best_epoch,best_psnr = epochs[best_index],psnr[best_index]
     print(f"Best Epoch {best_epoch} | Best PSNR {best_psnr} | N: {cfg.N} | Blind: {blind}")
     
-    root = Path(f"{settings.ROOT_PATH}/output/n2nwl/{postfix}/")
+    root = Path(f"{settings.ROOT_PATH}/output/n2sim/{postfix}/")
     # if cfg.blind: root = root / Path(f"./blind/")
     # else: root = root / Path(f"./nonblind/")
     fn = Path(f"results.csv")
@@ -275,14 +282,14 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     save_model(cfg, model, optimizer)
 
 def write_record_losses_file(current_epoch,postfix,loss_type,record_losses):
-    root = Path(f"{settings.ROOT_PATH}/output/n2nwl/{postfix}/")
+    root = Path(f"{settings.ROOT_PATH}/output/n2sim/{postfix}/")
     if not root.exists(): root.mkdir(parents=True)
     path = root / f"record_losses_{current_epoch}_{loss_type}.csv"
     print(f"Writing record_losses to {path}")
     record_losses.to_csv(path)
 
 def write_record_test_file(current_epoch,postfix,loss_type,record_test):
-    root = Path(f"{settings.ROOT_PATH}/output/n2nwl/{postfix}/")
+    root = Path(f"{settings.ROOT_PATH}/output/n2sim/{postfix}/")
     if not root.exists(): root.mkdir(parents=True)
     path = root / f"record_test_{current_epoch}_{loss_type}.csv"
     print(f"Writing record_test to {path}")

@@ -29,7 +29,7 @@ from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
 from .test_ot_loss import *
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[0.001],nGgrid=1,ngpus=3,idx=0):
+def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
     
     args = get_args()
@@ -61,13 +61,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[0.001],nGgrid=1,ngpus=3,id
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 3
+    cfg.N = 2
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 300
+    cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
@@ -75,11 +75,11 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[0.001],nGgrid=1,ngpus=3,id
     cfg.color_cat = True
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 2
+    cfg.dynamic.ppf = 0
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
-    # cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
-    cfg.dynamic.total_pixels = 6
+    cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
+    # cfg.dynamic.total_pixels = 6
     cfg.load = False
 
     cfg.input_noise = False
@@ -145,11 +145,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[0.001],nGgrid=1,ngpus=3,id
         print("Loaded model.")
         cfg.current_epoch = cfg.epochs
         
-    run_ot_v_displacement(cfg,criterion,loader.te)
+    # run_ot_v_displacement(cfg,criterion,loader.te)
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
-        losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
-        ave_psnr = test_loop(cfg,model,criterion,loader.te,epoch)
+        losses = train_loop_n2n(cfg,model,optimizer,criterion,loader.tr,epoch)
+        ave_psnr = test_loop_n2n(cfg,model,criterion,loader.te,epoch)
+        # losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
+        # ave_psnr = test_loop(cfg,model,criterion,loader.te,epoch)
         te_ave_psnr[epoch] = ave_psnr
         cfg.current_epoch += 1
 

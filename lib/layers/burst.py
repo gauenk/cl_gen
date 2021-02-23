@@ -20,11 +20,16 @@ from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 
 class BurstAlignSG(nn.Module):
 
-    def __init__(self, kpn, denoiser_info, skip_middle = True):
+    def __init__(self, align_info, denoiser_info, unet_info, use_alignment = True,
+                 use_unet = True, use_unet_only = False, skip_middle = True):
         super(BurstAlignSG, self).__init__()
-        self.kpn = kpn
+        self.align_info = align_info
         self.denoiser_info = denoiser_info
+        self.unet_info = unet_info
         self.skip_middle = skip_middle
+        self.use_alignment=use_alignment
+        self.use_unet = use_unet
+        self.use_unet_only = use_unet_only
         self.global_step = 0
         # self.ot_loss = LossOT()
 
@@ -37,15 +42,34 @@ class BurstAlignSG(nn.Module):
         N,B,C,H,W = burst.shape
         kpn_stack = rearrange(burst,'n b c h w -> b n c h w')
         kpn_cat = rearrange(burst,'n b c h w -> b (n c) h w')
+        mid_img_r = burst[N//2].unsqueeze(1).repeat(1,N,1,1,1)
 
         # -- align images --
-        aligned,aligned_ave,temporal_loss,filters = self.kpn(kpn_cat,kpn_stack)
+        aligned,aligned_ave,temporal_loss,aligned_filters = self.align_info.model(kpn_stack)
 
         # -- denoise --
-        aligned_stack = aligned#.detach()
+        aligned_stack = aligned
+        # both_stack = torch.cat([aligned,kpn_stack],dim=2)
+        # both_stack = torch.cat([mid_img_r,kpn_stack],dim=2)
+        # aligned_cat = rearrange(both_stack,'b n c h w -> b (n c) h w')
         aligned_cat = rearrange(aligned_stack,'b n c h w -> b (n c) h w')
-        denoised,denoised_ave,dn_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
-        # denoised,denoised_ave,dn_filters = self.denoiser_info.model(kpn_cat,kpn_stack)
+        if self.use_alignment:
+            denoised,denoised_ave,denoised_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
+        else:
+            denoised,denoised_ave,denoised_filters = self.denoiser_info.model(kpn_cat,kpn_stack)
+
+        # -- denoised via unet --
+        if self.use_unet or self.use_unet_only:
+            aligned,aligned_ave,aligned_filters = denoised,denoised_ave,denoised_filters
+            aligned_cat = rearrange(aligned,'b n c h w -> b (n c) h w')
+            if self.use_unet_only:
+                denoised = self.unet_info.model(kpn_cat)
+                denoised = rearrange(denoised,'b (n c) h w -> b n c h w',n=N)
+                denoised_ave = torch.mean(denoised,dim=1)
+            else:
+                # denoised,denoised_ave,denoised_filters = self.unet_info.model(aligned_cat,aligned)
+                denoised = self.unet_info.model(aligned_cat.detach())
+
 
         # -- no error back to unet --
         # rec = rec.detach()
@@ -58,7 +82,7 @@ class BurstAlignSG(nn.Module):
             self.global_step += 1
 
         # -- return all components --
-        return aligned,aligned_ave,denoised,denoised_ave,filters
+        return aligned,aligned_ave,denoised,denoised_ave,aligned_filters,denoised_filters
 
     def denoise(self, x):
         recs,rec = self.kpn(x,x)
@@ -74,6 +98,73 @@ class BurstAlignSG(nn.Module):
         r_idx = npr.choice(range(P),S)
         s_pairs = [pairs[idx] for idx in r_idx]
         return s_pairs,S
+
+class BurstAlignSTN(nn.Module):
+
+    def __init__(self, align_info, denoiser_info, use_alignment = True, skip_middle = True):
+        super(BurstAlignSTN, self).__init__()
+        self.align_info = align_info
+        self.denoiser_info = denoiser_info
+        self.skip_middle = skip_middle
+        self.use_alignment=use_alignment
+        self.global_step = 0
+        # self.ot_loss = LossOT()
+
+    def forward(self, burst):
+        """
+        :param burst: burst[:,1] ~ burst[:,N], shape: [N, batch, 3, height, width]
+        """
+        # -- init --
+        CRITIC_UD = 1
+        N,B,C,H,W = burst.shape
+        stack = rearrange(burst,'n b c h w -> b n c h w')
+        mid_img_r = burst[N//2].unsqueeze(1).repeat(1,N,1,1,1)
+        kpn_cat = rearrange(burst,'n b c h w -> b (n c) h w')
+
+        # -- align images --
+        aligned = self.align_info.model(stack)
+        aligned_ave = torch.mean(aligned,dim=1)
+        aligned_filters = torch.zeros(B,N,1,1,1)
+
+        # -- denoise --
+        aligned_stack = aligned.detach()
+        # both_stack = torch.cat([aligned,kpn_stack],dim=2)
+        # both_stack = torch.cat([mid_img_r,kpn_stack],dim=2)
+        # aligned_cat = rearrange(both_stack,'b n c h w -> b (n c) h w')
+        aligned_cat = rearrange(aligned_stack,'b n c h w -> b (n c) h w')
+        if self.use_alignment:
+            denoised,denoised_ave,denoised_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
+        else:
+            denoised,denoised_ave,denoised_filters = self.denoiser_info.model(kpn_cat,kpn_stack)
+
+        # -- no error back to unet --
+        # rec = rec.detach()
+
+        # -- update unet --
+        # if self.training: self.update_unet(aligned,residual)
+
+        # -- update global step --
+        if self.training:
+            self.global_step += 1
+
+        # -- return all components --
+        return aligned,aligned_ave,denoised,denoised_ave,aligned_filters,denoised_filters
+
+    def denoise(self, x):
+        recs,rec = self.kpn(x,x)
+        self.unet(recs[i] for i in range(N))
+        
+    def _select_pairs(self, S, N):
+        if self.skip_middle:
+            pairs = list(set([(i,j) for i in range(N) for j in range(N) if i != N//2 and j != N//2]))
+        else:
+            pairs = list(set([(i,j) for i in range(N) for j in range(N)]))
+        P = len(pairs)
+        if S is None: S = P
+        r_idx = npr.choice(range(P),S)
+        s_pairs = [pairs[idx] for idx in r_idx]
+        return s_pairs,S
+
 
 class BurstAlignN2N(nn.Module):
 
@@ -264,9 +355,9 @@ class EntropyLoss(nn.Module):
         super(EntropyLoss, self).__init__()
 
     def forward(self, x):
-        eps = 1e-8
-        b = x * torch.log(x + eps)
-        b = -1.0 * b.sum(dim=1)
+        eps = 1e-15
+        b = x * torch.log( x + eps )
+        b = -1.0 * b.mean(dim=1)
         return b.mean()
 
 class LossRecBurst(nn.Module):

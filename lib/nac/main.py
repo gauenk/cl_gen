@@ -27,14 +27,6 @@ from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2
 from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
-from .learn_kpn import train_loop as train_loop_kpn
-from .learn_kpn import test_loop as test_loop_kpn
-from .learn_burst import train_loop as train_loop_burst
-from .learn_burst import test_loop as test_loop_burst
-from .learn_burst_nc import train_loop as train_loop_burst_nc
-from .learn_burst_nc import test_loop as test_loop_burst_nc
-
-
 
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
@@ -46,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 2
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -79,7 +71,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
     cfg.batch_size = 4
-    cfg.init_lr = 5e-6
+    cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
@@ -99,13 +91,14 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # -- experiment info --
     name = "burst"
     sup_str = "sup" if cfg.supervised else "unsup"
+    bs_str = "b{}".format(cfg.batch_size)
     frame_str = "n{}".format(cfg.N)
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
-    misc = "kpn_klLoss_annealMSE_smallLR"
-    cfg.exp_name = f"{sup_str}_{name}_{frame_str}_{framesize_str}_{filtersize_str}_{misc}"
+    misc = "kpn_klLoss_annealMSE"
+    cfg.exp_name = f"{sup_str}_{name}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
-    cfg.desc = "Desc: unsup, 6 frames, filter size 15, kl loss, anneal mse"
+    cfg.desc = "Desc: unsup, frames {}, framesize {}, filter size {}, lr {}, kl loss, anneal mse".format(frame_str,framesize_str,filtersize_str,cfg.init_lr)
     print(f"Description: [{cfg.desc}]")
 
     # -- attn params --
@@ -193,8 +186,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         print(cfg.desc)
         sys.stdout.flush()
 
-        losses,record_losses = train_loop_burst(cfg,model,optimizer,criterion,loader.tr,epoch,record_losses)
-        # losses,record_losses = train_loop_burst_nc(cfg,model,noise_critic,optimizer,criterion,loader.tr,epoch,record_losses)
+        losses,record_losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch,record_losses)
         if use_record:
             write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
 
@@ -203,7 +195,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
             save_burst_model(cfg,"denoiser",model,optimizer)
             save_burst_model(cfg,"critic",noise_critic.disc,noise_critic.optim)
 
-        ave_psnr,record_test = test_loop_burst(cfg,model,criterion,loader.te,epoch)
+        ave_psnr,record_test = test_loop(cfg,model,criterion,loader.te,epoch)
         if use_record:        
             write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
         te_ave_psnr[epoch] = ave_psnr

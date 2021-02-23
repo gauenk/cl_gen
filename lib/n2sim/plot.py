@@ -15,10 +15,10 @@ from pyutils.plot import add_legend
 #
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-def plot_histogram_gradient_norms(model,name,global_step,prefix,rand_name=False):
+def plot_histogram_gradient_norms(model,global_step,prefix,rand_name=False):
 
     # -- directory --
-    path = Path(prefix) / Path(f"histogram/{name}")
+    path = Path(prefix) / Path("histogram")
     if rand_name: path = path / Path(uuid_str)
     else: path = path / Path("default")
     if not path.exists(): path.mkdir(parents=True)
@@ -52,10 +52,10 @@ def plot_histogram_gradient_norms(model,name,global_step,prefix,rand_name=False)
 #
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-def plot_histogram_gradients(model,name,global_step,prefix,rand_name=False):
+def plot_histogram_gradients(model,global_step,prefix,rand_name=False):
     
     # -- directory --
-    path = Path(prefix) / Path(f"histogram/{name}")
+    path = Path(prefix) / Path("histogram")
     if rand_name: path = path / Path(uuid_str)
     else: path = path / Path("default")
     if not path.exists(): path.mkdir(parents=True)
@@ -91,7 +91,6 @@ def plot_histogram_residuals_batch(batch,global_step,prefix,rand_name=True):
     # -- init --
     uuid_str = str( uuid.uuid4() )
     B = batch.shape[0]
-    if B > 100: B = 10
 
     # -- directory --
     path = Path(prefix) / Path("histogram")
@@ -127,5 +126,4 @@ def plot_histogram_residual_burst(burst,filename,global_step):
 
     # -- save filename --
     plt.savefig(filename,dpi=300,bbox_inches='tight')
-    plt.close("all")
     

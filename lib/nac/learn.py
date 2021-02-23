@@ -174,7 +174,7 @@ def train_loop(cfg,model,optimizer,criterion,train_loader,epoch,record_losses):
         losses = criterion(denoised,denoised_ave,gt_img,cfg.global_step)
         ave_loss,burst_loss = [loss.item() for loss in losses]
         rec_mse = np.sum(losses)
-        rec_mse_coeff = 0.9997**cfg.global_step
+        rec_mse_coeff = 0.997**cfg.global_step
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #

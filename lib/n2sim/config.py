@@ -295,8 +295,8 @@ def set_cfg(args):
     # 
 
     dsname = cfg.dataset.name.lower()
-    model_path = Path(f"{settings.ROOT_PATH}/output/n2n_wl/{dsname}/{cfg.exp_name}/model/")
-    optim_path = Path(f"{settings.ROOT_PATH}/output/n2n_wl/{dsname}/{cfg.exp_name}/optim/")
+    model_path = Path(f"{settings.ROOT_PATH}/output/n2sim/{dsname}/{cfg.exp_name}/model/")
+    optim_path = Path(f"{settings.ROOT_PATH}/output/n2sim/{dsname}/{cfg.exp_name}/optim/")
     if not model_path.exists(): model_path.mkdir(parents=True)
     cfg.model_path = model_path
     cfg.optim_path = optim_path
@@ -346,6 +346,12 @@ def set_cfg(args):
     cfg.simcl.use_apex = cfg.use_apex
     cfg.simcl.n_img_channels = cfg.n_img_channels
     cfg.simcl.activation_hooks = False
+
+    # -- kpn params --
+    cfg.kpn_frame_size = 9
+    cfg.kpn_cascade = True
+    cfg.kpn_cascade_num = 3
+    cfg.kpn_cascade_output = False # use for each kpn loaded
 
     # -- allow for dynamic frame motion --
     cfg.dynamic = edict()

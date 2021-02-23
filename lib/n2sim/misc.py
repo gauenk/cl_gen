@@ -67,7 +67,7 @@ whats happening is: 1st and 30th frame are shifted by 60 pixels
 """
 
 
-# python imports
+# -- python imports --
 import sys,csv
 sys.path.append("./lib")
 import matplotlib.pyplot as plt
@@ -75,22 +75,14 @@ import numpy as np
 import pandas as pd
 from pathlib import Path
 
-# project imports
+# -- pytorch imports --
+
+
+# -- project imports --
 import settings
 from pyutils.plot import add_legend
+from datasets.transform import Noise2VoidAug
 
-class AlignmentFilterHooks():
-
-    def __init__(self,N):
-        self.filters = []
-        self.N = N
-
-    def __call__(self, module, module_in, output_filter):
-        reshaped_filter = rearrange(output_filter,'b (n k2) h w -> b n k2 1 h w',n=self.N)
-        self.filters.append(reshaped_filter)
-        
-    def clear(self):
-        self.filters = []
 
 def read_file(path):
     data = None
@@ -98,6 +90,15 @@ def read_file(path):
         reader = csv.reader(f,delimiter=',')
         data = next(iter(reader))
     return data
+
+def apply_transformations(burst,gt_img):
+    gt_img_s = gt_img.unsqueeze(1)
+    all_images = torch.stack([burst,gt_img_s],dim=0)
+    print(all_images.shape)
+    
+    # # -- create pytorch transform set --
+    # aug = Noise2VoidAug()
+    
 
 
 def load_noise_frame_grid():

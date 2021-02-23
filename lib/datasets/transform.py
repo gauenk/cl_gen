@@ -13,12 +13,39 @@ import torchvision
 import torch.nn.functional as F
 from torchvision import transforms as thT
 import torchvision.transforms.functional as tvF
+import torchvision.utils as tvUtils
 
 # project imports
 from pyutils.timer import Timer
 
 def th_uniform(l,u,size):
     return (l - u) * torch.rand(size) + u
+
+class RandomChoice(torch.nn.Module):
+    def __init__(self, transforms):
+       super().__init__()
+       self.transforms = transforms
+       S = len(transforms)
+       self.probs = torch.ones(S)/float(S)+1
+
+    def __call__(self, imgs):
+        N = torch.multinomial(self.probs,1)
+        t = self.torch_rand_choice(self.transforms,N)
+        return [t(img) for img in imgs]
+
+    def torch_rand_choice(self,elements,K):
+        E  = len(elements)
+        indices = torch.randperm(E)[:K]
+        selected = []
+        for i in indices:
+            elem = elements[i]
+            if elem == tvF.rotate:
+                elem = partial(tvF_rand_rotate,90)
+            selected.append(elem)
+        return thT.Compose(selected)
+
+def tvF_rand_rotate(angle,img):
+    return tvF.rotate(img,angle)
 
 class LowLight:
 
@@ -38,6 +65,21 @@ class ScaleZeroMean:
     def __call__(self,pic):
         return pic - 0.5
 
+class Noise2VoidAug:
+
+    def __init__(self):
+        self.aug_transform = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.RandomResizedCrop(size=size),
+                torchvision.transforms.RandomHorizontalFlip(),  # with 0.5 probability
+                torchvision.transforms.RandomApply([color_jitter], p=0.8),
+                # torchvision.transforms.RandomGrayscale(p=0.2),
+                torchvision.transforms.ToTensor(),
+            ]
+        )
+
+    def __call__(self,x):
+        self.aug_transform(x)
 
 class TransformsSimCLR:
     """
@@ -348,15 +390,36 @@ class GlobalCameraMotionTransform():
 
         # -- compute ppf rate given fixed frames --
         if self.total_pixels > 0:
-            raw_ppf = float(self.total_pixels) / (self.nframes-1)
+            raw_ppf = float(self.total_pixels) / (self.nframes-1) if self.nframes > 1 else float(self.total_pixels)
         else:
             raw_ppf = self.ppf
+
+        # -- keep blur consistent across higher frame rates --
+        downsampling_subpix_movement = False
+        if downsampling_subpix_movement:
+            max_fr = 6
+            interp_key = 1
+            raw_ppf_lim = self.total_pixels / (max_fr-1)
+            h_new_lim,w_new_lim = int(h*raw_ppf_lim)+1,int(w*raw_ppf_lim)+1
+            pic = tvF.resize(pic,(h_new_lim,w_new_lim),interp_key)
+            # pic_save = self.to_tensor(pic)
+            # tvUtils.save_image(pic_save,"rs-test_shrink.png")
+
+        # pic = tvF.resize(pic,(h_new_lim,w_new_lim),interp_key)
+        # pic_save = self.to_tensor(pic)
+        # tvUtils.save_image(pic_save,"rs-test_during.png")
+        
+        # h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
+        # print(h_new,w_new)
+        # pic = tvF.resize(pic,(h_new,w_new),interp_key)
+        # pic_save = self.to_tensor(pic)
+        # tvUtils.save_image(pic_save,"rs-test_after.png")
+        # exit()
 
         # -- compute pixels per frame and resize image for fractions -- 
         if raw_ppf < 1 and raw_ppf > 0:
             h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
             tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
-            # print(h_new,w_new,h,w)
             pic = tvF.resize(pic,(h_new,w_new))
             crop_frame_size = int(self.frame_size/raw_ppf)+1
             ppf = 1
