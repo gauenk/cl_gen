@@ -32,7 +32,8 @@ def load_scheduler(cfg,model,optimizer):
     return scheduler
 
 def make_lr_scheduler(cfg, optimizer):
-    return RampedLR(optimizer, cfg.solver.max_iter, cfg.solver.ramp_up_fraction, cfg.solver.ramp_down_fraction)
+    return lr_sched.MultiStepLR(optimizer,[10**3,20**3])
+    # return RampedLR(optimizer, cfg.solver.max_iter, cfg.solver.ramp_up_fraction, cfg.solver.ramp_down_fraction)
 
 # FIXME ideally this would be achieved with a CombinedLRScheduler,
 # separating MultiStepLR with WarmupLR

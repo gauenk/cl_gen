@@ -103,7 +103,7 @@ def get_args():
         'msg': each_image (bool), stddev_range (tuple)
     """
     defaults = '{"g":{"mean":0.0,"stddev":10},\
-    "ll":{"alpha":0.5},\
+    "ll":{"alpha":4,"read_noise":0.25},\
     "msg":{"each_image":0,"stddev_rand":[0,50]}\
     }'
     parser.add_argument("--noise-params", type=jloads,
@@ -260,7 +260,10 @@ def set_cfg(args):
     cfg.dataset.name = args.dataset
     cfg.dataset.load_residual = False
     cfg.dataset.triplet_loader = True
+    cfg.dataset.dict_loader = False
     cfg.dataset.bw = False
+    cfg.use_lmdb = False
+    cfg.use_kindex_lmdb = False
 
     cfg.batch_size = args.batch_size
     cfg.world_size = args.world_size

@@ -4,6 +4,9 @@ from .celeba import get_celeba_dataset
 from .imagenet import get_imagenet_dataset
 from .pascal_voc import get_voc_dataset
 from .cbsd68 import get_cbsd68_dataset
+from .sun2009 import get_sun2009_dataset
+from .yiheng import get_eccv2020_dataset
+from .rebel2021 import get_rebel2021_dataset
 from .transform import TransformsSimCLR,LowLight,BlockGaussian
 
 
@@ -14,8 +17,8 @@ def get_dataset(cfg,cfg_type):
 
     # added for backward compatibility 09-14-20
     ds_dict = cfg
-    if cfg_type != "denoising" and cfg_type != "simcl" and cfg_type != "simcl_cls" and cfg_type != 'cls_3c' and cfg_type != "dynamic" and cfg_type != "single_denoising": 
-        ds_dict = cfg[cfg_type]
+    exempt_types = ["denoising","simcl","simcl_cls","cls_3c","dynamic","single_denoising","dynamic-lmdb","default","rebel2021"]
+    if not (cfg_type in exempt_types): ds_dict = cfg[cfg_type]
 
     if ds_dict.dataset.name.lower() == "mnist":
         return get_mnist_dataset(cfg,cfg_type)
@@ -29,6 +32,12 @@ def get_dataset(cfg,cfg_type):
         return get_voc_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "cbsd68":
         return get_cbsd68_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "sun2009":
+        return get_sun2009_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "eccv2020":
+        return get_eccv2020_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "rebel2021":
+        return get_rebel2021_dataset(cfg,cfg_type)
     else:
         raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 

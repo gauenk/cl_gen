@@ -246,7 +246,7 @@ def load_attn_model(cfg,unet):
 def load_model_unet(cfg):
     # return CSBDeepBN( 3*cfg.N, 3*cfg.N)
     # return UNet_n2n_2layer( 1*cfg.N, 3)
-    return UNet2(3,3)
+    return UNet2(3*cfg.N,3*cfg.N)
     # return UNet_n2n( cfg.N,3,3*(cfg.N) )
     # return UNet_n2n( 1, 3, 3)
 

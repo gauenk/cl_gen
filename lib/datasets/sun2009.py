@@ -1,5 +1,5 @@
 """
-CBSD68 dataset
+SUN2009 dataset
 
 """
 
@@ -26,200 +26,23 @@ from settings import ROOT_PATH
 from pyutils.misc import add_noise
 from .transform import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoiseRandStd,GlobalCameraMotionTransform,AddGaussianNoise
 
-
-class DenoiseBSD68(DatasetFolder):
-
-    def __init__(self,root,N,noise_type,noise_params,dynamic,train=True):
-        self.super(BSD68Detection).__init__()
-        self.N = N
-        self.noise_type = noise_type
-        self.noise_params = noise_params
-        self.dynamic = dynamic
-        self.dynamic_trans = self._get_dynamic_transform(dynamic)
-        noisy_N = N if dynamic['bool'] else 1
-        trans,self.repN = self._get_noise_transform(noise_type,noise_params,noisy_N)
-        th_trans = self._get_th_img_trans()
-        self.__class__.__name__ = "cifar10"
-        super(DenoiseBSD68, self).__init__( root, train=train,
-                                              transform=trans)
-        self.th_trans = th_trans
-
-        # create dynamic motion separately.
-
-    def __getitem__(self, index):
-        """
-        Args:
-            index (int): Index
-
-        Returns:
-            tuple: (image, target) where target is index of the target class.
-        """
-        img = Image.open(self.images[index]).convert("RGB")
-        target = self.parse_bsd68_xml(ET.parse(self.annotations[index]).getroot())
-        # img, target = Image.fromarray(self.data[index]), int(self.targets[index])
-        
-        if self.repN:
-            img_set = self._apply_transform_N(img)
-        else:
-            img_set = self.transform(img)
-        th_img = self.th_trans(img)
-
-        if self.target_transform is not None:
-            target = self.target_transform(target,index)
-
-        return img_set, th_img
-
-    def _apply_transform_N(self,img):
-        t = self.transform
-        imgs = []
-        for _ in range(self.N):
-            # imgs.append(t_img)
-            imgs.append(t(img))
-        imgs = torch.stack(imgs)
-        return imgs
-
-    def _get_dynamic_transform(self,dynamic):
-        if dynamic['bool'] == False:
-            return None
-        if dynamic['mode'] == 'global':
-            return self._get_global_dynamic_transform(dynamic)
-        elif dynamic['mode'] == 'local':
-            raise NotImplemented("No local motion coded.")
-        else:
-            raise ValueError("Dynamic model [{dynamic['mode']}] not found.")
-        
-    def _get_global_dynamic_transform(self,dynamic):
-        return GlobalCameraMotionTransform(dynamic)
-
-    def _get_noise_transform(self,noise_type,params,N):
-        if noise_type == "g":
-            return self._get_g_noise(params,N),False
-        elif noise_type == "g":
-            return self._get_g_noise(params,N),False
-        elif noise_type == "ll":
-            return self._get_ll_noise(params,N),False
-        elif noise_type == "msg":
-            print("Loading msg transforms")
-            return self._get_msg_noise(params,N),False
-        elif noise_type == "msg_simcl":
-            print("Loading msg_simcl transforms")
-            return self._get_msg_simcl_noise(params,N),True
-        else:
-            raise ValueError(f"Unknown noise_type [{noise_type}]")
-
-    def _get_g_noise(self,params,N):
-        """
-        Noise Type: Gaussian  (LL)
-        - Each N images has Gaussian noise from with same parameters
-        """
-        resize = torchvision.transforms.Resize(size=32)
-        to_tensor = th_transforms.ToTensor()
-        szm = ScaleZeroMean()
-        gaussian_noise = AddGaussianNoise(params['mean'],params['stddev'])
-        comp = [resize,to_tensor,szm,gaussian_noise]
-        t = th_transforms.Compose(comp)
-        return t
-
-    def _get_ll_noise(self,params,N):
-        """
-        Noise Type: Low-Light  (LL)
-        - Each N images is a low-light image with same alpha parameter
-        """
-        raise NotImplemented()
-
-    def _get_msg_noise(self,params,N):
-        """
-        Noise Type: Multi-scale Gaussian  (MSG)
-        - Each N images has it's own noise level
-        """
-        resize = torchvision.transforms.Resize(size=32)
-        to_tensor = th_transforms.ToTensor()
-        szm = ScaleZeroMean()
-        gaussian_n2n = AddGaussianNoiseSetN2N(N,(0,50.))
-        comp = [resize,to_tensor,szm,gaussian_n2n]
-        t = th_transforms.Compose(comp)
-        return t
-
-    def _get_msg_simcl_noise(self,params,N):
-        """
-        Noise Type: Multi-scale Gaussian  (MSG)
-        - Each N images has it's own noise level
-
-        plus contrastive learning augs
-        - random crop (flip and resize)
-        - color distortion
-        - gaussian blur
-        """
-        comp = []
-        # -- random resize, crop, and flip --
-        crop = torchvision.transforms.RandomResizedCrop(size=32)
-        comp += [crop]
-
-        # -- flipping --
-        # vflip = torchvision.transforms.RandomVerticalFlip(p=0.5)
-        # comp += [vflip]
-        hflip = torchvision.transforms.RandomHorizontalFlip(p=0.5)
-        comp += [hflip]
-
-        # -- color jitter -- 
-        s = params['s'] 
-        c_jitter_kwargs = {'brightness':0.8*s,
-                           'contrast':0.8*s,
-                           'saturation':0.8*s,
-                           'hue': 0.2*s}
-        cjitter = torchvision.transforms.ColorJitter(**c_jitter_kwargs)
-        cjitter = torchvision.transforms.RandomApply([cjitter], p=0.8)
-        comp += [cjitter]
-
-        # -- convert to gray --
-        # gray = torchvision.transforms.RandomGrayscale(p=0.8)
-        # comp += [gray]
-        
-        # -- gaussian blur --
-        # gblur = GaussianBlur(size=3)
-        # comp += [gblur]
-
-        # -- convert to tensor --
-        to_tensor = th_transforms.ToTensor()
-        comp += [to_tensor]
-
-        # -- center to zero mean, all within [-1,1] --
-        # szm = ScaleZeroMean()
-        # comp += [szm]
-
-        # -- additive gaussian noise --
-        # gaussian_n2n = AddGaussianNoiseRandStd(0,0,50)
-        # comp += [gaussian_n2n]
-
-        t = th_transforms.Compose(comp)
-
-        # def t_n_raw(t,N,img):
-        #     imgs = []
-        #     for _ in range(N):
-        #         imgs.append(t(img))
-        #     imgs = torch.stack(imgs)
-        #     return imgs
-        # t_n = partial(t_n_raw,t,N)
-        return t
-        
-    def _get_th_img_trans(self):
-        t = th_transforms.Compose([torchvision.transforms.Resize(size=32),
-                                   th_transforms.ToTensor()
-        ])
-        return t
-
-
-class DynamicBSD68():
+class DynamicSUN2009():
 
     def __init__(self,path,N,noise_type,noise_params,dynamic):
 
         # -- create dynamic bsd68 --
         self.path = path
+        self.image_path = path / Path("./images")
+        self.label_path = path / Path("./labels")
         self.N = N
         self.noise_type = noise_type
         self.noise_params = noise_params
         self.dynamic = dynamic
         self.size = self.dynamic.frame_size
+
+        # -- load data info --
+        self.images,self.image_filenames = self._load_images(self.image_path)
+        self.labels,self.label_filenames = self._load_labels(self.label_path)
 
         # -- augmentations --
         noisy_N = N if dynamic['bool'] else 1
@@ -228,21 +51,37 @@ class DynamicBSD68():
         th_trans = self._get_th_img_trans()
         self.th_trans = th_trans
 
+
+    def _load_labels(self,label_path):
+        labels,filenames = [],[]
         # -- load list of files --
-        self.filenames = []
-        search_path = path / Path("*.png")
+        search_path = label_path / Path("*.regions.txt")
         for filename in glob.glob(str(search_path)):
-            self.filenames.append(filename)            
-        self.filenames = sorted(self.filenames)
+            filenames.append(filename)            
+        filenames = sorted(filenames)
+
+        # -- load all labels --
+        for filename in filenames:
+            label = np.loadtxt(filename,delimiter=' ',dtype=np.int)
+            labels.append(label)
+        return labels,filenames
+
+    def _load_images(self,image_path):
+        images,filenames = [],[]
+        # -- load list of files --
+        search_path = image_path / Path("*.jpg")
+        for filename in glob.glob(str(search_path)):
+            filenames.append(filename)            
+        filenames = sorted(filenames)
 
         # -- load all images --
-        self.images = []
-        for filename in self.filenames:
+        for filename in filenames:
             image = Image.open(filename).convert("RGB")
-            self.images.append(image)
+            images.append(image)
+        return images,filenames
 
     def __len__(self):
-        return len(self.filenames)
+        return len(self.image_filenames)
         
     def __getitem__(self, index):
         """
@@ -397,16 +236,16 @@ class DynamicBSD68():
 # Loading the datasets in a project
 #
 
-def get_cbsd68_dataset(cfg,mode):
+def get_sun2009_dataset(cfg,mode):
     root = cfg.dataset.root
-    root = Path(root)/Path("./cbsd68/CBSD68-dataset/CBSD68/original_png/")
+    root = Path(root)/Path("./sun2009/")
     data = edict()
     if mode == 'cl':
         batch_size = cfg.cl.batch_size
         low_light = cfg.cl.dataset.transforms.low_light
-        data.tr = ClBSD68(root,cfg.cl.image_size,train=True,low_light=low_light)
-        data.val = ClBSD68(root,cfg.cl.image_size,train=True,low_light=low_light)
-        data.te = ClBSD68(root,cfg.cl.image_size,train=False,low_light=low_light)
+        data.tr = ClSUN2009(root,cfg.cl.image_size,train=True,low_light=low_light)
+        data.val = ClSUN2009(root,cfg.cl.image_size,train=True,low_light=low_light)
+        data.te = ClSUN2009(root,cfg.cl.image_size,train=False,low_light=low_light)
     elif mode == "simcl" or mode == "denoising":
         batch_size = cfg.batch_size
         N = cfg.N
@@ -414,11 +253,11 @@ def get_cbsd68_dataset(cfg,mode):
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
-        data.tr = DenoiseBSD68(root,N,noise_type,noise_params,dynamic,load_res,train=True)
-        data.val = DenoiseBSD68(root,N,noise_type,noise_params,dynamic,load_res,train=False)
+        data.tr = DenoiseSUN2009(root,N,noise_type,noise_params,dynamic,load_res,train=True)
+        data.val = DenoiseSUN2009(root,N,noise_type,noise_params,dynamic,load_res,train=False)
         data.val.data = data.val.data[0:2*2048]
         data.val.targets = data.val.targets[0:2*2048]
-        data.te = DenoiseBSD68(root,N,noise_type,noise_params,dynamic,load_res,train=False)
+        data.te = DenoiseSUN2009(root,N,noise_type,noise_params,dynamic,load_res,train=False)
     elif mode == "dynamic":
         batch_size = cfg.batch_size
         N = cfg.N
@@ -427,40 +266,21 @@ def get_cbsd68_dataset(cfg,mode):
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
         bw = cfg.dataset.bw
-        data.tr = DynamicBSD68(root,N,noise_type,noise_params,dynamic)
-        # data.val = DynamicBSD68(root,N,noise_type,noise_params,dynamic,load_res,bw)
-        # data.val.data = data.val.data[0:2*2048]
-        # data.val.targets = data.val.targets[0:2*2048]
-        # data.te = DynamicBSD68(root,"2007","test",N,noise_type,noise_params,dynamic,load_res,bw)
+        data.tr = DynamicSUN2009(root,N,noise_type,noise_params,dynamic)
         data.val,data.te = data.tr,data.tr
-    else: raise ValueError(f"Unknown BSD68 mode {mode}")
+    else: raise ValueError(f"Unknown SUN2009 mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)
     return data,loader
 
-def get_bsd68_transforms(cfg):
-    cls_batch_size = cfg.cls.batch_size
-    cfg.cls.batch_size = 1
-    data,loader = get_bsd68_dataset(cfg,'cls')
-    cfg.cls.batch_size = cls_batch_size
 
-    transforms = edict()
-    transforms.tr = get_dataset_transforms(cfg,data.tr.data)
-    transforms.te = get_dataset_transforms(cfg,data.te.data)
 
-    return transforms
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#
+#                 Common Functions
+#
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-def get_dataset_transforms(cfg,data):
-    import numpy as np
-    noise_levels = cfg.imgrec.dataset.noise_levels
-    noise_data = []
-    for noise_level in noise_levels:
-        shape = (len(data),3,33,33)
-        means = torch.zeros(shape)
-        noise_i = torch.normal(means,noise_level)
-        noise_data.append(noise_i)
-    noise_data = torch.stack(noise_data,dim=1)
-    return noise_data
 
 def get_loader(cfg,data,batch_size,mode):
     if cfg.use_ddp:

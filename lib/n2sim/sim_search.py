@@ -1,5 +1,7 @@
 # -- python imports --
+import pickle,lmdb
 import numpy as np
+from pathlib import Path
 import numpy.random as npr
 from einops import rearrange, repeat, reduce
 
@@ -36,7 +38,7 @@ def compare_sim_images_methods(cfg,burst,K,patchsize=3):
 
     t_2 = Timer()
     t_2.tic()
-    sim_burst_v2 = compute_similar_bursts(cfg,single_burst,K,patchsize=3)[0,0,1:]
+    sim_burst_v2 = compute_similar_bursts(cfg,single_burst,K,patchsize=3,shuffle_k=False)[0,0,1:]
     t_2.toc()
 
     print(t_1,t_2)
@@ -83,23 +85,38 @@ def compare_sim_patches_methods(cfg,burst,K,patchsize=3):
     
 def compute_similar_bursts_n2sim(cfg,burst,K,patchsize=3):
     N,B = burst.shape[:2]
+    burst = burst.cpu()
     sim_burst = []
     for b in range(B):
         sim_frames = []
         for n in range(N):
-            image = rearrange(burst[n,b].cpu(),'c h w -> h w c')
+            image = rearrange(burst[n,b],'c h w -> h w c')
             sim_images = compute_sim_images(image, patchsize, K, img_ori=None) 
             sim_images = rearrange(sim_images,'k h w c -> k c h w')
             sim_images = torch.tensor(sim_images)
             sim_frames.append(sim_images)
         sim_frames = torch.stack(sim_frames,dim=0)
         sim_burst.append(sim_frames)
-    sim_burst = torch.stack(sim_burst,dim=1).to(cfg.gpuid)
+    sim_burst = torch.stack(sim_burst,dim=1).to(cfg.gpuid,non_blocking=True)
     # for k in range(K):
     #     print(k,F.mse_loss(sim_burst[:,:,k],burst))
     return sim_burst
 
-def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=False):
+async def compute_kindex_rands_async(cfg,burst,K):
+    N,B,C,H,W = burst.shape
+    kindex = []
+    for b in range(B):
+        kindex_b = []
+        for n in range(N):
+            kindex_b.append(torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid))
+        kindex.append(torch.stack(kindex_b))
+    kindex = torch.stack(kindex)
+    return kindex
+
+async def compute_similar_bursts_async(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None):
+    compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=shuffle_k,kindex=kindex)
+
+def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pick_2=False):
     """
     params: burst shape: [N, B, C, H, W]
     """
@@ -134,18 +151,22 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=False):
     faiss_cfg.device = cfg.gpuid
 
     # -- search each batch separately --
+    # if shuffle_k and kindex is None: kindex = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
+    
     sim_images = []
     for b in range(B):
+
+        # -- setup faiss index --
+        database = rearrange(patches[b],'n r l -> (n r) l')
+        database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
+        # database = patches[b,n]
+        # database_zc = patches_zc[b,n]
+        gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+        gpu_index.add(database_zc)
 
         sim_frames = []
         for n in range(N):
 
-            # -- setup faiss index --
-            database = rearrange(patches[b],'n r l -> (n r) l')
-            # database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
-            database_zc = patches_zc[b,n]
-            gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-            gpu_index.add(database_zc)
 
             # -- run faiss search --
             query = patches_zc[b,n].contiguous()
@@ -169,14 +190,28 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=False):
 
             # -- shuffle across each k --
             if shuffle_k:
-                index = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long()
-                index = index.to(cfg.gpuid)
-                sim_image.scatter_(0,index,sim_image)
+                if kindex is None:
+                    # kindex_sim = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
+                    kindex_sim = torch.randint(K+1,(K+1,C*H*W,)).long().to(cfg.gpuid)
+                else:
+                    kindex_sim = kindex[b,n]
+                sim_image.scatter_(0,kindex_sim,sim_image)
+                
+                # if len(kindex.shape) <= 2:
+                #     sim_image.scatter_(0,kindex,sim_image)
+                # else:
+                #     sim_image.scatter_(0,kindex[b,n],sim_image)
 
             # -- add to frames --
+            if pick_2:
+                rand2 = torch.randperm(K+1)[:2]
+                sim_image = sim_image[rand2]
+                
             shape_str = 'k (c h w) -> 1 k c h w'
             sim_image = rearrange(sim_image,shape_str,h=H,w=W)
+
             sim_frames.append(sim_image)
+                
 
             del query
 
@@ -213,10 +248,14 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=False):
     return burst_sim
 
 
-def create_k_grid(burst,G,shuffle=False,L=None):
+def create_k_grid(burst,shuffle=False):
     """
     :params burst: shape: [B,N,G,C,H,W]
     """
+
+    # -- method v0 --
+    G = burst.shape[2]
+    if G == 2: return [0],[1]
 
     # -- method v1 --
     k_ins,k_outs = [],[]
@@ -264,3 +303,77 @@ def create_k_grid_v2(K,shuffle=False,L=None):
     return k_ins,k_outs
 
 
+
+class kIndexPermLMDB():
+
+    def __init__(self,batch_size,ds_num_frames,img_shape=(3,128,128)):
+
+        # -- init info --
+        B = batch_size
+        C,H,W = img_shape
+        self.batch_size = batch_size
+        self.ds_num_frames = ds_num_frames
+
+        # -- lmdb path --
+        self.lmdb_path = Path("data/rand_perms/lmdbs/randperm_c3_hw128_nf12_ns8_e1_d10000/")
+
+        # -- extract metadata --
+        metadata_fn = self.lmdb_path / Path("metadata.pkl")
+        self.meta_info = pickle.load(open(metadata_fn,'rb'))
+        self.num_samples = self.meta_info['num_samples']
+        self.num_sim = self.meta_info['num_sim']
+        self.num_frames = self.meta_info['num_frames']
+
+        # -- create shape --
+        N,K = self.num_frames,self.num_sim
+        self.shape = (N,K+1,C*H*W)
+
+        # -- init data env --
+        self.data_env = None
+
+        # -- randomize ordering --
+        self.order = None
+        self.shuffle()
+        
+    def __len__(self):
+        return self.meta_info['num_samples']
+
+    def shuffle(self):
+        self.order = torch.randperm(self.meta_info['num_samples'])
+
+    def __getitem__(self,batch_index):
+        rands = []
+        lmdb_indices = self._lmdb_indices_from_batch_idx(batch_index)
+        for lmdb_index in lmdb_indices:
+            rands.append(self._load_single_lmdb_entry(lmdb_index))
+        rands = torch.stack(rands)
+        return rands
+
+    def _lmdb_indices_from_batch_idx(self,batch_index):
+        nbatches = self.__len__() // self.batch_size
+        batch_index = batch_index % nbatches
+        lmdb_indices = np.arange(self.batch_size)
+        lmdb_indices += batch_index*self.batch_size
+        return lmdb_indices
+
+    def _load_single_lmdb_entry(self,lmdb_index,dtype=np.uint8):
+        # -- create data env --
+        if self.data_env is None:
+            self.data_env = lmdb.open(str(self.lmdb_path), readonly=True, lock=False, readahead=False, meminit=False)
+        data_env = self.data_env
+
+        # -- read from lmdb --
+        key = "{}_perm".format(self.order[lmdb_index]).encode("ascii")
+        with data_env.begin(write=False) as txn: buf = txn.get(key)
+
+        # -- convert to ndarrays --
+        indices = np.frombuffer(buf, dtype=dtype).copy().reshape(self.shape)
+        indices = torch.tensor(indices).long()
+
+        # -- limit to number of frames actually used --
+        indices = indices[:self.ds_num_frames]
+
+        return indices
+        
+
+        

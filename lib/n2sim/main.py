@@ -38,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 1
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -59,11 +59,16 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # cfg.dataset.name = "cifar10"
     # cfg.dataset.name = "cbsd68"
     cfg.dataset.name = "voc"
+    # cfg.dataset.name = "sun2009"
+    # cfg.dataset.name = "eccv2020"
+    # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 6
+    cfg.N = 3
+    cfg.use_lmdb = True
+    cfg.use_kindex_lmdb = True
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
@@ -75,20 +80,20 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.burst_use_alignment = False
     cfg.burst_use_unet = False
     cfg.burst_use_unet_only = False
-    
 
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
+    cfg.noise_params.ntype = cfg.noise_type
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
     cfg.batch_size = 16
     cfg.init_lr = 5e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
-    cfg.epochs = 300
+    cfg.epochs = 100
     cfg.color_cat = True
-    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.log_interval = 25 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 1
@@ -109,6 +114,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     # -- experiment info --
     name = "n2sim_burst"
+    ds_name = cfg.dataset.name.lower()
     sup_str = "sup" if cfg.supervised else "unsup"
     bs_str = "b{}".format(cfg.batch_size)
     align_str = "yesAlignNet" if cfg.burst_use_alignment else "noAlignNet"
@@ -118,7 +124,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
     misc = "unet_mse_noKL"
-    cfg.exp_name = f"{sup_str}_{name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{unet_str}_{misc}"
+    cfg.exp_name = f"{sup_str}_{name}_{ds_name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{unet_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
     desc_fmt = (frame_str,kpn_cascade_str,framesize_str,filtersize_str,cfg.init_lr,align_str)
     cfg.desc = "Desc: unsup, frames {}, cascade {}, framesize {}, filter size {}, lr {}, {}, kl loss, anneal mse".format(*desc_fmt)
@@ -182,7 +188,10 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     # load data
     # data,loader = load_dataset(cfg,'denoising')
-    data,loader = load_dataset(cfg,'dynamic')
+    # data,loader = load_dataset(cfg,'default')
+    # data,loader = load_dataset(cfg,'dynamic')
+    data,loader = load_dataset(cfg,'dynamic-lmdb')
+    # data,loader = load_dataset(cfg,'default')
     # data,loader = simulate_noisy_dataset(data,loaders,M,N)
 
     # load criterion
@@ -226,7 +235,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         print("PSNR before training {:2.3e}".format(ave_psnr))
         return 
     if checkpoint.exists() and cfg.load:
-        model = load_model_fp(cfg,model,checkpoint,gpuid)
+        model = load_model_fp(cfg,model,checkpoint,cfg.gpuid)
         print("Loaded model.")
         cfg.current_epoch = cfg.epochs+1
         cfg.global_step = len(train_data) * cfg.epochs
