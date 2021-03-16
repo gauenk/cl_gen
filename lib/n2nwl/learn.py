@@ -16,7 +16,7 @@ import torchvision.transforms as th_trans
 # -- project code --
 import settings
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
-from datasets.transform import ScaleZeroMean
+from datasets.transforms import ScaleZeroMean
 
 def train_loop(cfg,model,optimizer,criterion,train_loader,epoch):
     return train_loop_offset(cfg,model,optimizer,criterion,train_loader,epoch)

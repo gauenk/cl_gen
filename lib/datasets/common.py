@@ -73,12 +73,22 @@ def get_loader_ddp(cfg,data):
     return loader
 
 def collate_dict(batch):
-    for key,elem in batch.items():
+
+    # -- aggregate tensors --
+    fbatch = {}
+    for sample in batch:
+        keys = sample.keys()
+        for key,elem in sample.items():
+            if not (key in fbatch): fbatch[key] = []
+            fbatch[key].append(elem)
+
+    # -- shape tensors --
+    for key,elem in fbatch.items():
         if key in ['burst','noisy','res']:
-            batch[key] = torch.stack(elem,dim=1)
+            fbatch[key] = torch.stack(elem,dim=1)
         else:
-            batch[key] = torch.stack(elem,dim=0)
-    return batch
+            fbatch[key] = torch.stack(elem,dim=0)
+    return fbatch
 
 def collate_fn(batch):
     noisy,clean = zip(*batch)
@@ -95,6 +105,6 @@ def collate_triplet_fn(batch):
     return noisy,res,clean,directions
 
 def set_torch_seed(worker_id):
-    torch.manual_seed(0)
+    torch.manual_seed(worker_id)
 
 

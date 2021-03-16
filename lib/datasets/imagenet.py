@@ -19,7 +19,7 @@ from torchvision import transforms as th_transforms
 
 # project imports
 from settings import ROOT_PATH
-from .transform import AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
+from datasets.transforms import AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 
 class ClImageNet(ImageNet):

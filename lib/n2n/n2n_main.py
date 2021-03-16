@@ -1,5 +1,5 @@
 
-# python imports
+# -- python imports --
 import os
 from tqdm import tqdm
 import numpy as np
@@ -7,21 +7,23 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
 
-# pytorch import 
+# -- pytorch import --
 import torch
 from torch import nn
 import torchvision.utils as vutils
 import torch.nn.functional as F
 import torch.multiprocessing as mp
+from torch.utils.tensorboard import SummaryWriter
 
-# project code
+
+# -- project code --
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from learning.utils import save_model
 
-# [this folder] project code
+# -- [this folder] project code --
 from .config import get_cfg,get_args
 from .model_io import load_model,load_model_fp
 from .optim_io import load_optimizer
@@ -33,8 +35,7 @@ def get_postfix_str(cfg,blind,noise_level):
     postfix = Path(f"./n2n_main/{cfg.S}/{blind}/{noise_level}/")
     return postfix
 
-def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25],nGgrid=1,ngpus=3,idx=0):
-# def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
+def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
     
     args = get_args()
     args.name = "default"
@@ -42,7 +43,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25],nGgrid=1,ngpus=3,i
     cfg.use_ddp = False
     cfg.use_apex = False
     # gpuid = rank % ngpus # set gpuid
-    gpuid = 2
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -63,6 +64,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25],nGgrid=1,ngpus=3,i
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    cfg.noise_params.ntype = cfg.noise_type
     noise_level = Ggrid[G_grid_idx]
     cfg.batch_size = 16
     cfg.init_lr = 1e-3

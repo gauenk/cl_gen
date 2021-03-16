@@ -1,5 +1,6 @@
 
 # -- python imports --
+import os
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,8 +30,7 @@ from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
 from .test_ot_loss import *
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
-# def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):
+def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=0):
     
     args = get_args()
     args.name = "default"
@@ -38,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 2
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -62,15 +62,23 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 2
+
+    # -- noise 2 simulate parameters --
+    cfg.sim_shuffleK = True
+    cfg.sim_method = "w"
+    cfg.sim_K = 8
     # cfg.N = 30
+    cfg.num_workers = 2
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    cfg.noise_params.ntype = cfg.noise_type
     noise_level = Ggrid[G_grid_idx] # don't worry about
     cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
+    cfg.patchsize = 3
     cfg.epochs = 30
     cfg.color_cat = True
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
@@ -109,12 +117,14 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
+    print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K}")
 
     print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
-
+    print("PID: {}".format(os.getpid()))
     torch.cuda.set_device(gpuid)
 
     # load model
+    torch.manual_seed(cfg.seed)
     model = load_model(cfg)
     optimizer = load_optimizer(cfg,model)
     scheduler = load_scheduler(cfg,model,optimizer)

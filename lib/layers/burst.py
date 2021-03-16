@@ -21,7 +21,8 @@ from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 class BurstAlignSG(nn.Module):
 
     def __init__(self, align_info, denoiser_info, unet_info, use_alignment = True,
-                 use_unet = True, use_unet_only = False, skip_middle = True):
+                 use_unet = True, use_unet_only = False, skip_middle = True,
+                 kpn_num_frames = None):
         super(BurstAlignSG, self).__init__()
         self.align_info = align_info
         self.denoiser_info = denoiser_info
@@ -30,6 +31,7 @@ class BurstAlignSG(nn.Module):
         self.use_alignment=use_alignment
         self.use_unet = use_unet
         self.use_unet_only = use_unet_only
+        self.kpn_num_frames = kpn_num_frames
         self.global_step = 0
         # self.ot_loss = LossOT()
 
@@ -56,8 +58,11 @@ class BurstAlignSG(nn.Module):
         if self.use_alignment:
             denoised,denoised_ave,denoised_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
         else:
-            denoised,denoised_ave,denoised_filters = self.denoiser_info.model(kpn_cat,kpn_stack)
-
+            if isinstance(self.denoiser_info.model,nn.Sequential):
+                denoised,denoised_ave,denoised_filters = self.run_kpn_cascade(kpn_stack)
+            else:
+                denoised,denoised_ave,denoised_filters = self.denoiser_info.model(kpn_stack,
+                                                                                  kpn_cat)
         # -- denoised via unet --
         if self.use_unet or self.use_unet_only:
             aligned,aligned_ave,aligned_filters = denoised,denoised_ave,denoised_filters
@@ -83,6 +88,40 @@ class BurstAlignSG(nn.Module):
 
         # -- return all components --
         return aligned,aligned_ave,denoised,denoised_ave,aligned_filters,denoised_filters
+
+    def run_kpn_cascade(self,burst):
+        N = burst.shape[1]
+        if 5 == burst.shape[1]: # spoof 3 frames right now.
+            burst = burst[:,1:4]
+        model = self.denoiser_info.model
+        kpn_models = list(model.children())
+        num_cascade = len(kpn_models)
+        inputs = burst
+        frames_l,filters_l = [],[]
+        for cascade_id in range(num_cascade):
+            if inputs.shape[1] < 3 and inputs.shape[1] == 1: # spoof 3 frames
+                inputs = inputs.repeat(1,3,1,1,1)
+            kpn_model = kpn_models[cascade_id]
+            frames,ave,filters = self.run_kpn_cascade_level(inputs,kpn_model)
+            inputs = ave
+            frames_l.append(frames)
+            filters_l.append(frames)
+            if cascade_id == (num_cascade-1): ave = ave[:,0]
+            else: frames_l.append(ave)
+        frames_l = torch.cat(frames_l,dim=1)
+        filters_l = torch.stack(filters_l,dim=2)
+        return frames_l,ave,filters_l
+
+    def run_kpn_cascade_level(self,burst,kpn_model):
+        N = burst.shape[1]
+        nsteps = N - self.kpn_num_frames + 1
+        output = []
+        for i in range(nsteps):
+            inputs = burst[:,i:i+self.kpn_num_frames]
+            frames,ave,filters = kpn_model(inputs)
+            output.append(ave)
+        output = torch.stack(output,dim=1)
+        return frames,output,filters
 
     def denoise(self, x):
         recs,rec = self.kpn(x,x)
@@ -324,9 +363,12 @@ class BurstRecLoss(nn.Module):
 
         # -- alignment loss for each frame via MSE --
         loss_burst = self.loss_burst(burst, ground_truth)
-        loss_burst *= self.coeff_burst
+        loss_burst *= self._compute_burst_decay(global_step) * self.coeff_burst
 
         return loss_ave, loss_burst
+
+    def _compute_burst_decay(self,global_step):
+        return self.alpha**global_step
 
 class LossRec(nn.Module):
     """

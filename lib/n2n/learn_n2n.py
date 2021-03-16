@@ -13,6 +13,7 @@ import torchvision.utils as vutils
 # project code
 import settings
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from n2sim.sim_search import compute_similar_bursts,kIndexPermLMDB
 
 def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
     model.train()
@@ -21,18 +22,31 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
     total_loss = 0
     running_loss = 0
     train_iter = iter(train_loader)
+    K = cfg.sim_K
+    noise_level = cfg.noise_params['g']['stddev']
 
-    for batch_idx, (burst_imgs, res_img, raw_img, d) in enumerate(train_loader):
+    for batch_idx, (burst, res_img, raw_img, d) in enumerate(train_loader):
 
         optimizer.zero_grad()
         model.zero_grad()
 
         # -- reshaping of data --
-        # raw_img = raw_img.cuda(non_blocking=True)
-        burst_imgs = burst_imgs.cuda(non_blocking=True)
-        img0 = burst_imgs[0]
-        img1 = burst_imgs[1]
-
+        BS = raw_img.shape[0]
+        raw_img = raw_img.cuda(non_blocking=True)
+        burst = burst.cuda(non_blocking=True)
+        burst0 = burst[[0]]
+        # img0 = burst[0]
+        # img1 = burst[1]
+        # kindex_ds = kIndexPermLMDB(cfg.batch_size,cfg.N)
+        # kindex = kindex_ds[batch_idx].cuda(non_blocking=True)
+        kindex = None
+        sim_burst = compute_similar_bursts(cfg,burst0,K,noise_level/255.,
+                                           patchsize=cfg.patchsize,shuffle_k=cfg.sim_shuffleK,
+                                           kindex=kindex,only_middle=True,
+                                           search_method=cfg.sim_method)
+        img0 = sim_burst[0][:,0]
+        img1 = sim_burst[0][:,1]
+        
         # -- denoising --
         rec_img = model(img0)
 
@@ -49,9 +63,14 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         optimizer.step()
 
         if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
+            loss = F.mse_loss(raw_img-0.5,rec_img,reduction='none').reshape(BS,-1)
+            loss = torch.mean(loss,1).detach().cpu().numpy()
+            psnr = mse_to_psnr(loss)
+            psnr_ave = np.mean(psnr)
+            psnr_std = np.std(psnr)
+
             running_loss /= cfg.log_interval
-            print("[%d/%d][%d/%d]: %2.3e "%(epoch, cfg.epochs, batch_idx, len(train_loader),
-                                            running_loss))
+            print("[%d/%d][%d/%d]: %2.3e [PSNR] %2.2f +/- %2.2f "%(epoch, cfg.epochs, batch_idx, len(train_loader),running_loss,psnr_ave,psnr_std))
             running_loss = 0
     total_loss /= len(train_loader)
     return total_loss
@@ -63,14 +82,14 @@ def test_loop_n2n(cfg,model,criterion,test_loader,epoch):
     total_psnr = 0
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (burst_imgs, res_img, raw_img, d) in enumerate(test_loader):
+        for batch_idx, (burst, res_img, raw_img, d) in enumerate(test_loader):
 
             BS = raw_img.shape[0]
 
             # reshaping of data
             raw_img = raw_img.cuda(non_blocking=True)
-            burst_imgs = burst_imgs.cuda(non_blocking=True)
-            img0 = burst_imgs[0]
+            burst = burst.cuda(non_blocking=True)
+            img0 = burst[0]
 
             # denoising
             rec_img = model(img0)

@@ -67,7 +67,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 1
+    cfg.N = 3
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
@@ -76,15 +76,16 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.kpn_cascade = False
     cfg.kpn_cascade_num = 1
     cfg.burst_use_alignment = False
-    cfg.burst_use_unet = True
-    cfg.burst_use_unet_only = True
+    cfg.burst_use_unet = False
+    cfg.burst_use_unet_only = False
     
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    cfg.noise_params.ntype = cfg.noise_type
     noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 16
+    cfg.batch_size = 8
     cfg.init_lr = 5e-5
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
@@ -97,6 +98,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
+    cfg.num_workers = 4
     
     # -- load previous experiment --
     cfg.load_epoch = 0

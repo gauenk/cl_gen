@@ -49,10 +49,11 @@ def create_lmdb(cfg,dataset,ds_split,epochs=1,maxNumFrames=10,numSim=8,patchsize
 
     # -- check some configs --
     assert cfg.noise_type == 'g', "Noise must be Gaussian here"
-    assert np.isclose(cfg.noise_params['g']['stddev'],25.), "Noise Level must be 25."
     assert cfg.N == maxNumFrames, "Dataset must load max number of frames."
     assert cfg.dynamic.ppf == 1, "Movement must be one pixel per frame."
     assert cfg.batch_size == 1, "Batch Size must be 1"
+    pick_2 = False
+    only_middle = True
 
     # -- get noise level --
     noise_level = 0
@@ -78,14 +79,15 @@ def create_lmdb(cfg,dataset,ds_split,epochs=1,maxNumFrames=10,numSim=8,patchsize
     # lmdb_path = ds_path / Path("./noisy_burst_{}_{}_nf10_ns8_ps3_ppf1_fs128_{}_lmdb_{}".format(ds_split,noise_str,sim_shuffle,id_str))
     # metadata_fn = lmdb_path / Path("./noisy_burst_{}_{}_nf10_ns8_ps3_ppf1_fs128_{}_metadata_{}.pkl".format(ds_split,noise_str,sim_shuffle,id_str))
     lmdb_path = ds_path / Path("./noisy_burst_xburst_{}_{}_{}_ns8_ps3_ppf1_fs128_{}_lmdb_{}".format(ds_split,noise_str,nf_str,sim_shuffle,id_str))
-    metadata_fn = lmdb_path / Path("./noisy_burst_xburst_{}_{}_{}_ns8_ps3_ppf1_fs128_{}_metadata_{}.pkl".format(ds_split,noise_str,nf_str,sim_shuffle,id_str))
+    # metadata_fn = lmdb_path / Path("./noisy_burst_xburst_{}_{}_{}_ns8_ps3_ppf1_fs128_{}_metadata_{}.pkl".format(ds_split,noise_str,nf_str,sim_shuffle,id_str))
+    metadata_fn = lmdb_path / Path("./metadata.pkl")
     if lmdb_path.exists() and not overwite_lmdb(lmdb_path,metadata_fn): return
         
 
     # -- compute bytes per entry --
-    burst, res_imgs, raw_img, directions = dataset[0]
+    burst, _, raw_img, directions = dataset[0]
     burst = burst.to(cfg.gpuid)
-    sim_burst = compute_similar_bursts(cfg,burst.unsqueeze(1),numSim,patchsize=3,shuffle_k=True,pick_2=True)
+    sim_burst = compute_similar_bursts(cfg,burst.unsqueeze(1),numSim,patchsize=3,shuffle_k=True,pick_2=pick_2,only_middle=only_middle)
     burst_nbytes = burst.cpu().numpy().astype(np.float32).nbytes
     simburst_nbytes = sim_burst.cpu().numpy().astype(np.float32).nbytes
     rawimg_nbytes = raw_img.numpy().astype(np.float32).nbytes
@@ -105,7 +107,7 @@ def create_lmdb(cfg,dataset,ds_split,epochs=1,maxNumFrames=10,numSim=8,patchsize
     commit_interval = 3 
 
     # -- load cached randperms --
-    kindex_ds = kIndexPermLMDB(cfg.batch_size,maxNumFrames)
+    # kindex_ds = kIndexPermLMDB(cfg.batch_size,maxNumFrames)
 
     for index, key in tqdm_iter:
 
@@ -114,12 +116,13 @@ def create_lmdb(cfg,dataset,ds_split,epochs=1,maxNumFrames=10,numSim=8,patchsize
         tqdm_iter.set_description('Write {}'.format(key))
 
         # -- load sample --
-        burst, res_imgs, raw_img, directions = dataset[index]
+        burst, _, raw_img, directions = dataset[index]
         burst = burst.to(cfg.gpuid)
-        kindex = kindex_ds[index].to(cfg.gpuid)
+        kindex = None #kindex_ds[index].to(cfg.gpuid)
         sim_burst = compute_similar_bursts(cfg,burst.unsqueeze(1),numSim,
                                            patchsize=3,shuffle_k=True,
-                                           kindex=kindex,pick_2=True)
+                                           kindex=kindex,pick_2=pick_2,
+                                           only_middle=only_middle)
         burst = burst.cpu()
         sim_burst = sim_burst.cpu()
 
@@ -164,4 +167,102 @@ def create_lmdb(cfg,dataset,ds_split,epochs=1,maxNumFrames=10,numSim=8,patchsize
     
 
     
+def create_lmdb_noisy_burst(cfg,num_samples,dataset,ds_split,maxNumFrames=10,id_str="burst"):
+
+    # -- check some configs --
+    assert cfg.noise_type == 'g', "Noise must be Gaussian here"
+    assert cfg.N == maxNumFrames, "Dataset must load max number of frames."
+    assert cfg.dynamic.ppf == 1, "Movement must be one pixel per frame."
+    assert cfg.batch_size == 1, "Batch Size must be 1"
+
+    # -- get noise level --
+    noise_level = 0
+    if cfg.noise_type == 'g': noise_level = int(cfg.noise_params['g']['stddev'])
+    else: raise ValueError(f"Unknown Noise Type [{cfg.noise_type}]")
     
+    # -- create target path --
+    lower_name = cfg.dataset.name.lower()
+    ds_path = Path(cfg.dataset.root) / lower_name / Path("./lmdbs")
+    if not ds_path.exists(): ds_path.mkdir(parents=True)
+
+    # -- create config strings --
+    size_str= "num{}".format(num_samples)
+    noise_str = "{}{}".format(cfg.noise_type,noise_level)
+    sim_shuffle = "randPerm"
+    nf_str = "nf{}".format(maxNumFrames)
+
+    # -- create file names --
+    lmdb_path = ds_path / Path("./noisy_burst_{}_{}_{}_{}_ppf1_fs128_lmdb_{}".format(ds_split,size_str,noise_str,nf_str,id_str))
+    metadata_fn = lmdb_path / Path("./metadata.pkl")
+    if lmdb_path.exists() and not overwite_lmdb(lmdb_path,metadata_fn): return
+
+    # -- compute bytes per entry --
+    burst, res_imgs, raw_img, directions = dataset[0]
+    burst = burst.to(cfg.gpuid)
+    burst_nbytes = burst.cpu().numpy().astype(np.float32).nbytes
+    rawimg_nbytes = raw_img.numpy().astype(np.float32).nbytes
+    dirc_nbytes = directions.numpy().astype(np.float32).nbytes
+    data_size = (burst_nbytes + rawimg_nbytes + dirc_nbytes) * num_samples
+    data_mb,data_gb = data_size/(1000.**2.),data_size/(1000.**3)
+    print( "%2.2f MB | %2.2f GB" % (data_mb,data_gb) )
+
+    # -- open lmdb file & open writer --
+    print(f"Writing LMDB Path: {lmdb_path}")
+    env = lmdb.open( str(lmdb_path) , map_size=data_size*1.5)
+    txn = env.begin(write=True)
+
+    # -- start lmdb writing loop --
+    lmdb_index = 0
+    tqdm_iter = tqdm(enumerate(range(num_samples)), total=num_samples, leave=False)
+    commit_interval = 3 
+
+    # -- load cached randperms --
+    kindex_ds = kIndexPermLMDB(cfg.batch_size,maxNumFrames)
+
+    for index, key in tqdm_iter:
+
+        # -- write update --
+        assert index == key, "These are not the same?"
+        tqdm_iter.set_description('Write {}'.format(key))
+
+        # -- load sample --
+        burst, _, raw_img, directions = dataset[index]
+
+        # -- sample to numpy --
+        burst = burst.numpy()
+        raw_img = raw_img.numpy()
+        directions = directions.numpy()
+        
+        # -- create keys for lmdb --
+        key_burst = "{}_burst".format(lmdb_index).encode('ascii')
+        key_raw = "{}_raw".format(lmdb_index).encode('ascii')
+        key_direction = "{}_direction".format(lmdb_index).encode('ascii')
+        lmdb_index += 1
+        
+        # -- add to buffer to write for lmdb --
+        txn.put(key_burst, burst)
+        txn.put(key_raw, raw_img)
+        txn.put(key_direction, directions)
+
+        # -- write to lmdb --
+        if (index + 1) % commit_interval == 0:
+            txn.commit()
+            txn = env.begin(write=True)
+
+    # -- final write to lmdb & close --
+    txn.commit()
+    env.close()
+    print('Finish writing lmdb')
+
+    # -- write meta info to pkl --
+    meta_info = {"num_samples": num_samples,
+                 "num_frames":maxNumFrames,
+                 "noise_type":cfg.noise_type,
+                 "noise_level":noise_level,
+                 "ppf":cfg.dynamic.ppf
+                 }
+    pickle.dump(meta_info, open(metadata_fn, "wb"))
+
+    # -- done! --
+    print('Finish creating lmdb meta info.')
+

@@ -29,7 +29,7 @@ import torchvision.transforms.functional as tvF
 import settings
 from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
-from datasets.transform import ScaleZeroMean,RandomChoice
+from datasets.transforms import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
 
@@ -38,6 +38,7 @@ from n2nwl.dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_b
 from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 from .sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB
+from .debug import print_tensor_stats
 
 async def say_after(delay, what):
     await asyncio.sleep(delay)
@@ -51,7 +52,7 @@ async def run_both(cfg,burst,K,patchsize,kindex):
     await both
     return both
 
-def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
+def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
 
 
     # -=-=-=-=-=-=-=-=-=-=-
@@ -123,12 +124,30 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
+    #      Half Precision
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    # model.align_info.model.half()
+    # model.denoiser_info.model.half()
+    # model.unet_info.model.half()
+    # models = [model.align_info.model,
+    #           model.denoiser_info.model,
+    #           model.unet_info.model]
+    # for model_l in models:
+    #     model_l.half()
+    #     for layer in model_l.modules():
+    #         if isinstance(layer, torch.nn.BatchNorm2d):
+    #             layer.float()
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
     #      Init Loss Functions
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
     alignmentLossMSE = BurstRecLoss()
-    denoiseLossMSE = BurstRecLoss(alpha=1.0,gradient_L1=~cfg.supervised)
+    denoiseLossMSE = BurstRecLoss(alpha=cfg.kpn_burst_alpha,gradient_L1=~cfg.supervised)
     # denoiseLossOT = BurstResidualLoss()
     entropyLoss = EntropyLoss()
 
@@ -155,10 +174,15 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
     use_timer = False
     one = torch.FloatTensor([1.]).to(cfg.device)
     switch = True
-    if use_timer: clock = Timer()
+    if use_timer:
+        data_clock = Timer()
+        clock = Timer()
     K = 8
     train_iter = iter(train_loader)
-    steps_per_epoch = len(train_loader)
+    ds_size = len(train_loader)
+    small_ds = ds_size < 500
+    steps_per_epoch = ds_size if not small_ds else 500
+
     write_examples_iter = steps_per_epoch//3
     all_filters = []
 
@@ -177,24 +201,30 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
         # -- setup iteration timer --
-        if use_timer: clock.tic()
+        if use_timer:
+            data_clock.tic()
+            clock.tic()
 
         # -- grab data batch --
-        if not cfg.use_lmdb:
-            burst, res_imgs, raw_img, directions = next(train_iter)
-            # tv_utils.save_image(burst,'burst.png',normalize=True,range=(-1,1))
-                  
-            # -- create similar bursts --
-            burst = burst.cuda(non_blocking=True)
-            
-            if cfg.use_kindex_lmdb: kindex = kindex_ds[batch_idx].cuda(non_blocking=True)
-            else: kindex = None
-            sim_burst = compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=kindex)
-            # sim_burst = compute_similar_bursts(cfg,burst,K,patchsize=3,kindex=kindex)
-            # k_ins,k_outs = create_k_grid(sim_burst,K+1,shuffle=True,L=K)
-        else:
-            burst, sim_burst, raw_img, directions = next(train_iter)
-            sim_burst = sim_burst.cuda(non_blocking=True)
+        if small_ds and batch_idx >= ds_size: train_iter = iter(train_loader) # reset if too big
+        sample = next(train_iter)
+        burst,raw_img,directions = sample['burst'],sample['clean'],sample['directions']
+        burst = burst.cuda(non_blocking=True)
+
+        # -- handle possibly cached simulated bursts --
+        if 'sim_burst' in sample: sim_burst = rearrange(sample['sim_burst'],'b n k c h w -> n b k c h w')
+        else: sim_burst = None
+        if sim_burst is None and not cfg.n2n:
+            if sim_burst is None:
+                if cfg.use_kindex_lmdb: kindex = kindex_ds[batch_idx].cuda(non_blocking=True)
+                else: kindex = None
+                sim_burst = compute_similar_bursts(cfg,burst,K,noise_level/255.,
+                                                   patchsize=3,shuffle_k=True,
+                                                   kindex=kindex,only_middle=cfg.sim_only_middle)
+        if cfg.n2n: sim_burst = burst.unsqueeze(2).repeat(1,1,2,1,1,1)
+        else: sim_burst = sim_burst.cuda(non_blocking=True)
+
+        if use_timer: data_clock.toc()
     
         # -- getting shapes of data --
         N,B,C,H,W = burst.shape
@@ -205,7 +235,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
 
         # -- shuffle over Simulated Samples --
         k_ins,k_outs = create_k_grid(sim_burst,shuffle=True)
-        k_ins,k_outs = [k_ins[0]],[k_outs[0]]
+        # k_ins,k_outs = [k_ins[0]],[k_outs[0]]
 
         for k_in,k_out in zip(k_ins,k_outs):
             if k_in == k_out: continue
@@ -219,12 +249,19 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
             model.unet_info.optim.zero_grad()
 
             # -- compute input/output data --
-            burst = sim_burst[:,:,k_in]
-            mid_img =  sim_burst[N//2,:,k_out]
+            if cfg.sim_only_middle:
+                midi = 0 if sim_burst.shape[0] == 1 else N//2
+                left_burst,right_burst = burst[:N//2],burst[N//2+1:]
+                burst = torch.cat([left_burst,sim_burst[[midi],:,k_in],right_burst],dim=0)
+                mid_img =  sim_burst[midi,:,k_out]
+            else:
+                burst = sim_burst[:,:,k_in]
+                mid_img = sim_burst[N//2,:,k_out]
             # mid_img =  sim_burst[N//2,:]
             # print(burst.shape,mid_img.shape)
             # print(F.mse_loss(burst,mid_img).item())
             if cfg.supervised: gt_img = raw_zm_img
+            elif cfg.n2n: gt_img = torch.normal(raw_zm_img,noise_level/255.)
             else: gt_img = mid_img
             # gt_img = torch.normal(raw_zm_img,noise_level/255.)
     
@@ -294,7 +331,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
             #
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     
-            residuals = denoised - gt_img.unsqueeze(1).repeat(1,N,1,1,1)
+            gt_img_rep = gt_img.unsqueeze(1).repeat(1,denoised.shape[1],1,1,1)
+            residuals = denoised - gt_img_rep
             rec_ot = torch.FloatTensor([0.]).to(cfg.device)
             # rec_ot = kl_gaussian_bp(residuals,noise_level,flip=True)
             # rec_ot = kl_gaussian_bp_patches(residuals,noise_level,flip=True,patchsize=16)
@@ -378,8 +416,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
 
             # -- psnr for [bm3d] --
             bm3d_nb_psnrs = []
-            M = 10 if B > 10 else B
-            for b in range(B):
+            M = 4 if B > 4 else B
+            for b in range(M):
                 bm3d_rec = bm3d.bm3d(mid_img_og[b].cpu().transpose(0,2)+0.5,
                                      sigma_psd=noise_level/255,
                                      stage_arg=bm3d.BM3DStages.ALL_STAGES)
@@ -392,7 +430,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
             bm3d_nb_std = np.std(bm3d_nb_psnrs)
 
             # -- psnr for aligned + denoised --
-            raw_img_repN = raw_img.unsqueeze(1).repeat(1,N,1,1,1)
+            R = denoised.shape[1]
+            raw_img_repN = raw_img.unsqueeze(1).repeat(1,R,1,1,1)
             mse_loss = F.mse_loss(raw_img_repN,denoised+0.5,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_denoised_ave = np.mean(mse_to_psnr(mse_loss))
@@ -427,6 +466,14 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
                           psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,
                           bm3d_nb_std,rec_mse_ave,rec_ot_ave)
             print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
+            # -- write to summary writer --
+            if writer:
+                writer.add_scalar('train/running-loss',running_loss,cfg.global_step)
+                writer.add_scalars('train/model-psnr',{'ave':psnr,'std':psnr_std},cfg.global_step)
+                writer.add_scalars('train/dn-frame-psnr',{'ave':psnr_denoised_ave,
+                                                          'std':psnr_denoised_std},cfg.global_step)
+
+            # -- reset loss --
             running_loss = 0
 
         # -- write examples --
@@ -434,7 +481,10 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses):
             write_input_output(cfg,model,stacked_burst,aligned,denoised,all_filters,directions)
 
         if use_timer: clock.toc()
-        if use_timer: print(clock)
+
+        if use_timer:
+            print("data_clock",data_clock.average_time)
+            print("clock",clock.average_time)
         cfg.global_step += 1
 
     # -- remove hooks --
@@ -451,12 +501,20 @@ def test_loop(cfg,model,test_loader,epoch):
     model = model.to(cfg.device)
     total_psnr = 0
     total_loss = 0
-    psnrs = np.zeros( (len(test_loader),cfg.batch_size) )
     use_record = False
     record_test = pd.DataFrame({'psnr':[]})
+    test_iter = iter(test_loader)
+    num_batches,D = 25,len(test_iter) 
+    num_batches = D
+    num_batches = num_batches if D > num_batches else D
+    psnrs = np.zeros( ( num_batches, cfg.batch_size ) )
+
 
     with torch.no_grad():
-        for batch_idx, (burst, res_imgs, raw_img, directions) in enumerate(test_loader):
+        for batch_idx in range(num_batches):
+
+            sample = next(test_iter)
+            burst,raw_img,directions = sample['burst'],sample['clean'],sample['directions']
             B = raw_img.shape[0]
             
             # -- selecting input frames --
@@ -516,11 +574,11 @@ def test_loop(cfg,model,test_loader,epoch):
             #     plt.imshow(grid_imgs.permute(1,2,0))
             #     plt.savefig(fn)
             #     plt.close('all')
-            if batch_idx % 100 == 0: print("[%d/%d] Test PSNR: %2.2f" % (batch_idx,len(test_loader),total_psnr / (batch_idx+1)))
+            if batch_idx % 100 == 0: print("[%d/%d] Test PSNR: %2.2f" % (batch_idx,num_batches,total_psnr / (batch_idx+1)))
 
     psnr_ave = np.mean(psnrs)
     psnr_std = np.std(psnrs)
-    ave_loss = total_loss / len(test_loader)
+    ave_loss = total_loss / num_batches
     print("[N: %d] Testing: [psnr: %2.2f +/- %2.2f] [ave loss %2.3e]"%(cfg.N,psnr_ave,psnr_std,ave_loss))
     return psnr_ave,record_test
 

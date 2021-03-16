@@ -70,7 +70,8 @@ def load_burst_kpn_model(cfg):
 
     # -- load denoising model --
     denoiser_info = edict()
-    denoiser_info.model,_ = load_model_kpn(cfg)
+    denoiser_info.model,_ = load_model_kpn_cascade(cfg)
+    # denoiser_info.model,_ = load_model_kpn(cfg)
     denoiser_info.optim = load_optimizer(cfg,denoiser_info.model)
     denoiser_info.S = None
 
@@ -88,7 +89,10 @@ def load_burst_kpn_model(cfg):
     use_unet =  cfg.burst_use_unet
     use_unet_only = cfg.burst_use_unet_only
     criterion = BurstRecLoss(alpha=1.0)
-    model = BurstAlignSG(align_info,denoiser_info,unet_info,use_alignment=use_align,use_unet=use_unet,use_unet_only=use_unet_only)
+    model = BurstAlignSG(align_info,denoiser_info,unet_info,
+                         use_alignment=use_align,use_unet=use_unet,
+                         use_unet_only=use_unet_only,
+                         kpn_num_frames=cfg.kpn_num_frames)
 
     # -- load noise critic info --
     disc_model = DCGAN_D(64, -1,3,64,1,0)
@@ -189,24 +193,23 @@ def load_model_field(cfg,rank,model,field):
     return model
 
 def load_model_kpn_1f_cls_cascade(cfg):
-    if not cfg.kpn_cascade:
+    if not cfg.kpn_1f_cascade:
         return load_model_kpn_1f_cls(cfg)
     else:
         cascade = []
-        for i in range(cfg.kpn_cascade_num):
-            not_final = i != (cfg.kpn_cascade_num-1)
-            cfg.kpn_cascade_output = not_final
+        for i in range(cfg.kpn_1f_cascade_num):
+            not_final = i != (cfg.kpn_1f_cascade_num-1)
+            cfg.kpn_1f_cascade_output = not_final
             kpn,loss_fxn = load_model_kpn_1f_cls(cfg)
             cascade.append(kpn)
         cascade = nn.Sequential(*cascade)
         return cascade,loss_fxn
 
-    
 def load_model_kpn_1f_cls(cfg):
     if cfg.dynamic.frame_size in [64,128]:
-        return KPN_1f_cls(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_cascade_output,frame_size=cfg.dynamic.frame_size),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+        return KPN_1f_cls(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_1f_cascade_output,frame_size=cfg.dynamic.frame_size),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     elif cfg.dynamic.frame_size == 32:
-        return KPN_1f_cls_fs32(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+        return KPN_1f_cls_fs32(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_1f_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     else:
         raise KeyError(f"Uknown frame size [{cfg.dynamic.frame_size}]")
 
@@ -226,8 +229,22 @@ def load_model_stn(cfg):
     img_size = (3,fs,fs)
     return STNBurst(img_size)
 
+
+def load_model_kpn_cascade(cfg):
+    if not cfg.kpn_cascade:
+        return load_model_kpn(cfg)
+    else:
+        cascade = []
+        for i in range(cfg.kpn_cascade_num):
+            not_final = i != (cfg.kpn_cascade_num-1)
+            cfg.kpn_cascade_output = not_final
+            kpn,loss_fxn = load_model_kpn(cfg)
+            cascade.append(kpn)
+        cascade = nn.Sequential(*cascade)
+        return cascade,loss_fxn
+
 def load_model_kpn(cfg):
-    return KPN_model(color=True,burst_length=cfg.input_N,blind_est=True,kernel_size=[cfg.kpn_frame_size]),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+    return KPN_model(color=True,burst_length=cfg.kpn_num_frames,blind_est=True,kernel_size=[cfg.kpn_frame_size],cascade=cfg.kpn_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
 
 def load_attn_model(cfg,unet):
     simclr = None #load_model_simclr(cfg)

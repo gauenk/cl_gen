@@ -15,6 +15,7 @@ from torch import nn
 import torchvision.utils as vutils
 import torch.nn.functional as F
 import torch.multiprocessing as mp
+from torch.utils.tensorboard import SummaryWriter
 
 # -- project code --
 import settings
@@ -25,12 +26,12 @@ from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 # -- [this folder] project code --
 from .config import get_cfg,get_args
 from .model_io import load_unet_model,load_model_fp,load_model_kpn,load_burst_n2n_model,load_burst_kpn_model,save_burst_model
-from .optim_io import load_optimizer
+from .optim_io import load_optimizer,load_optim_fp
 from .sched_io import load_scheduler,make_lr_scheduler
 from .learn import train_loop,test_loop
 
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
+def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
     
     args = get_args()
     args.name = "default"
@@ -38,7 +39,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -63,24 +64,39 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
+    cfg.n2n = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 3
-    cfg.use_lmdb = True
+    cfg.N = 5
+    cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
+    cfg.num_workers = 8
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
     cfg.kpn_1f_frame_size = 2
-    cfg.kpn_frame_size = 9
-    cfg.kpn_cascade = False
+    cfg.kpn_frame_size = 5
+
+    cfg.kpn_cascade = True
     cfg.kpn_cascade_output = False
-    cfg.kpn_cascade_num = 1
+    cfg.kpn_num_frames = 3
+    cfg.kpn_cascade_num = 2
+
+
+    cfg.kpn_1f_cascade = False
+    cfg.kpn_1f_cascade_output = False
+    cfg.kpn_1f_cascade_num = 1
+
     cfg.burst_use_alignment = False
     cfg.burst_use_unet = False
     cfg.burst_use_unet_only = False
+    cfg.kpn_burst_alpha = 0.998
 
+    # -- dataset params --
+    cfg.dataset.triplet_loader = False
+    cfg.dataset.dict_loader = True
+    
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
@@ -103,32 +119,39 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     
     # -- asdf --
     cfg.solver = edict()
-    cfg.solver.max_iter = cfg.epochs*500
+    cfg.solver.max_iter = cfg.epochs* ( (721*16)/cfg.batch_size )
     cfg.solver.ramp_up_fraction = 0.1
     cfg.solver.ramp_down_fraction = 0.3
 
     # -- load previous experiment --
     cfg.load_epoch = 0
     cfg.load = cfg.load_epoch > 0
-    cfg.restart_after_load = True
+    cfg.restart_after_load = False
+    return cfg
+
+def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
+    
+    cfg = get_main_config()
 
     # -- experiment info --
-    name = "n2sim_burst"
+    name = "n2sim_burstv2"
     ds_name = cfg.dataset.name.lower()
     sup_str = "sup" if cfg.supervised else "unsup"
     bs_str = "b{}".format(cfg.batch_size)
     align_str = "yesAlignNet" if cfg.burst_use_alignment else "noAlignNet"
     unet_str = "yesUnet" if cfg.burst_use_unet else "noUnet"
     kpn_cascade_str = "cascade{}".format(cfg.kpn_cascade_num) if cfg.kpn_cascade else "noCascade"
+    kpnba_str = "kpnBurstAlpha{}".format(int(cfg.kpn_burst_alpha*1000))
     frame_str = "n{}".format(cfg.N)
     framesize_str = "f{}".format(cfg.dynamic.frame_size)
     filtersize_str = "filterSized{}".format(cfg.kpn_frame_size)
-    misc = "unet_mse_noKL"
-    cfg.exp_name = f"{sup_str}_{name}_{ds_name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{unet_str}_{misc}"
+    misc = "noKL"
+    cfg.exp_name = f"{sup_str}_{name}_{ds_name}_{kpn_cascade_str}_{bs_str}_{frame_str}_{framesize_str}_{filtersize_str}_{align_str}_{unet_str}_{kpnba_str}_{misc}"
     print(f"Experiment name: {cfg.exp_name}")
     desc_fmt = (frame_str,kpn_cascade_str,framesize_str,filtersize_str,cfg.init_lr,align_str)
     cfg.desc = "Desc: unsup, frames {}, cascade {}, framesize {}, filter size {}, lr {}, {}, kl loss, anneal mse".format(*desc_fmt)
     print(f"Description: [{cfg.desc}]")
+    noise_level = cfg.noise_params['g']['stddev']
 
     # -- attn params --
     cfg.patch_sizes = [128,128]
@@ -146,7 +169,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         cfg.input_N = cfg.N
 
     blind = "blind" if cfg.blind else "nonblind"
-    print(grid_idx,blind,cfg.N,Ggrid[G_grid_idx],gpuid)
+    gpuid = cfg.gpuid
+    print(blind,cfg.N,noise_level,gpuid)
 
     # if blind == "nonblind": return 
     dynamic_str = "dynamic_input_noise" if cfg.input_noise else "dynamic"
@@ -166,6 +190,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     torch.cuda.set_device(gpuid)
 
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #   init summary writer
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    log_dir = "{}".format(cfg.exp_name)
+    writer = SummaryWriter(log_dir=log_dir)
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
@@ -181,16 +212,16 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # optimizer = load_optimizer(cfg,model)
     # scheduler = load_scheduler(cfg,model,optimizer)
     # scheduler = make_lr_scheduler(cfg,model.unet_info.optim)
-    scheduler = make_lr_scheduler(cfg,model.denoiser_info.optim)
-    nparams = count_parameters(model)
+    nparams = count_parameters(model.denoiser_info.model)
     print("Number of Trainable Parameters: {}".format(nparams))
     print("PID: {}".format(os.getpid()))
 
     # load data
     # data,loader = load_dataset(cfg,'denoising')
     # data,loader = load_dataset(cfg,'default')
-    # data,loader = load_dataset(cfg,'dynamic')
-    data,loader = load_dataset(cfg,'dynamic-lmdb')
+    data,loader = load_dataset(cfg,'dynamic')
+    # data,loader = load_dataset(cfg,'dynamic-lmdb-all')
+    # data,loader = load_dataset(cfg,'dynamic-lmdb-burst')
     # data,loader = load_dataset(cfg,'default')
     # data,loader = simulate_noisy_dataset(data,loaders,M,N)
 
@@ -206,9 +237,12 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     if cfg.load:
         name = "denoiser"
-        fp = cfg.model_path / Path("{}/checkpoint_{}.tar".format(name,cfg.load_epoch))
-        fp = Path("/home/gauenk/Documents/experiments/cl_gen/output/n2n_wl/cifar10/default/model/modelBurst/unsup_burst_noCascade_b4_n10_f128_filterSized12_kpn_klLoss_annealMSE_klPRes/dynamic_wmf/128_1_10/1/blind/10/25.0/denoiser/checkpoint_{}.tar".format(cfg.load_epoch))
+        fp = "/home/gauenk/Documents/experiments/cl_gen/output/n2sim/cifar10/default/model/modelBurst/unsup_n2sim_burstv2_voc_noCascade_b20_n8_f128_filterSized9_noAlignNet_noUnet_unet_mse_noKL/dynamic_wmf/128_1_8/1/blind/8/25.0/denoiser/checkpoint_83.tar"
+        # fp = cfg.model_path / Path("{}/checkpoint_{}.tar".format(name,cfg.load_epoch))
+        # fp = Path("/home/gauenk/Documents/experiments/cl_gen/output/n2n_wl/cifar10/default/model/modelBurst/unsup_burst_noCascade_b4_n10_f128_filterSized12_kpn_klLoss_annealMSE_klPRes/dynamic_wmf/128_1_10/1/blind/10/25.0/denoiser/checkpoint_{}.tar".format(cfg.load_epoch))
         model.denoiser_info.model = load_model_fp(cfg,model.denoiser_info.model,fp,cfg.gpuid)
+        fp = "/home/gauenk/Documents/experiments/cl_gen/output/n2sim/cifar10/default/optim/modelBurst/unsup_n2sim_burstv2_voc_noCascade_b20_n8_f128_filterSized9_noAlignNet_noUnet_unet_mse_noKL/dynamic_wmf/128_1_8/1/blind/8/25.0/denoiser/checkpoint_83.tar"
+        # model.denoiser_info.optim = load_optim_fp(cfg,model.denoiser_info.optim,fp,cfg.gpuid)
         # name = "critic"
         # fp = cfg.model_path / Path("{}/checkpoint_{}.tar".format(name,cfg.load_epoch))
         # noise_critic.disc = load_model_fp(cfg,noise_critic.disc,fp,cfg.gpuid)
@@ -217,9 +251,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
             cfg.global_step = 0
         else:
             cfg.current_epoch = cfg.load_epoch+1
-            cfg.global_step = cfg.load_epoch * len(train_data)
+            cfg.global_step = cfg.load_epoch * len(data.tr)
+            ce,gs = cfg.current_epoch,cfg.global_step
+            print(f"Starting Training from epoch [{ce}] and global step [{gs}]")
     else:
         cfg.current_epoch = 0
+    scheduler = make_lr_scheduler(cfg,model.denoiser_info.optim,cfg.global_step)
+
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
@@ -231,7 +269,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     te_ave_psnr = {}
     test_before = False
     if test_before:
-        ave_psnr,_ = test_loop_burst(cfg,model,criterion,loader.te,-1)
+        ave_psnr,record_test = test_loop(cfg,model,loader.te,-1,writer)
         print("PSNR before training {:2.3e}".format(ave_psnr))
         return 
     if checkpoint.exists() and cfg.load:
@@ -256,7 +294,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         print("Learning Rate: %2.2e"% (lr))
         sys.stdout.flush()
 
-        losses,record_losses = train_loop(cfg,model,scheduler,loader.tr,epoch,record_losses)
+        losses,record_losses = train_loop(cfg,model,scheduler,loader.tr,epoch,record_losses,writer)
         if use_record:
             write_record_losses_file(cfg.current_epoch,postfix,loss_type,record_losses)
 
@@ -268,7 +306,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
         ave_psnr,record_test = test_loop(cfg,model,loader.te,epoch)
         if use_record:        
-            write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test)
+            write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test,writer)
         te_ave_psnr[epoch] = ave_psnr
 
 

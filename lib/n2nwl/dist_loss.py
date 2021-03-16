@@ -23,7 +23,7 @@ import torchvision.utils as tv_utils
 import settings
 from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
-from datasets.transform import ScaleZeroMean
+from datasets.transforms import ScaleZeroMean
 from layers.ot_pytorch import sink_stabilized
 
 def ot_gaussian_bp(residuals,std=25,reg=1.0,K=4):

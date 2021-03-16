@@ -1,9 +1,16 @@
 
+# -- python imports --
+import numpy as np
+from joblib import Parallel, delayed
+from functools import partial
+
 # -- pytorch imports --
 import torch
 from torchvision import transforms as thT
+import torchvision.transforms.functional as tvF
 
-
+# -- projects imports --
+from .misc import ScaleZeroMean
 
 class GlobalCameraMotionTransform():
     """
@@ -138,7 +145,7 @@ class GlobalCameraMotionTransform():
         pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
         res_i = torch.empty(0)
         if (not self.noise_trans is None):
-            noisy_pic_i = self.noise_trans(pic_i)
+            noisy_pic_i = self.szm(self.noise_trans(self.to_tensor(pic_i)))
             if self.load_res:
                 pic_nmlz = self.szm(self.to_tensor(pic_i))
                 res_i = noisy_pic_i - pic_nmlz

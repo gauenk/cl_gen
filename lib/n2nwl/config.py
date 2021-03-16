@@ -261,6 +261,7 @@ def set_cfg(args):
     cfg.dataset.name = args.dataset
     cfg.dataset.load_residual = False
     cfg.dataset.triplet_loader = True
+    cfg.dataset.dict_loader = False
     cfg.dataset.bw = False
 
     cfg.batch_size = args.batch_size

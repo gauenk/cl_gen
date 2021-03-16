@@ -319,13 +319,13 @@ def get_eccv2020_dataset(cfg,mode):
     data = edict()
     batch_size = cfg.batch_size
     # create_foreground_images("./data/sun2009/")
-    if mode == 'default':
+    if mode in ['default','dynamic']:
         dynamic_info = edict()
         dynamic_info.num_frames = cfg.N
         data = edict()
         data.tr = ECCV2020(cfg.noise_params,dynamic_info)
         data.val,data.te = data.tr,data.tr
-    else: raise ValueError(f"Unknown VOC mode {mode}")
+    else: raise ValueError(f"Unknown ECCV2020 mode [{mode}]")
     loader = get_loader(cfg,data,batch_size,mode)
     return data,loader
 
@@ -372,7 +372,14 @@ class ECCV2020():
             
         # -- compat with package --
         spoof_res,spoof_dir = torch.tensor([0.]),torch.tensor([0.])
-        return burst, spoof_res, raw_img, spoof_dir
+
+        # -- create dict --
+        rinfo = {}
+        rinfo['burst'] = burst
+        rinfo['res'] = spoof_res
+        rinfo['clean'] = raw_img        
+        rinfo['directions'] = spoof_dir
+        return rinfo
 
 """
 # Training data generator for Two Encoder Net that generates different noisy samples in each epoch

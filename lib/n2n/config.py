@@ -259,6 +259,7 @@ def set_cfg(args):
     cfg.dataset.n_classes = 10
     cfg.dataset.name = args.dataset
     cfg.dataset.load_residual = False
+    cfg.dataset.dict_loader = False
     cfg.dataset.triplet_loader = True
     cfg.dataset.bw = False
 
@@ -371,6 +372,7 @@ def set_cfg(args):
     # add dataset size as parameter
     cfg.S = -1
     cfg.set_worker_seed = False
+    cfg.seed = 1234
 
     return cfg
     

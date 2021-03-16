@@ -24,7 +24,7 @@ import torchvision.transforms.functional as tvF
 import settings
 from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
-from datasets.transform import ScaleZeroMean
+from datasets.transforms import ScaleZeroMean
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
 
@@ -375,7 +375,7 @@ def train_loop(cfg,model,train_loader,epoch,record_losses):
         losses = denoiseLossMSE(denoised,denoised_ave,gt_img,cfg.global_step)
         ave_loss,burst_loss = [loss.item() for loss in losses]
         rec_mse = np.sum(losses)
-        rec_mse_coeff = 0. #0.9**cfg.global_step
+        rec_mse_coeff = 0.95**cfg.global_step
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #
@@ -386,9 +386,9 @@ def train_loop(cfg,model,train_loader,epoch,record_losses):
         # -- computation --
         gt_img_rs = gt_img.unsqueeze(1).repeat(1,N,1,1,1)
         residuals = denoised - gt_img.unsqueeze(1).repeat(1,N,1,1,1)
-        # rec_ot_a = kl_gaussian_bp(residuals,noise_level)
-        # rec_ot_b = kl_gaussian_bp(residuals,noise_level,flip=True)
-        # rec_ot = (rec_ot_a + rec_ot_b)/2.
+        # rec_ot = kl_gaussian_bp(residuals,noise_level)
+        rec_ot = kl_gaussian_bp(residuals,noise_level,flip=True)
+        # rec_ot /= 2.
         # alpha_grid = [0.,1.,5.,10.,25.]
         # for alpha in alpha_grid:
         #     # residuals = torch.normal(torch.zeros_like(residuals)+ gt_img_rs*alpha/255.,noise_level/255.)
@@ -402,7 +402,7 @@ def train_loop(cfg,model,train_loader,epoch,record_losses):
         #     rec_ot_v2 = (rec_ot_v2_a + rec_ot_v2_b).item()/2.
         #     print(alpha,torch.min(rec_ot_all),torch.max(rec_ot_all),rec_ot_v1,rec_ot_v2)
         # exit()
-        rec_ot = w_gaussian_bp(residuals,noise_level)
+        # rec_ot = w_gaussian_bp(residuals,noise_level)
         # print(residuals.numel())
         rec_ot_coeff = 100. #residuals.numel()*2.
         # 1000.# - .997**cfg.global_step

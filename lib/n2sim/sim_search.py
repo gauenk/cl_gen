@@ -6,6 +6,7 @@ import numpy.random as npr
 from einops import rearrange, repeat, reduce
 
 # -- faiss imports --
+import faiss_mod
 import faiss
 import faiss.contrib.torch_utils
 
@@ -20,7 +21,7 @@ import torchvision.transforms.functional as tvF
 from pyutils.timer import Timer
 
 # -- [local] image comparisons --
-from .nearest_search import search_raw_array_pytorch
+from .nearest_search import search_raw_array_pytorch,search_mod_raw_array_pytorch
 from .prepare_bsd400_lmdb import compute_sim_images,shift_concat_image
 
 def compare_sim_images_methods(cfg,burst,K,patchsize=3):
@@ -116,10 +117,13 @@ async def compute_kindex_rands_async(cfg,burst,K):
 async def compute_similar_bursts_async(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None):
     compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=shuffle_k,kindex=kindex)
 
-def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pick_2=False):
+def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2"):
     """
     params: burst shape: [N, B, C, H, W]
     """
+    # -- error checking --
+    if not(search_method in ["l2","w"]):
+        raise ValueError(f"Uknown search method [{search_method}]")
 
     # -- init shapes --
     ps = patchsize
@@ -134,8 +138,11 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pi
 
     # -- remove center pixels from patches for search --
     patches = rearrange(patches,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
-    patches_zc = patches.clone()
-    patches_zc[...,ps//2,ps//2,:] = 0
+    if search_method == "l2":
+        patches_zc = patches.clone()
+        patches_zc[...,ps//2,ps//2,:] = 0
+    else:
+        patches_zc = patches
     patches = rearrange(patches,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
     patches_zc = rearrange(patches_zc,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
 
@@ -159,21 +166,27 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pi
         # -- setup faiss index --
         database = rearrange(patches[b],'n r l -> (n r) l')
         database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
-        # database = patches[b,n]
-        # database_zc = patches_zc[b,n]
-        gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-        gpu_index.add(database_zc)
+        if search_method == "l2":
+            # database = patches[b,n]
+            # database_zc = patches_zc[b,n]
+            gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+            gpu_index.add(database_zc)
 
         sim_frames = []
         for n in range(N):
-
+            if only_middle and n != N//2: continue
 
             # -- run faiss search --
             query = patches_zc[b,n].contiguous()
-            D, I = gpu_index.search(query,K+1)
-
-            # -- locations of smallest K patches; no identity so no first column --
-            S,V = D[:,1:], I[:,1:]
+            if search_method == "l2":
+                D, I = gpu_index.search(query,K+1)
+                # -- locations of smallest K patches; no identity so no first column --
+                S,V = D[:,1:], I[:,1:]
+            elif search_method == "w":
+                search_args = [res,noise_level,database_zc,query,K+1]
+                D, I = search_mod_raw_array_pytorch(*search_args)
+                S,V = D,I
+            else: raise ValueError(f"Uknown search method [{search_method}]")
 
             # -- reshape to extract middle pixel from nearest patches --
             shape_str = 'hw k (ps1 ps2 c) -> hw k ps1 ps2 c'
@@ -186,13 +199,15 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pi
 
             # -- concat with original image --
             image_flat = rearrange(burst[n,b],'c h w -> 1 (c h w)')
-            sim_image = torch.cat([image_flat,sim_image],dim=0)
+            if search_method != "w":
+                sim_image = torch.cat([image_flat,sim_image],dim=0)
 
             # -- shuffle across each k --
+            R = sim_image.shape[0]
             if shuffle_k:
                 if kindex is None:
                     # kindex_sim = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
-                    kindex_sim = torch.randint(K+1,(K+1,C*H*W,)).long().to(cfg.gpuid)
+                    kindex_sim = torch.randint(R,(R,C*H*W,)).long().to(cfg.gpuid)
                 else:
                     kindex_sim = kindex[b,n]
                 sim_image.scatter_(0,kindex_sim,sim_image)
@@ -204,7 +219,7 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pi
 
             # -- add to frames --
             if pick_2:
-                rand2 = torch.randperm(K+1)[:2]
+                rand2 = torch.randperm(R)[:2]
                 sim_image = sim_image[rand2]
                 
             shape_str = 'k (c h w) -> 1 k c h w'
@@ -213,12 +228,9 @@ def compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None,pi
             sim_frames.append(sim_image)
                 
 
-            del query
-
         # -- concat on NumFrames dimension --
         sim_frames = torch.cat(sim_frames,dim=0)
         sim_images.append(sim_frames)
-        del gpu_index
 
         # -- randomly shuffle pixels across k images --
         # sim_images[:,:] = sim_images[:,shuffle]
@@ -255,7 +267,9 @@ def create_k_grid(burst,shuffle=False):
 
     # -- method v0 --
     G = burst.shape[2]
-    if G == 2: return [0],[1]
+    if G == 2:
+        i0,i1 = torch.randperm(G)[:2]
+        return [i0],[i1]
 
     # -- method v1 --
     k_ins,k_outs = [],[]
@@ -374,6 +388,234 @@ class kIndexPermLMDB():
         indices = indices[:self.ds_num_frames]
 
         return indices
+
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+#
+#                Burst Analysis
+#
+# -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         
 
+def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=False,kindex=None,pick_2=False,only_middle=True,sim_mode="burst",noise_level=25./255):
+    """
+    params: burst shape: [N, B, C, H, W]
+    """
+    # -- error checking
+    if not(search_method in ["l2","w"]):
+        raise ValueError(f"Uknown search method [{search_method}]")
+    if not (sim_mode in ["batch","burst","frame"]):
+        raise ValueError(f"Invalid Reference Database [{sim_mode}]")
+
+    # -- init shapes --
+    ps = patchsize
+    N,B,C,H,W = burst.shape
+
+    # -- tile patches --
+    unfold = nn.Unfold(patchsize,1,0,1)
+    burst_pad = rearrange(burst,'n b c h w -> (b n) c h w')
+    burst_pad = F.pad(burst_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
+    # print("pad",burst_pad.shape)
+    patches = unfold(burst_pad)
+
+    # -- tile clean patches --
+    clean = rearrange(clean,'n b c h w -> (b n) c h w')
+    clean_pad = F.pad(clean,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
+    clean_patches = unfold(clean_pad)
+    shape_str = '(b n) (c ps1 ps2) r -> b n r (ps1 ps2 c)'
+    clean_patches = rearrange(clean_patches,shape_str,b=B,ps1=ps,ps2=ps)
+
+    # -- remove center pixels from patches for search --
+    patches = rearrange(patches,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
+    if search_method == "l2":
+        patches_zc = patches.clone()
+        patches_zc[...,ps//2,ps//2,:] = 0
+    else:
+        patches_zc = patches
+    patches = rearrange(patches,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
+    patches_zc = rearrange(patches_zc,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
+
+    # -- contiguous for faiss --
+    patches = patches.contiguous()
+    patches_zc = patches_zc.contiguous()
+    B,N,R,ND = patches.shape
+
+    # -- faiss setup --
+    res = faiss.StandardGpuResources()
+    # faiss_cfg = faiss.GpuIndexFlatConfig()
+    # faiss_cfg.useFloat16 = False
+    # faiss_cfg.device = cfg.gpuid
+    # metric=faiss_mod.METRIC_L2
+    metric=faiss.METRIC_L2
+
+    # -- search each batch separately --
+    # if shuffle_k and kindex is None: kindex = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
+    
+    # -- create noise level vector for modified Wasserstein search --
+    if sim_mode == "batch":
+        noise_col = torch.ones(B*N*H*W) * noise_level
+    elif sim_mode == "burst":
+        noise_col = torch.ones(N*H*W) * noise_level
+    elif sim_mode == "frame":
+        noise_col = torch.ones(H*W) * noise_level
+    query_noise_col = torch.ones(H*W) * noise_level
+
+    # -- search across entire batch --
+    if sim_mode == "batch":
+        database = rearrange(patches,'b n r l -> (b n r) l')
+        database_zc = rearrange(patches_zc,'b n r l -> (b n r) l')
+        cdatabase = rearrange(clean_patches,'b n r l -> (b n r) l')        
+        # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+        # gpu_index.add(database_zc)
         
+        # -- modified Wasserstein metric --
+        # w_database = database_zc
+        # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+        # w_gpu_index.add(w_database)
+
+
+    sim_images = []
+    csim_images = []
+    wsim_images = []
+    batch_distances = []
+    batch_indices = []
+    for b in range(B):
+
+        # -- search across each burst --
+        if sim_mode == "burst":
+            database = rearrange(patches[b],'n r l -> (n r) l')
+            database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
+            cdatabase = rearrange(clean_patches[b],'n r l -> (n r) l')
+            # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+            # gpu_index.add(database_zc)
+            
+            # # -- modified Wasserstein metric --
+            # w_database = database_zc
+            # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+            # w_gpu_index.add(w_database)
+
+        sim_frames = []
+        csim_frames = []
+        wsim_frames = []
+        frame_distances = []
+        frame_indices = []
+        for n in range(N):
+            if only_middle and n != N//2: continue
+        
+            # -- search across each frame --
+            if sim_mode == "frame":
+                database = patches[b,n]
+                database_zc = patches_zc[b,n]
+                cdatabase = clean_patches[b,n]
+                # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+                # gpu_index.add(database_zc)
+
+                # # -- modified Wasserstein metric --
+                # w_database = database_zc
+                # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+                # w_gpu_index.add(w_database)
+
+            # -- run faiss search --
+            query = patches_zc[b,n].contiguous()
+            if search_method == "l2":
+                D, I = gpu_index.search(query,K+1)
+                S,V = D[:,1:], I[:,1:] # locations of smallest K patches; no identity so no first column
+            elif search_method == "w":
+                search_args = [res,noise_level,database_zc,query,K+1]
+                D, I = search_mod_raw_array_pytorch(*search_args)
+                S,V = D,I
+            else: raise ValueError(f"Uknown search method [{search_method}]")
+
+            # # D, I = gpu_index.search(query,K+1)
+            # # search_args = [res,noise_level,database_zc,query,K+1]
+            # # D, I = search_mod_raw_array_pytorch(*search_args,metric=metric)
+            # search_args = [res,database_zc,query,K+1]
+            # D, I = search_raw_array_pytorch(*search_args)
+
+            # -- locations of smallest K patches; no identity so no first column --
+            S,V = D[:,1:], I[:,1:]
+
+            # -- add information to distances and indices --
+            frame_distances.append(S)
+            frame_indices.append(V)
+
+            # -- extract middle pixel from patch in clean image --
+            shape_str = 'hw k (ps1 ps2 c) -> hw k ps1 ps2 c'
+            csim_patches = rearrange(cdatabase[V],shape_str,ps1=ps,ps2=ps)
+            csim_pixels = csim_patches[...,ps//2,ps//2,:]
+            shape_str = '(h w) k c -> 1 k c h w'
+            csim_image = rearrange(csim_pixels,shape_str,h=H)
+
+            # -- reshape to extract middle pixel from nearest patches --
+            shape_str = 'hw k (ps1 ps2 c) -> hw k ps1 ps2 c'
+            sim_patches = rearrange(database[V],shape_str,ps1=ps,ps2=ps)
+
+            # -- create image from nearest pixels --
+            sim_pixels = sim_patches[...,ps//2,ps//2,:]
+            shape_str = '(h w) k c -> k (c h w)'
+            sim_image = rearrange(sim_pixels,shape_str,h=H)
+
+            # -- concat with original image --
+            image_flat = rearrange(burst[n,b],'c h w -> 1 (c h w)')
+            if search_method != "w":
+                sim_image = torch.cat([image_flat,sim_image],dim=0)
+
+            # -- shuffle across each k --
+            R = sim_image.shape[0]
+            if shuffle_k:
+                if kindex is None:
+                    # kindex_sim = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
+                    kindex_sim = torch.randint(R,(R,C*H*W,)).long().to(cfg.gpuid)
+                else:
+                    kindex_sim = kindex[b,n]
+                sim_image.scatter_(0,kindex_sim,sim_image)
+
+            # -- add to frames --
+            if pick_2:
+                rand2 = torch.randperm(K+1)[:2]
+                sim_image = sim_image[rand2]
+                
+            shape_str = 'k (c h w) -> 1 k c h w'
+            sim_image = rearrange(sim_image,shape_str,h=H,w=W)
+
+            sim_frames.append(sim_image)
+            csim_frames.append(csim_image)
+
+            # del query
+
+        # -- extra info --
+        shape_str = 'n (h w) k1 -> n k1 h w'
+        frame_distances = rearrange(torch.stack(frame_distances,dim=0),shape_str,h=H)
+        frame_indices = rearrange(torch.stack(frame_indices,dim=0),shape_str,h=H)
+        batch_distances.append(frame_distances)
+        batch_indices.append(frame_indices)
+
+        # -- clean concat --
+        csim_frames = torch.cat(csim_frames,dim=0)
+        csim_images.append(csim_frames)
+
+        # -- concat on NumFrames dimension --
+        sim_frames = torch.cat(sim_frames,dim=0)
+        sim_images.append(sim_frames)
+        # del gpu_index
+
+        # -- randomly shuffle pixels across k images --
+        # sim_images[:,:] = sim_images[:,shuffle]
+
+    # -- create batch dimension --
+    batch_distances = torch.stack(batch_distances,dim=1)    
+    batch_indices = torch.stack(batch_indices,dim=1)    
+    csim_images = torch.stack(csim_images,dim=1)
+    sim_images = torch.stack(sim_images,dim=1)
+
+    # -- visually inspect --
+    vis = False
+    if vis:
+        print(burst.shape,sim_images.shape)
+        sims = rearrange(sim_images[:,0],'n k c h w -> (n k) c h w')
+        tv_utils.save_image(burst[:,0],'sim_search_tgt.png',nrow=N,normalize=True)
+        tv_utils.save_image(sims,'sim_search_similar_images.png',nrow=K,normalize=True)
+        # tv_utils.save_image(sim_images[0,0],'sim_search_similar_locations.png')
+
+    return sim_images,csim_images,wsim_images,batch_distances,batch_indices
+
+

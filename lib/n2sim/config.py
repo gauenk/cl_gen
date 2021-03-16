@@ -276,6 +276,7 @@ def set_cfg(args):
     cfg.hyper_params = args.hyper_params
     cfg.noise_type = args.noise_type
     cfg.noise_params = args.noise_params
+    cfg.noise_params.ntype = cfg.noise_type
     cfg.optim_type = args.optim_type
     cfg.optim_params = args.optim_params
     cfg.sched_type = args.sched_type
@@ -352,9 +353,11 @@ def set_cfg(args):
 
     # -- kpn params --
     cfg.kpn_frame_size = 9
+    cfg.kpn_1f_cascade = False
+    cfg.kpn_1f_cascade_num = 3
+    cfg.kpn_1f_cascade_output = False # use for each kpn loaded
     cfg.kpn_cascade = True
-    cfg.kpn_cascade_num = 3
-    cfg.kpn_cascade_output = False # use for each kpn loaded
+    cfg.kpn_cascade_num = 2
 
     # -- allow for dynamic frame motion --
     cfg.dynamic = edict()

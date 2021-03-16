@@ -20,7 +20,7 @@ from torch.utils.data.distributed import DistributedSampler
 # project imports
 from settings import ROOT_PATH
 from pyutils.misc import add_noise
-from .transform import BlockGaussian,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
+from datasets.transforms import BlockGaussian,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 def get_mnist_dataset(cfg,mode):
     if mode == "denoising" or mode == "simcl" or mode == "simcl_cls" or mode == "cls_3c":

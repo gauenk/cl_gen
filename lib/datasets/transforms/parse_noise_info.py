@@ -3,7 +3,8 @@
 from torchvision import transforms as tvT
 
 # -- project imports --
-from .transform import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoissonNoiseBW,AddLowLightNoiseBW
+from .misc import ScaleZeroMean
+from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoissonNoiseBW,AddLowLightNoiseBW
 
 __all__ = ['get_noise_transform']
 
@@ -11,13 +12,18 @@ def get_noise_transform(noise_info,noise_only=False):
     """
     The exemplar function for noise getting info
     """
+    # -- get transforms --
     to_tensor = tvT.ToTensor()
     szm = ScaleZeroMean()
-    noise = choose_transform(noise_info)
-    comp = [to_tensor,noise,szm]
+    noise = choose_noise_transform(noise_info)
+
+    # -- create composition --
+    comp = []
+    if noise_only: comp = [noise]
+    else: comp = [to_tensor,noise,szm]
     transform = tvT.Compose(comp)
-    if noise_only: return noise
-    else: return transform
+
+    return transform
 
 def choose_noise_transform(noise_info):
     ntype = noise_info.ntype
@@ -25,8 +31,10 @@ def choose_noise_transform(noise_info):
     if ntype == "g":
         return get_g_noise(noise_params)
     elif ntype == "ll":
+        print("Check order of szm and noise fxn")
         return get_ll_noise(noise_params)
     elif ntype == "qis":
+        print("Check order of szm and noise fxn")
         return get_qis_noise(noise_params)
     elif ntype == "msg":
         return get_msg_noise(noise_params)

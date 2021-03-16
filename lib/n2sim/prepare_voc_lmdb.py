@@ -21,20 +21,31 @@ import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
-from datasets.prepare_pascal_voc import create_lmdb
+from datasets.prepare_pascal_voc import create_lmdb,create_lmdb_noisy_burst
 
 # -- [this folder] project code --
 from .config import get_cfg,get_args
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
+def run_me(lmdb_type='all'):
     
+    # -- init --
+    rank=0
+    Sgrid=[1]
+    Ngrid=[3]
+    nNgrid=1
+    Ggrid=[75.]
+    nGgrid=1
+    ngpus=3
+    idx=0
+
+    # -- args + config --
     args = get_args()
     args.name = "default"
     cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -60,7 +71,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 8
+    cfg.N = 6
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
@@ -77,6 +88,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.noise_type = 'g'
+    cfg.noise_params.ntype = cfg.noise_type
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     noise_level = Ggrid[G_grid_idx] # don't worry about
     cfg.batch_size = 1
@@ -165,5 +177,15 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     
     data,loader = load_dataset(cfg,'dynamic')
+    ds_set = "train"
+    # ds_set = "test"
 
-    create_lmdb(cfg,data.tr,"train",epochs=1,maxNumFrames=cfg.N,numSim=10,patchsize=3)
+    if lmdb_type == 'all':
+        create_lmdb(cfg,data.tr,ds_set,epochs=1,maxNumFrames=cfg.N,numSim=10,patchsize=3)
+    elif lmdb_type == 'burst':
+        D = 100
+        create_lmdb_noisy_burst(cfg,D,data.tr,ds_set,maxNumFrames=cfg.N,id_str='burst')
+    elif lmdb_type == 'noise':
+        raise NotImplemented(f"Not yet implemented lmdb type [{lmdb_type}]")
+    else: raise ValueError(f"Uknown LMDB Type [{lmdb_type}]")
+            
