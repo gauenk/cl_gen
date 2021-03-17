@@ -43,7 +43,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     cfg.use_ddp = False
     cfg.use_apex = False
     # gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 

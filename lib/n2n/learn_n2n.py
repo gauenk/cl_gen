@@ -35,17 +35,19 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         raw_img = raw_img.cuda(non_blocking=True)
         burst = burst.cuda(non_blocking=True)
         burst0 = burst[[0]]
+        burst1 = burst[[1]]
         # img0 = burst[0]
         # img1 = burst[1]
         # kindex_ds = kIndexPermLMDB(cfg.batch_size,cfg.N)
         # kindex = kindex_ds[batch_idx].cuda(non_blocking=True)
         kindex = None
-        sim_burst = compute_similar_bursts(cfg,burst0,K,noise_level/255.,
-                                           patchsize=cfg.patchsize,shuffle_k=cfg.sim_shuffleK,
+        sim_burst = compute_similar_bursts(cfg,burst0,burst1,K,noise_level/255.,
+                                           patchsize=cfg.patchsize,
+                                           shuffle_k=cfg.sim_shuffleK,
                                            kindex=kindex,only_middle=True,
                                            search_method=cfg.sim_method)
-        img0 = sim_burst[0][:,0]
-        img1 = sim_burst[0][:,1]
+        img0 = burst[0]#sim_burst[0][:,0]
+        img1 = sim_burst[0][:,0]
         
         # -- denoising --
         rec_img = model(img0)

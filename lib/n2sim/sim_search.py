@@ -183,7 +183,7 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
                 # -- locations of smallest K patches; no identity so no first column --
                 S,V = D[:,1:], I[:,1:]
             elif search_method == "w":
-                search_args = [res,noise_level,database_zc,query,K+1]
+                search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
                 S,V = D,I
             else: raise ValueError(f"Uknown search method [{search_method}]")
@@ -396,7 +396,7 @@ class kIndexPermLMDB():
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         
 
-def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=False,kindex=None,pick_2=False,only_middle=True,sim_mode="burst",noise_level=25./255):
+def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=False,kindex=None,pick_2=False,only_middle=True,sim_mode="burst",db_mod=None,noise_level=25./255,search_method="l2"):
     """
     params: burst shape: [N, B, C, H, W]
     """
@@ -441,9 +441,9 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
 
     # -- faiss setup --
     res = faiss.StandardGpuResources()
-    # faiss_cfg = faiss.GpuIndexFlatConfig()
-    # faiss_cfg.useFloat16 = False
-    # faiss_cfg.device = cfg.gpuid
+    faiss_cfg = faiss.GpuIndexFlatConfig()
+    faiss_cfg.useFloat16 = False
+    faiss_cfg.device = cfg.gpuid
     # metric=faiss_mod.METRIC_L2
     metric=faiss.METRIC_L2
 
@@ -464,14 +464,8 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
         database = rearrange(patches,'b n r l -> (b n r) l')
         database_zc = rearrange(patches_zc,'b n r l -> (b n r) l')
         cdatabase = rearrange(clean_patches,'b n r l -> (b n r) l')        
-        # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-        # gpu_index.add(database_zc)
-        
-        # -- modified Wasserstein metric --
-        # w_database = database_zc
-        # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-        # w_gpu_index.add(w_database)
-
+        gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+        gpu_index.add(database_zc)
 
     sim_images = []
     csim_images = []
@@ -485,13 +479,8 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
             database = rearrange(patches[b],'n r l -> (n r) l')
             database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
             cdatabase = rearrange(clean_patches[b],'n r l -> (n r) l')
-            # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-            # gpu_index.add(database_zc)
-            
-            # # -- modified Wasserstein metric --
-            # w_database = database_zc
-            # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-            # w_gpu_index.add(w_database)
+            gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+            gpu_index.add(database_zc)
 
         sim_frames = []
         csim_frames = []
@@ -506,13 +495,8 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
                 database = patches[b,n]
                 database_zc = patches_zc[b,n]
                 cdatabase = clean_patches[b,n]
-                # gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-                # gpu_index.add(database_zc)
-
-                # # -- modified Wasserstein metric --
-                # w_database = database_zc
-                # w_gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-                # w_gpu_index.add(w_database)
+                gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+                gpu_index.add(database_zc)
 
             # -- run faiss search --
             query = patches_zc[b,n].contiguous()
@@ -520,19 +504,10 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
                 D, I = gpu_index.search(query,K+1)
                 S,V = D[:,1:], I[:,1:] # locations of smallest K patches; no identity so no first column
             elif search_method == "w":
-                search_args = [res,noise_level,database_zc,query,K+1]
+                search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
                 S,V = D,I
             else: raise ValueError(f"Uknown search method [{search_method}]")
-
-            # # D, I = gpu_index.search(query,K+1)
-            # # search_args = [res,noise_level,database_zc,query,K+1]
-            # # D, I = search_mod_raw_array_pytorch(*search_args,metric=metric)
-            # search_args = [res,database_zc,query,K+1]
-            # D, I = search_raw_array_pytorch(*search_args)
-
-            # -- locations of smallest K patches; no identity so no first column --
-            S,V = D[:,1:], I[:,1:]
 
             # -- add information to distances and indices --
             frame_distances.append(S)

@@ -24,6 +24,23 @@ class LowLight:
         low_light_pic = torch.poisson(self.alpha*pic,generator=self.seed)/self.alpha
         return low_light_pic
 
+class AddHeteroGaussianNoise():
+    def __init__(self, mean=0., read=25., shot=1.):
+        self.mean = mean
+        self.read = read/255.
+        self.shot = shot/255.
+        
+    def __call__(self, tensor):
+        pic = torch.normal(tensor.add(self.mean),self.read)
+        shot_noise = torch.normal(0,self.shot * tensor)
+        pic.add(shot_noise)
+        return pic
+    
+    def __repr__(self):
+        return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
+    
+
+
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1e-2):
         self.mean = mean

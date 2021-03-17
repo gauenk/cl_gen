@@ -66,7 +66,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     # -- noise 2 simulate parameters --
     cfg.sim_shuffleK = True
     cfg.sim_method = "w"
-    cfg.sim_K = 8
+    cfg.sim_K = 1
     # cfg.N = 30
     cfg.num_workers = 2
     cfg.dynamic.frames = cfg.N
@@ -78,7 +78,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
-    cfg.patchsize = 3
+    cfg.patchsize = 31
     cfg.epochs = 30
     cfg.color_cat = True
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
@@ -89,6 +89,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
     # cfg.dynamic.total_pixels = 6
     cfg.load = False
+    print("The reason to run this is to see zero error to Noise2Noise. This is because the patches are now Gaussian since we achieved the important numOfSamples > 30 mark in statistics.")
 
     cfg.input_noise = False
     cfg.input_noise_middle_only = False

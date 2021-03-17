@@ -4,7 +4,7 @@ from torchvision import transforms as tvT
 
 # -- project imports --
 from .misc import ScaleZeroMean
-from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoissonNoiseBW,AddLowLightNoiseBW
+from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoissonNoiseBW,AddLowLightNoiseBW,AddHeteroGaussianNoise
 
 __all__ = ['get_noise_transform']
 
@@ -30,6 +30,8 @@ def choose_noise_transform(noise_info):
     noise_params = noise_info[ntype]
     if ntype == "g":
         return get_g_noise(noise_params)
+    if ntype == "hg":
+        return get_hg_noise(noise_params)
     elif ntype == "ll":
         print("Check order of szm and noise fxn")
         return get_ll_noise(noise_params)
@@ -45,11 +47,18 @@ def choose_noise_transform(noise_info):
 
 def get_g_noise(params):
     """
-    Noise Type: Gaussian  (LL)
+    Noise Type: Gaussian 
     """
     gaussian_noise = AddGaussianNoise(params['mean'],params['stddev'])
     return gaussian_noise
 
+def get_hg_noise(params):
+    """
+    Noise Type: Heteroskedastic Gaussian N(x, \sigma_r + \sigma_s * x)
+    """
+    gaussian_noise = AddHeteroGaussianNoise(params['mean'],params['read'],params['shot'])
+    return gaussian_noise
+    
 def get_ll_noise(params):
     """
     Noise Type: Low-Light  (LL)
