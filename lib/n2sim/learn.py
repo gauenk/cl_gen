@@ -32,6 +32,7 @@ from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
 from datasets.transforms import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
+from datasets.transforms import get_noise_transform
 
 # -- [local] project code --
 from n2nwl.dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp,kl_gaussian_bp_patches
@@ -77,6 +78,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
     unfold = torch.nn.Unfold(blocksize,1,0,blocksize)
     use_record = False
     if record_losses is None: record_losses = pd.DataFrame({'burst':[],'ave':[],'ot':[],'psnr':[],'psnr_std':[]})
+    noise_type = cfg.noise_params.ntype
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
@@ -164,6 +166,16 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             if name == "filter_cls":
                 align_hook_handle = layer.register_forward_hook(align_hook)
                 align_hooks.append(align_hook_handle)
+                
+
+    # -=-=-=-=-=-=-=-=-=-=-
+    #
+    #     Noise2Noise
+    #
+    # -=-=-=-=-=-=-=-=-=-=-
+
+    noise_xform = get_noise_transform(cfg.noise_params,
+                                      use_to_tensor=False)
 
     # -=-=-=-=-=-=-=-=-=-=-
     #
@@ -177,7 +189,6 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
     if use_timer:
         data_clock = Timer()
         clock = Timer()
-    K = 8
     train_iter = iter(train_loader)
     ds_size = len(train_loader)
     small_ds = ds_size < 500
@@ -214,14 +225,19 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         # -- handle possibly cached simulated bursts --
         if 'sim_burst' in sample: sim_burst = rearrange(sample['sim_burst'],'b n k c h w -> n b k c h w')
         else: sim_burst = None
-        if sim_burst is None and not cfg.n2n:
+        if sim_burst is None and not (cfg.n2n or cfg.supervised):
             if sim_burst is None:
                 if cfg.use_kindex_lmdb: kindex = kindex_ds[batch_idx].cuda(non_blocking=True)
                 else: kindex = None
-                sim_burst = compute_similar_bursts(cfg,burst,K,noise_level/255.,
-                                                   patchsize=3,shuffle_k=True,
-                                                   kindex=kindex,only_middle=cfg.sim_only_middle)
-        if cfg.n2n: sim_burst = burst.unsqueeze(2).repeat(1,1,2,1,1,1)
+                query = burst[[N//2]]
+                database = torch.cat([burst[:N//2],burst[N//2+1:]])
+                sim_burst = compute_similar_bursts(cfg,query,database,
+                                                   cfg.sim_K,noise_level/255.,
+                                                   patchsize=cfg.sim_patchsize,
+                                                   shuffle_k=cfg.sim_shuffleK,
+                                                   kindex=kindex,only_middle=cfg.sim_only_middle,
+                                                   search_method=cfg.sim_method,db_level="frame")
+        if cfg.n2n or cfg.supervised: sim_burst = burst.unsqueeze(2).repeat(1,1,2,1,1,1)
         else: sim_burst = sim_burst.cuda(non_blocking=True)
 
         if use_timer: data_clock.toc()
@@ -260,10 +276,11 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             # mid_img =  sim_burst[N//2,:]
             # print(burst.shape,mid_img.shape)
             # print(F.mse_loss(burst,mid_img).item())
-            if cfg.supervised: gt_img = raw_zm_img
-            elif cfg.n2n: gt_img = torch.normal(raw_zm_img,noise_level/255.)
+            if cfg.supervised: gt_img = get_nmlz_img(cfg,raw_img).cuda(non_blocking=True)
+            elif cfg.n2n: gt_img = noise_xform(raw_img).cuda(non_blocking=True)
             else: gt_img = mid_img
             # gt_img = torch.normal(raw_zm_img,noise_level/255.)
+            
     
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #
@@ -400,16 +417,18 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             # -- compute mse for fun --
             B = raw_img.shape[0]            
             raw_img = raw_img.cuda(non_blocking=True)
+            raw_img = get_nmlz_img(cfg,raw_img)
 
             # -- psnr for [average of aligned frames] --
-            mse_loss = F.mse_loss(raw_img,aligned_ave+0.5,reduction='none').reshape(B,-1)
+            mse_loss = F.mse_loss(raw_img,aligned_ave,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_aligned_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_aligned_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [average of input, misaligned frames] --
-            mis_ave = torch.mean(stacked_burst,dim=1)
-            mse_loss = F.mse_loss(raw_img,mis_ave+0.5,reduction='none').reshape(B,-1)
+            mis_ave = torch.mean(burst_og,dim=0)
+            if noise_type == "qis": mis_ave = quantize_img(cfg,mis_ave)
+            mse_loss = F.mse_loss(raw_img,mis_ave,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_misaligned_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_misaligned_std = np.std(mse_to_psnr(mse_loss))
@@ -422,6 +441,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
                                      sigma_psd=noise_level/255,
                                      stage_arg=bm3d.BM3DStages.ALL_STAGES)
                 bm3d_rec = torch.FloatTensor(bm3d_rec).transpose(0,2)
+                # maybe an issue here
                 b_loss = F.mse_loss(raw_img[b].cpu(),bm3d_rec,reduction='none').reshape(1,-1)
                 b_loss = torch.mean(b_loss,1).detach().cpu().numpy()
                 bm3d_nb_psnr = np.mean(mse_to_psnr(b_loss))
@@ -429,16 +449,24 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             bm3d_nb_ave = np.mean(bm3d_nb_psnrs)
             bm3d_nb_std = np.std(bm3d_nb_psnrs)
 
+            # -- psnr for input averaged frames --
+            # burst_ave = torch.mean(burst_og,dim=0)
+            # mse_loss = F.mse_loss(raw_img,burst_ave,reduction='none').reshape(B,-1)
+            # mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
+            # psnr_input_ave = np.mean(mse_to_psnr(mse_loss))
+            # psnr_input_std = np.std(mse_to_psnr(mse_loss))
+
             # -- psnr for aligned + denoised --
             R = denoised.shape[1]
             raw_img_repN = raw_img.unsqueeze(1).repeat(1,R,1,1,1)
-            mse_loss = F.mse_loss(raw_img_repN,denoised+0.5,reduction='none').reshape(B,-1)
+            if noise_type == "qis": denoised = quantize_img(cfg,denoised)
+            mse_loss = F.mse_loss(raw_img_repN,denoised,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_denoised_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_denoised_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [model output image] --
-            mse_loss = F.mse_loss(raw_img,denoised_ave+0.5,reduction='none').reshape(B,-1)
+            mse_loss = F.mse_loss(raw_img,denoised_ave,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr = np.mean(mse_to_psnr(mse_loss))
             psnr_std = np.std(mse_to_psnr(mse_loss))
@@ -493,12 +521,54 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
     total_loss /= len(train_loader)
     return total_loss,record_losses
 
+def add_color_channel(bw_pic):
+    repeat = [1 for i in bw_pic.shape]
+    repeat[-3] = 3
+    bw_pic = bw_pic.repeat(*(repeat))
+    return bw_pic
+
+def quantize_img(cfg,image):
+    params = cfg.noise_params['qis']
+    pix_max = 2**params['nbits'] - 1
+    image += 0.5
+    image *= params['alpha']
+    image = torch.round(image)
+    image = torch.clamp(image, 0, pix_max)
+    image /= params['alpha']
+    image -= 0.5
+    return image
+    
+def get_nmlz_img(cfg,raw_img):
+    pix_max = 2**3-1
+    noise_type = cfg.noise_params.ntype
+    if noise_type in ["g","hg"]: nmlz_raw = raw_img - raw_offset
+    elif noise_type in ["qis"]:
+        params = cfg.noise_params[noise_type]
+        pix_max = 2**params['nbits'] - 1
+        raw_img_bw = tvF.rgb_to_grayscale(raw_img,1)
+        raw_img_bw = add_color_channel(raw_img_bw)
+        # nmlz_raw = raw_scale * raw_img_bw - 0.5
+        raw_img_bw *= params['alpha']
+        raw_img_bw = torch.round(raw_img_bw)
+        # print("ll",ll_pic.min().item(),ll_pic.max().item())
+        raw_img_bw = torch.clamp(raw_img_bw, 0, pix_max)
+        raw_img_bw /= params['alpha']
+        # -- end of qis noise transform --
+
+        # -- start dnn normalization for optimization --
+        nmlz_raw = raw_img_bw - 0.5
+    else:
+        print("[Warning]: Check normalize raw image.")        
+        nmlz_raw = raw_img
+    return nmlz_raw
+
 def test_loop(cfg,model,test_loader,epoch):
     model.eval()
     model.align_info.model.eval()
     model.denoiser_info.model.eval()
     model.unet_info.model.eval()
     model = model.to(cfg.device)
+    noise_type = cfg.noise_params.ntype
     total_psnr = 0
     total_loss = 0
     use_record = False
@@ -550,7 +620,8 @@ def test_loop(cfg,model,test_loader,epoch):
             # denoised_ave = burst[middle_img_idx] - rec_res
             
             # -- compare with stacked targets --
-            denoised_ave = rescale_noisy_image(denoised_ave)        
+            raw_img = get_nmlz_img(cfg,raw_img)
+            # denoised_ave = rescale_noisy_image(denoised_ave)        
 
             # -- compute psnr --
             loss = F.mse_loss(raw_img,denoised_ave,reduction='none').reshape(B,-1)

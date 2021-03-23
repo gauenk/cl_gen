@@ -62,10 +62,25 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     cfg.blind = (B_grid_idx == 0)
     cfg.N = 2
     cfg.dynamic.frames = cfg.N
+
+    # -- gaussian noise --
     cfg.noise_type = 'g'
     cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
     cfg.noise_params.ntype = cfg.noise_type
+    noise_params = cfg.noise_params['g']
     noise_level = Ggrid[G_grid_idx]
+    noise_level_str = f"{int(noise_level)}"
+
+    # -- heteroskedastic gaussian noise --
+    cfg.noise_type = 'hg'
+    cfg.noise_params['hg']['read'] = Ggrid[G_grid_idx]
+    cfg.noise_params['hg']['shot'] = 25.
+    noise_params = cfg.noise_params['hg']
+    cfg.noise_params.ntype = cfg.noise_type
+    noise_level = Ggrid[G_grid_idx]
+    noise_level_str = f"{int(noise_params['read']),int(noise_params['shot'])}"
+
+    # -- batch info --
     cfg.batch_size = 16
     cfg.init_lr = 1e-3
     cfg.unet_channels = 3
@@ -93,7 +108,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
 
-    print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
+    print("N: {} | Noise Level: {} | Noise Type: {}".format(cfg.N,noise_level_str,noise_type))
 
     torch.cuda.set_device(gpuid)
 

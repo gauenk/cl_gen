@@ -130,8 +130,8 @@ def train_loop(cfg,model_target,model_online,optim_target,optim_online,criterion
         rec_ot_coeff = 100
         residuals = denoised_o - mid_img.unsqueeze(1).repeat(1,N,1,1,1)
         residuals = rearrange(residuals,'b n c h w -> b n (h w) c')
-        rec_ot_loss = ot_pairwise_bp(residuals,K=3)
-        # rec_ot_loss = torch.FloatTensor([0.]).to(cfg.device)
+        # rec_ot_loss = ot_pairwise_bp(residuals,K=3)
+        rec_ot_loss = torch.FloatTensor([0.]).to(cfg.device)
 
         # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         #    final losses & recording

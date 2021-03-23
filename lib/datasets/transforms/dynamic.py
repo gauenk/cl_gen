@@ -14,6 +14,8 @@ from .misc import ScaleZeroMean
 
 class GlobalCameraMotionTransform():
     """
+    Axis-aligned motion
+    
     Global camera motion.
 
     direction: the vector of where we currently go

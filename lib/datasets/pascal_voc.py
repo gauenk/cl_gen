@@ -106,7 +106,6 @@ class DynamicVOC(VOCDetection):
             raise ValueError(f"Uknown return type [{rtype}]")
         self._return_type = rtype
 
-        
         # -- create transforms --
         noise_trans = get_noise_transform(noise_info,noise_only=True)
         self.dynamic_trans = get_dynamic_transform(dynamic_info,noise_trans,load_res)

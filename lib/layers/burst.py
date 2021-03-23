@@ -55,9 +55,9 @@ class BurstAlignSG(nn.Module):
         # both_stack = torch.cat([mid_img_r,kpn_stack],dim=2)
         # aligned_cat = rearrange(both_stack,'b n c h w -> b (n c) h w')
         aligned_cat = rearrange(aligned_stack,'b n c h w -> b (n c) h w')
-        if self.use_alignment:
+        if self.use_alignment and not (self.use_unet_only):
             denoised,denoised_ave,denoised_filters = self.denoiser_info.model(aligned_cat,aligned_stack)
-        else:
+        elif not (self.use_unet_only):
             if isinstance(self.denoiser_info.model,nn.Sequential):
                 denoised,denoised_ave,denoised_filters = self.run_kpn_cascade(kpn_stack)
             else:
@@ -65,8 +65,11 @@ class BurstAlignSG(nn.Module):
                                                                                   kpn_cat)
         # -- denoised via unet --
         if self.use_unet or self.use_unet_only:
-            aligned,aligned_ave,aligned_filters = denoised,denoised_ave,denoised_filters
-            aligned_cat = rearrange(aligned,'b n c h w -> b (n c) h w')
+            if not (self.use_unet_only):
+                aligned,aligned_ave,aligned_filters = denoised,denoised_ave,denoised_filters
+                aligned_cat = rearrange(aligned,'b n c h w -> b (n c) h w')
+            else: denoised_filters = aligned_filters
+
             if self.use_unet_only:
                 denoised = self.unet_info.model(kpn_cat)
                 denoised = rearrange(denoised,'b (n c) h w -> b n c h w',n=N)
@@ -113,6 +116,7 @@ class BurstAlignSG(nn.Module):
         return frames_l,ave,filters_l
 
     def run_kpn_cascade_level(self,burst,kpn_model):
+        # kpn_num_frames = for spoofing?
         N = burst.shape[1]
         nsteps = N - self.kpn_num_frames + 1
         output = []

@@ -39,7 +39,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 1
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -78,32 +78,48 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.kpn_1f_frame_size = 2
     cfg.kpn_frame_size = 5
 
-    cfg.kpn_cascade = True
+    cfg.kpn_cascade = False
     cfg.kpn_cascade_output = False
     cfg.kpn_num_frames = 3
-    cfg.kpn_cascade_num = 2
-
+    cfg.kpn_cascade_num = 3
 
     cfg.kpn_1f_cascade = False
     cfg.kpn_1f_cascade_output = False
     cfg.kpn_1f_cascade_num = 1
 
     cfg.burst_use_alignment = False
-    cfg.burst_use_unet = False
-    cfg.burst_use_unet_only = False
+    cfg.burst_use_unet = True
+    cfg.burst_use_unet_only = True
     cfg.kpn_burst_alpha = 0.998
+
+    # -- noise-2-similar parameters --
+    cfg.sim_shuffleK = True
+    cfg.sim_method = "l2"
+    cfg.sim_K = 8
+    cfg.sim_patchsize = 9
 
     # -- dataset params --
     cfg.dataset.triplet_loader = False
     cfg.dataset.dict_loader = True
     
+    # -- gaussian noise --
+    # cfg.noise_type = 'g'
+    # cfg.noise_params.ntype = cfg.noise_type
+    # cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    # noise_level = Ggrid[G_grid_idx] # don't worry about
+    # noise_level_str = f"{int(noise_level)}"
+
+    # -- low-light noise --
+    noise_type = "qis"
+    cfg.noise_type = noise_type
+    cfg.noise_params['qis']['alpha'] = 4.0
+    cfg.noise_params['qis']['readout'] = 0.0
+    cfg.noise_params['qis']['nbits'] = 3
+    cfg.noise_params.ntype = cfg.noise_type
+
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
-    cfg.noise_type = 'g'
-    cfg.noise_params.ntype = cfg.noise_type
-    cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
-    noise_level = Ggrid[G_grid_idx] # don't worry about
-    cfg.batch_size = 16
+    cfg.batch_size = 4
     cfg.init_lr = 5e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
@@ -112,7 +128,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.log_interval = 25 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 1
+    cfg.dynamic.ppf = 0
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
@@ -132,6 +148,12 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
     
     cfg = get_main_config()
+
+    # -- noise info --
+    noise_type = cfg.noise_params.ntype
+    noise_params = cfg.noise_params['qis']
+    noise_level = noise_params['readout']
+    noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
 
     # -- experiment info --
     name = "n2sim_burstv2"
@@ -186,7 +208,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
 
-    print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
+    print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K} | Patchsize: {cfg.sim_patchsize}")
+    print("N: {} | Noise Level: {} | Noise Type: {}".format(cfg.N,noise_level_str,noise_type))
 
     torch.cuda.set_device(gpuid)
 
@@ -214,6 +237,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # scheduler = make_lr_scheduler(cfg,model.unet_info.optim)
     nparams = count_parameters(model.denoiser_info.model)
     print("Number of Trainable Parameters: {}".format(nparams))
+    print("GPUID: {}".format(gpuid))
     print("PID: {}".format(os.getpid()))
 
     # load data

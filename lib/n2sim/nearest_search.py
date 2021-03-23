@@ -183,7 +183,7 @@ def search_mod_raw_array_pytorch(res, noise_level, xb, xq, k, D=None, I=None,
     gpu_config.outIndices = I_ptr
     gpu_config.outIndicesType = faiss_mod.DistanceDataType_F32
     gpu_config.ignoreOutDistances = False
-    gpu_config.noise_level = 2*noise_level**2
+    gpu_config.noise_level = 2*noise_level**2 / xb.shape[1]
     gpu_config.useWasserstein = True
     faiss_mod.bfKnn(res, gpu_config)
 

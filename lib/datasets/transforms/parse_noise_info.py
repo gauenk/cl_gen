@@ -8,7 +8,7 @@ from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoiss
 
 __all__ = ['get_noise_transform']
 
-def get_noise_transform(noise_info,noise_only=False):
+def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True):
     """
     The exemplar function for noise getting info
     """
@@ -20,7 +20,9 @@ def get_noise_transform(noise_info,noise_only=False):
     # -- create composition --
     comp = []
     if noise_only: comp = [noise]
-    else: comp = [to_tensor,noise,szm]
+    else:
+        if use_to_tensor: comp = [to_tensor,noise,szm]
+        else: comp = [noise,szm]
     transform = tvT.Compose(comp)
 
     return transform
@@ -33,10 +35,10 @@ def choose_noise_transform(noise_info):
     if ntype == "hg":
         return get_hg_noise(noise_params)
     elif ntype == "ll":
-        print("Check order of szm and noise fxn")
+        print("[parse_noise_info]: Check order of szm and noise fxn")
         return get_ll_noise(noise_params)
     elif ntype == "qis":
-        print("Check order of szm and noise fxn")
+        print("[parse_noise_info]: Check order of szm and noise fxn")
         return get_qis_noise(noise_params)
     elif ntype == "msg":
         return get_msg_noise(noise_params)
@@ -69,6 +71,7 @@ def get_ll_noise(params):
 
 def get_qis_noise(params):
     alpha,readout,nbits = params['alpha'],params['readout'],params['nbits']
+    if readout > 1: readout /= 255. # rescale is necessary
     qis_noise = AddLowLightNoiseBW(alpha,readout,nbits)
     return qis_noise
 

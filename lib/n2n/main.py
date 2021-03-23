@@ -38,7 +38,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -65,21 +65,49 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
 
     # -- noise 2 simulate parameters --
     cfg.sim_shuffleK = True
-    cfg.sim_method = "w"
+    cfg.sim_method = "l2"
     cfg.sim_K = 1
+    cfg.sim_patchsize = 9
     # cfg.N = 30
     cfg.num_workers = 2
     cfg.dynamic.frames = cfg.N
-    cfg.noise_type = 'g'
-    cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+
+    # -- gaussian noise --
+    # noise_type = "g"
+    # cfg.noise_type = noise_type
+    # cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    # cfg.noise_params.ntype = cfg.noise_type
+    # noise_params = cfg.noise_params['g']
+    # noise_level = Ggrid[G_grid_idx]
+    # noise_level_str = f"{int(noise_level)}"
+
+    # -- heteroskedastic gaussian noise --
+    # noise_type = "hg"
+    # cfg.noise_type = noise_type
+    # cfg.noise_params['hg']['read'] = Ggrid[G_grid_idx]
+    # cfg.noise_params['hg']['shot'] = 25.
+    # noise_params = cfg.noise_params['hg']
+    # cfg.noise_params.ntype = cfg.noise_type
+    # noise_level = Ggrid[G_grid_idx]
+    # noise_level_str = f"{int(noise_params['read']),int(noise_params['shot'])}"
+
+    # -- low-light noise --
+    noise_type = "qis"
+    cfg.noise_type = noise_type
+    cfg.noise_params['qis']['alpha'] = 4.0
+    cfg.noise_params['qis']['readout'] = 0.0
+    cfg.noise_params['qis']['nbits'] = 3
+    noise_params = cfg.noise_params['qis']
     cfg.noise_params.ntype = cfg.noise_type
-    noise_level = Ggrid[G_grid_idx] # don't worry about
+    noise_level = noise_params['readout']
+    noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
+
+    # -- batch info --
     cfg.batch_size = 4
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
-    cfg.patchsize = 31
-    cfg.epochs = 30
+    cfg.epochs = 50
     cfg.color_cat = True
     cfg.log_interval = int(int(50000 / cfg.batch_size) / 100)
     cfg.dynamic.bool = True
@@ -89,7 +117,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
     # cfg.dynamic.total_pixels = 6
     cfg.load = False
-    print("The reason to run this is to see zero error to Noise2Noise. This is because the patches are now Gaussian since we achieved the important numOfSamples > 30 mark in statistics.")
+    print("This is to benchmark a new distribution class. We want to find the case when mL2 fails.")
 
     cfg.input_noise = False
     cfg.input_noise_middle_only = False
@@ -118,9 +146,9 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
-    print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K}")
+    print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K} | Patchsize: {cfg.sim_patchsize}")
 
-    print("N: {} | Noise Level: {}".format(cfg.N,cfg.noise_params['g']['stddev']))
+    print("N: {} | Noise Level: {} | Noise Type: {}".format(cfg.N,noise_level_str,noise_type))
     print("PID: {}".format(os.getpid()))
     torch.cuda.set_device(gpuid)
 

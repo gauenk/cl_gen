@@ -89,26 +89,57 @@ def main():
     cfg = get_main_config()
     cfg.gpuid = 0
     cfg.batch_size = 10
-    cfg.N = 8
+    cfg.N = 2
     cfg.num_workers = 0
     cfg.dynamic.frames = cfg.N
-    cfg.noise_params['g']['stddev'] = 200.
+
+    # -=-=-=-=-=-=-=-=-=-=-=-
+    #   gaussian noise 
+    # -=-=-=-=-=-=-=-=-=-=-=-
+
+    # cfg.noise_params.ntype = 'g'
+    # noise_type = 'g'
+    # cfg.noise_params[noise_type]['stddev'] = 75.
+    # noise_str = "{}".format(noise_type,noise_params['stddev'])
+    # noise_level = int(cfg.noise_params[noise_type]['stddev'])
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #   heteroskedastic noise
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    cfg.noise_params.ntype = 'hg'
+    noise_type = 'hg'
+    cfg.noise_params[noise_type]['read'] = 25.
+    cfg.noise_params[noise_type]['shot'] = 0.
+    noise_params = cfg.noise_params[noise_type]
+    noise_str = "{}-{}-{}".format(noise_type,int(noise_params['read']),int(noise_params['shot']))
+    noise_level = int(cfg.noise_params[noise_type]['read'])
+
+    # -=-=-=-=-=-=-=-
+    #    dynamics
+    # -=-=-=-=-=-=-=-
     cfg.dataset.load_residual = True
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.ppf = 2
+    cfg.dynamic.ppf = 0
     cfg.dynamic.total_pixels = cfg.N*cfg.dynamic.ppf
     torch.cuda.set_device(cfg.gpuid)
+
+    # -=-=-=-=-=-=-
+    #   dataset
+    # -=-=-=-=-=-=-
     data,loader = load_dataset(cfg,'dynamic')
     train_iter = iter(loader.tr)
 
-    K = 30
-    patchsize = 15
-    noise_level = int(cfg.noise_params['g']['stddev'])
-    sim_mode = "burst"
-    # sim_str = "zc"
+    # -- sim params --
+    K = 15
+    patchsize = 31
+    db_level = "burst"
     search_method = "w"
+    # database_str = f"burstAll"
+    database_idx = 1
+    database_str = "burst{}".format(database_idx)
     
-    root = Path("output/n2sim/sim_search_analysis/k{}_ps{}_g{}_sim-{}-{}".format(K,patchsize,noise_level,sim_mode,search_method))
+    root = Path("output/n2sim/sim_search_analysis/k{}_ps{}_b{}_n{}_{}_db-{}_sim-{}-{}".format(K,patchsize,cfg.batch_size,cfg.N,noise_str,database_str,db_level,search_method))
     print(f"Writing to {root}")
     if not root.exists(): root.mkdir(parents=True)
 
@@ -121,11 +152,15 @@ def main():
 
     # -- run search --
     kindex = kindex_ds[0]
-    sim_outputs = compute_similar_bursts_analysis(cfg,burst,clean,K,
+    database = None
+    if database_str == f"burstAll": database = burst
+    else: database = burst[[database_idx]]
+    query = burst[[0]]
+    sim_outputs = compute_similar_bursts_analysis(cfg,query,database,clean,K,
                                                   patchsize=patchsize,
                                                   shuffle_k=False,kindex=kindex,
                                                   only_middle=cfg.sim_only_middle,
-                                                  sim_mode=sim_mode,
+                                                  db_level=db_level,
                                                   search_method=search_method,
                                                   noise_level=noise_level/255.)
     sims,csims,wsims,b_dist,b_indx = sim_outputs
@@ -147,7 +182,8 @@ def main():
     mean_along_k = reduce(b_dist,'n b k1 h w -> k1','mean')
     std_along_k = torch.std(b_dist,dim=(0,1,3,4))
     fig,ax = plt.subplots(figsize=(8,8))
-    ax.errorbar(np.arange(K),mean_along_k,yerr=std_along_k)
+    R = mean_along_k.shape[0]
+    ax.errorbar(np.arange(R),mean_along_k,yerr=std_along_k)
     plt.savefig(root / "distance_stats.png",dpi=300)
     plt.clf()
     plt.close("all")
@@ -158,10 +194,11 @@ def main():
     #         Statistics about middle pixel differences
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    R = csims.shape[2]
 
     # -- stats about middle pixel diff --
     print("About to make the boxplot.... Takes some time...")
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - csims[0]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - csims[0]
     pix_diff = rearrange(pix_diff,'b k c h w -> k (b c h w)')
     fig,ax = plt.subplots(figsize=(8,8))
     ax.boxplot([pix_diff[k] for k in range(pix_diff.shape[0])])
@@ -171,7 +208,7 @@ def main():
     print("Completed boxplot.")
 
     # -- plot percent of samples in the tail --
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - csims[0]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - csims[0]
     pix_diff = rearrange(pix_diff,'b k c h w -> k (b c h w)')
     std = torch.std(pix_diff,dim=1)
     tail_info = compute_percent_std(pix_diff,score=1.65)
@@ -186,10 +223,28 @@ def main():
     #         Statistics about residual pixel differences
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    if database_str != "burstAll":
+        indices = rearrange(b_indx[0],'bs k h w -> bs k (h w)').numpy()
+        B,K,P = indices.shape
+        top1_acc = []
+        for b in range(B):
+            firstk = indices[b,0]
+            top1_acc_b = np.sum(np.isclose(firstk, np.arange(P))) / float(P) * 100
+            print(firstk,K,P,np.min(firstk),np.max(firstk),top1_acc_b)
+            top1_acc.append(top1_acc_b)
+        m,s = np.mean(top1_acc),np.std(top1_acc)
+        print("Accuracy: %2.3f +/- %2.3f" % (m,s))
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    #         Statistics about residual pixel differences
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    R = sims.shape[2]
 
     # -- stats about residual pixel diff --
     plot_K = K
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - sims[0,:,1:]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - sims[0,:,:]
     pix_diff = rearrange(pix_diff,'b k c h w -> k (b c h w)')
     fig,ax = plt.subplots(figsize=(8,8))
     ax.boxplot([pix_diff[k] for k in range(pix_diff.shape[0])])
@@ -199,7 +254,7 @@ def main():
     print("Completed boxplot.")
 
     # -- plot percent of samples in the tail --
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - sims[0,:,1:]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - sims[0,:,:]
     pix_diff = rearrange(pix_diff,'b k c h w -> k (b c h w)')
     std = torch.std(pix_diff,dim=1)
     tail_info = compute_percent_std(pix_diff,score=1.65)
@@ -246,9 +301,10 @@ def main():
     #      stats about middle pixel diff for Nonsmooth Patches 
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    R = csims.shape[2]
 
     # -- compute pixel difference --
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - csims[0]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - csims[0]
     pix_diff = pix_diff
 
     # -- get nonsmooth regions --
@@ -273,7 +329,7 @@ def main():
     mean_along_k = torch.mean(nonsmooth_pix,dim=(0,2,3))
     std_along_k = torch.std(nonsmooth_pix,dim=(0,2,3))
     fig,ax = plt.subplots(figsize=(8,8))
-    ax.errorbar(np.arange(K),mean_along_k,yerr=std_along_k)
+    ax.errorbar(np.arange(R),mean_along_k,yerr=std_along_k)
     plt.savefig(root / "nonsmooth_mid_pix_stats.png",dpi=300)
     plt.clf()
     plt.close("all")
@@ -285,9 +341,10 @@ def main():
     #      stats about middle pixel diff for Smooth Patches 
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+    R = csims.shape[2]
 
     # -- compute pixel difference --
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K,1,1,1) - csims[0]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - csims[0]
     pix_diff = pix_diff
 
     # -- get smooth regions --
@@ -311,8 +368,9 @@ def main():
 
     mean_along_k = torch.mean(smooth_pix,dim=(0,2,3))
     std_along_k = torch.std(smooth_pix,dim=(0,2,3))
+    R = mean_along_k.shape[0]
     fig,ax = plt.subplots(figsize=(8,8))
-    ax.errorbar(np.arange(K),mean_along_k,yerr=std_along_k)
+    ax.errorbar(np.arange(R),mean_along_k,yerr=std_along_k)
     plt.savefig(root / "smooth_mid_pix_stats.png",dpi=300)
     plt.clf()
     plt.close("all")
@@ -322,12 +380,12 @@ def main():
     #                stats about residuals
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-
-    pix_diff = raw_img.unsqueeze(1).repeat(1,K+1,1,1,1) - sims[0]
+    R = sims.shape[2]
+    pix_diff = raw_img.unsqueeze(1).repeat(1,R,1,1,1) - sims[0]
     mean_along_k = torch.mean(pix_diff,dim=(0,2,3,4))
     std_along_k = torch.std(pix_diff,dim=(0,2,3,4))
     fig,ax = plt.subplots(figsize=(8,8))
-    ax.errorbar(np.arange(K+1),mean_along_k,yerr=std_along_k)
+    ax.errorbar(np.arange(R),mean_along_k,yerr=std_along_k)
     plt.savefig(root / "sim_residuals_stats.png",dpi=300)
     plt.clf()
     plt.close("all")

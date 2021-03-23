@@ -71,7 +71,7 @@ def load_burst_kpn_model(cfg):
     # -- load denoising model --
     denoiser_info = edict()
     denoiser_info.model,_ = load_model_kpn_cascade(cfg)
-    # denoiser_info.model,_ = load_model_kpn(cfg)
+    # denoiser_info.model,_ = load_model_kpn(cfg,cfg.N)
     denoiser_info.optim = load_optimizer(cfg,denoiser_info.model)
     denoiser_info.S = None
 
@@ -80,7 +80,7 @@ def load_burst_kpn_model(cfg):
     unet_info.model = load_model_unet(cfg).to(cfg.device)
     # unet_info.model = load_model_unet(cfg).to(cfg.device)
     # unet_info.model = init_net(unet_info.model)
-    # unet_info.model,_ = load_model_kpn(cfg)
+    # unet_info.model,_ = load_model_kpn(cfg,cfg.N)
     unet_info.optim = load_optimizer(cfg,unet_info.model)
     unet_info.S = None
 
@@ -126,7 +126,7 @@ def load_burst_stn_model(cfg):
 
     # -- load denoising model --
     denoiser_info = edict()
-    denoiser_info.model,_ = load_model_kpn(cfg)
+    denoiser_info.model,_ = load_model_kpn(cfg,cfg.N)
     denoiser_info.optim = load_optimizer(cfg,denoiser_info.model)
     denoiser_info.S = None
 
@@ -155,7 +155,7 @@ def load_burst_stn_model(cfg):
 
 def load_unet_model(cfg):
 
-    unet = UNet_n2n( cfg.input_N,3,3*(cfg.input_N-1) )
+    unet = UNet_n2n( cfg.N,3,3*cfg.N )
     cfg.color_cat = False
 
     # model = UNet_Git(3*cfg.input_N,3)
@@ -232,19 +232,19 @@ def load_model_stn(cfg):
 
 def load_model_kpn_cascade(cfg):
     if not cfg.kpn_cascade:
-        return load_model_kpn(cfg)
+        return load_model_kpn(cfg,cfg.N)
     else:
         cascade = []
         for i in range(cfg.kpn_cascade_num):
             not_final = i != (cfg.kpn_cascade_num-1)
             cfg.kpn_cascade_output = not_final
-            kpn,loss_fxn = load_model_kpn(cfg)
+            kpn,loss_fxn = load_model_kpn(cfg,cfg.kpn_num_frames)
             cascade.append(kpn)
         cascade = nn.Sequential(*cascade)
         return cascade,loss_fxn
 
-def load_model_kpn(cfg):
-    return KPN_model(color=True,burst_length=cfg.kpn_num_frames,blind_est=True,kernel_size=[cfg.kpn_frame_size],cascade=cfg.kpn_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+def load_model_kpn(cfg,num_frames):
+    return KPN_model(color=True,burst_length=num_frames,blind_est=True,kernel_size=[cfg.kpn_frame_size],cascade=cfg.kpn_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
 
 def load_attn_model(cfg,unet):
     simclr = None #load_model_simclr(cfg)

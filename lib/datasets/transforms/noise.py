@@ -68,13 +68,15 @@ class AddLowLightNoiseBW(object):
         
         we assume C = 3 and then we convert it to BW. 
         """
+        # if pic.max() <= 1: pic *= 255.
         pix_max = 2**self.nbits-1
         pic_bw = tvF.rgb_to_grayscale(pic,1)
         ll_pic = torch.poisson(self.alpha*pic_bw,generator=self.seed)
-        ll_pic += self.read_noise*torch.randn(ll_pic.shape)
+        # ll_pic += self.read_noise*torch.randn(ll_pic.shape)
         if pic.shape[-3] == 3: ll_pic = self._add_color_channel(ll_pic)
         ll_pic = torch.round(ll_pic)
-        ll_pic = torch.clamp(ll_pic,0, pix_max)
+        # print("ll",ll_pic.min().item(),ll_pic.max().item())
+        ll_pic = torch.clamp(ll_pic, 0, pix_max)
         ll_pic /= self.alpha
         return ll_pic
 

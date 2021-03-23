@@ -105,7 +105,8 @@ def get_args():
     defaults = '{"g":{"mean":0.0,"stddev":10},\
     "ll":{"alpha":4,"read_noise":0.25},\
     "msg":{"each_image":0,"stddev_rand":[0,50]},\
-    "hg":{"mean":0.0,"read":25.0,"shot":5.0}\
+    "hg":{"mean":0.0,"read":25.0,"shot":5.0},\
+    "qis":{"alpha":4.0,"readout":65.0,"nbits":3}\
     }'
     parser.add_argument("--noise-params", type=jloads,
                         default=defaults, help=msg)

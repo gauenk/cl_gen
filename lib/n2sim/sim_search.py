@@ -117,23 +117,19 @@ async def compute_kindex_rands_async(cfg,burst,K):
 async def compute_similar_bursts_async(cfg,burst,K,patchsize=3,shuffle_k=True,kindex=None):
     compute_similar_bursts(cfg,burst,K,patchsize=3,shuffle_k=shuffle_k,kindex=kindex)
 
-def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2"):
-    """
-    params: burst shape: [N, B, C, H, W]
-    """
-    # -- error checking --
-    if not(search_method in ["l2","w"]):
-        raise ValueError(f"Uknown search method [{search_method}]")
 
-    # -- init shapes --
+def tile_patches(burst,patchsize,search_method):
+    """
+    prepares a sequence of patches centered at each pixel location
+    """
+    # -- init --
+    N = burst.shape[0]
     ps = patchsize
-    N,B,C,H,W = burst.shape
 
     # -- tile patches --
     unfold = nn.Unfold(patchsize,1,0,1)
     burst_pad = rearrange(burst,'n b c h w -> (b n) c h w')
     burst_pad = F.pad(burst_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
-    # print("pad",burst_pad.shape)
     patches = unfold(burst_pad)
 
     # -- remove center pixels from patches for search --
@@ -149,7 +145,29 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
     # -- contiguous for faiss --
     patches = patches.contiguous()
     patches_zc = patches_zc.contiguous()
-    B,N,R,ND = patches.shape
+    return patches,patches_zc
+    
+def compute_similar_bursts(cfg,burst_query,burst_database,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2",db_level="burst"):
+    """
+    params: burst shape: [N, B, C, H, W]
+    """
+    # -- error checking --
+    if not(search_method in ["l2","w"]):
+        raise ValueError(f"Uknown search method [{search_method}]")
+    if not (db_level in ["batch","burst","frame"]):
+        raise ValueError(f"Invalid Reference Database [{db_level}]")
+
+    # -- init shapes --
+    ps = patchsize
+    N,B,C,H,W = burst_query.shape
+    Nd,Bd,Cd,Hd,Wd = burst_database.shape
+
+    # -- tile patches --
+    q_patches,q_patches_zc = tile_patches(burst_query,patchsize,search_method)
+    B,N,R,ND = q_patches.shape
+
+    db_patches,db_patches_zc = tile_patches(burst_database,patchsize,search_method)
+    Bd,Nd,Rd,NDd = db_patches.shape
 
     # -- faiss setup --
     res = faiss.StandardGpuResources()
@@ -157,18 +175,21 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
     faiss_cfg.useFloat16 = False
     faiss_cfg.device = cfg.gpuid
 
-    # -- search each batch separately --
-    # if shuffle_k and kindex is None: kindex = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
-    
+    # -- search across entire batch --
+    if db_level == "batch":
+        database = rearrange(db_patches,'b n r l -> (b n r) l')
+        database_zc = rearrange(db_patches_zc,'b n r l -> (b n r) l')
+        cdatabase = rearrange(clean_patches,'b n r l -> (b n r) l')        
+        gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+        gpu_index.add(database_zc)
+
     sim_images = []
     for b in range(B):
 
-        # -- setup faiss index --
-        database = rearrange(patches[b],'n r l -> (n r) l')
-        database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
-        if search_method == "l2":
-            # database = patches[b,n]
-            # database_zc = patches_zc[b,n]
+        # -- setup database --
+        if db_level == "burst":
+            database = rearrange(db_patches[b],'n r l -> (n r) l')
+            database_zc = rearrange(db_patches_zc[b],'n r l -> (n r) l')
             gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
             gpu_index.add(database_zc)
 
@@ -176,12 +197,23 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
         for n in range(N):
             if only_middle and n != N//2: continue
 
+            # -- setup database --
+            if db_level == "frame":
+                database = db_patches[b,n]
+                database_zc = db_patches_zc[b,n]
+                gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
+                gpu_index.add(database_zc)
+
             # -- run faiss search --
-            query = patches_zc[b,n].contiguous()
+            query = q_patches_zc[b,n].contiguous()
             if search_method == "l2":
-                D, I = gpu_index.search(query,K+1)
                 # -- locations of smallest K patches; no identity so no first column --
-                S,V = D[:,1:], I[:,1:]
+                # D, I = gpu_index.search(query,K+1)
+                # S,V = D[:,1:], I[:,1:]
+
+                # -- locations of smallest K patches; no identity so no first column --
+                D, I = gpu_index.search(query,K)
+                S,V = D,I
             elif search_method == "w":
                 search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
@@ -198,25 +230,18 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
             sim_image = rearrange(sim_pixels,shape_str,h=H)
 
             # -- concat with original image --
-            image_flat = rearrange(burst[n,b],'c h w -> 1 (c h w)')
-            if search_method != "w":
-                sim_image = torch.cat([image_flat,sim_image],dim=0)
+            image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
+            # if search_method != "w":
+            #     sim_image = torch.cat([image_flat,sim_image],dim=0)
 
             # -- shuffle across each k --
             R = sim_image.shape[0]
             if shuffle_k:
                 if kindex is None:
-                    # kindex_sim = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
                     kindex_sim = torch.randint(R,(R,C*H*W,)).long().to(cfg.gpuid)
-                else:
-                    kindex_sim = kindex[b,n]
+                else: kindex_sim = kindex[b,n][:R] % R
                 sim_image.scatter_(0,kindex_sim,sim_image)
                 
-                # if len(kindex.shape) <= 2:
-                #     sim_image.scatter_(0,kindex,sim_image)
-                # else:
-                #     sim_image.scatter_(0,kindex[b,n],sim_image)
-
             # -- add to frames --
             if pick_2:
                 rand2 = torch.randperm(R)[:2]
@@ -232,20 +257,24 @@ def compute_similar_bursts(cfg,burst,K,noise_level,patchsize=3,shuffle_k=True,ki
         sim_frames = torch.cat(sim_frames,dim=0)
         sim_images.append(sim_frames)
 
-        # -- randomly shuffle pixels across k images --
-        # sim_images[:,:] = sim_images[:,shuffle]
-
     # -- create batch dimension --
     sim_images = torch.stack(sim_images,dim=1)
 
     # -- visually inspect --
     vis = False
     if vis:
-        print(burst.shape,sim_images.shape)
-        sims = rearrange(sim_images[:,0],'n k c h w -> (n k) c h w')
-        tv_utils.save_image(burst[:,0],'sim_search_tgt.png',nrow=N,normalize=True)
-        tv_utils.save_image(sims,'sim_search_similar_images.png',nrow=K,normalize=True)
+        # print(burst_query.shape,sim_images.shape)
+        N,B = burst_query.shape[:2]
+        res = burst_database - sim_images[:,:,0]
+        res = rearrange(res,'n b c h w -> (n b) c h w')
+        bursts = rearrange(burst_query,'n b c h w -> (n b) c h w')
+        sims = rearrange(sim_images,'n b k c h w -> (n k b) c h w')
+        tv_utils.save_image(bursts,'sim_search_tgt.png',nrow=N*B,normalize=True)
+        tv_utils.save_image(sims,'sim_search_similar_images.png',nrow=N*B,normalize=True)
+        tv_utils.save_image(res,'sim_search_res.png',nrow=N*B,normalize=True)
+        print("Saved example images!")
         # tv_utils.save_image(sim_images[0,0],'sim_search_similar_locations.png')
+
 
 
     # -- append to original images --
@@ -395,74 +424,41 @@ class kIndexPermLMDB():
 #
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         
-
-def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=False,kindex=None,pick_2=False,only_middle=True,sim_mode="burst",db_mod=None,noise_level=25./255,search_method="l2"):
+def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_database,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2",db_level="burst"):
     """
     params: burst shape: [N, B, C, H, W]
     """
-    # -- error checking
+    # -- error checking --
     if not(search_method in ["l2","w"]):
         raise ValueError(f"Uknown search method [{search_method}]")
-    if not (sim_mode in ["batch","burst","frame"]):
-        raise ValueError(f"Invalid Reference Database [{sim_mode}]")
+    if not (db_level in ["batch","burst","frame"]):
+        raise ValueError(f"Invalid Reference Database [{db_level}]")
 
     # -- init shapes --
     ps = patchsize
-    N,B,C,H,W = burst.shape
+    N,B,C,H,W = burst_query.shape
+    Nd,Bd,Cd,Hd,Wd = burst_database.shape
 
     # -- tile patches --
-    unfold = nn.Unfold(patchsize,1,0,1)
-    burst_pad = rearrange(burst,'n b c h w -> (b n) c h w')
-    burst_pad = F.pad(burst_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
-    # print("pad",burst_pad.shape)
-    patches = unfold(burst_pad)
+    q_patches,q_patches_zc = tile_patches(burst_query,patchsize,search_method)
+    B,N,R,ND = q_patches.shape
 
-    # -- tile clean patches --
-    clean = rearrange(clean,'n b c h w -> (b n) c h w')
-    clean_pad = F.pad(clean,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
-    clean_patches = unfold(clean_pad)
-    shape_str = '(b n) (c ps1 ps2) r -> b n r (ps1 ps2 c)'
-    clean_patches = rearrange(clean_patches,shape_str,b=B,ps1=ps,ps2=ps)
+    db_patches,db_patches_zc = tile_patches(burst_database,patchsize,search_method)
+    Bd,Nd,Rd,NDd = db_patches.shape
 
-    # -- remove center pixels from patches for search --
-    patches = rearrange(patches,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
-    if search_method == "l2":
-        patches_zc = patches.clone()
-        patches_zc[...,ps//2,ps//2,:] = 0
-    else:
-        patches_zc = patches
-    patches = rearrange(patches,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
-    patches_zc = rearrange(patches_zc,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
-
-    # -- contiguous for faiss --
-    patches = patches.contiguous()
-    patches_zc = patches_zc.contiguous()
-    B,N,R,ND = patches.shape
+    clean_patches,clean_patches_zc = tile_patches(clean_database,patchsize,search_method)
+    Bd,Nd,Rd,NDd = clean_patches.shape
 
     # -- faiss setup --
     res = faiss.StandardGpuResources()
     faiss_cfg = faiss.GpuIndexFlatConfig()
     faiss_cfg.useFloat16 = False
     faiss_cfg.device = cfg.gpuid
-    # metric=faiss_mod.METRIC_L2
-    metric=faiss.METRIC_L2
-
-    # -- search each batch separately --
-    # if shuffle_k and kindex is None: kindex = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
-    
-    # -- create noise level vector for modified Wasserstein search --
-    if sim_mode == "batch":
-        noise_col = torch.ones(B*N*H*W) * noise_level
-    elif sim_mode == "burst":
-        noise_col = torch.ones(N*H*W) * noise_level
-    elif sim_mode == "frame":
-        noise_col = torch.ones(H*W) * noise_level
-    query_noise_col = torch.ones(H*W) * noise_level
 
     # -- search across entire batch --
-    if sim_mode == "batch":
-        database = rearrange(patches,'b n r l -> (b n r) l')
-        database_zc = rearrange(patches_zc,'b n r l -> (b n r) l')
+    if db_level == "batch":
+        database = rearrange(db_patches,'b n r l -> (b n r) l')
+        database_zc = rearrange(db_patches_zc,'b n r l -> (b n r) l')
         cdatabase = rearrange(clean_patches,'b n r l -> (b n r) l')        
         gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
         gpu_index.add(database_zc)
@@ -474,10 +470,10 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
     batch_indices = []
     for b in range(B):
 
-        # -- search across each burst --
-        if sim_mode == "burst":
-            database = rearrange(patches[b],'n r l -> (n r) l')
-            database_zc = rearrange(patches_zc[b],'n r l -> (n r) l')
+        # -- setup database --
+        if db_level == "burst":
+            database = rearrange(db_patches[b],'n r l -> (n r) l')
+            database_zc = rearrange(db_patches_zc[b],'n r l -> (n r) l')
             cdatabase = rearrange(clean_patches[b],'n r l -> (n r) l')
             gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
             gpu_index.add(database_zc)
@@ -489,20 +485,21 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
         frame_indices = []
         for n in range(N):
             if only_middle and n != N//2: continue
-        
-            # -- search across each frame --
-            if sim_mode == "frame":
-                database = patches[b,n]
-                database_zc = patches_zc[b,n]
+
+            # -- setup database --
+            if db_level == "frame":
+                database = db_patches[b,n]
+                database_zc = db_patches_zc[b,n]
                 cdatabase = clean_patches[b,n]
                 gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
                 gpu_index.add(database_zc)
 
             # -- run faiss search --
-            query = patches_zc[b,n].contiguous()
+            query = q_patches_zc[b,n].contiguous()
             if search_method == "l2":
-                D, I = gpu_index.search(query,K+1)
-                S,V = D[:,1:], I[:,1:] # locations of smallest K patches; no identity so no first column
+                D, I = gpu_index.search(query,K)
+                # -- locations of smallest K patches; no identity so no first column --
+                S,V = D[:,:], I[:,:]
             elif search_method == "w":
                 search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
@@ -530,7 +527,7 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
             sim_image = rearrange(sim_pixels,shape_str,h=H)
 
             # -- concat with original image --
-            image_flat = rearrange(burst[n,b],'c h w -> 1 (c h w)')
+            image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
             if search_method != "w":
                 sim_image = torch.cat([image_flat,sim_image],dim=0)
 
@@ -538,15 +535,14 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
             R = sim_image.shape[0]
             if shuffle_k:
                 if kindex is None:
-                    # kindex_sim = torch.stack([torch.randperm(K+1) for _ in range(C*H*W)]).t().long().to(cfg.gpuid)
                     kindex_sim = torch.randint(R,(R,C*H*W,)).long().to(cfg.gpuid)
                 else:
                     kindex_sim = kindex[b,n]
                 sim_image.scatter_(0,kindex_sim,sim_image)
-
+                
             # -- add to frames --
             if pick_2:
-                rand2 = torch.randperm(K+1)[:2]
+                rand2 = torch.randperm(R)[:2]
                 sim_image = sim_image[rand2]
                 
             shape_str = 'k (c h w) -> 1 k c h w'
@@ -554,9 +550,7 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
 
             sim_frames.append(sim_image)
             csim_frames.append(csim_image)
-
-            # del query
-
+                
         # -- extra info --
         shape_str = 'n (h w) k1 -> n k1 h w'
         frame_distances = rearrange(torch.stack(frame_distances,dim=0),shape_str,h=H)
@@ -571,10 +565,6 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
         # -- concat on NumFrames dimension --
         sim_frames = torch.cat(sim_frames,dim=0)
         sim_images.append(sim_frames)
-        # del gpu_index
-
-        # -- randomly shuffle pixels across k images --
-        # sim_images[:,:] = sim_images[:,shuffle]
 
     # -- create batch dimension --
     batch_distances = torch.stack(batch_distances,dim=1)    
@@ -585,12 +575,12 @@ def compute_similar_bursts_analysis(cfg,burst,clean,K,patchsize=3,shuffle_k=Fals
     # -- visually inspect --
     vis = False
     if vis:
-        print(burst.shape,sim_images.shape)
         sims = rearrange(sim_images[:,0],'n k c h w -> (n k) c h w')
-        tv_utils.save_image(burst[:,0],'sim_search_tgt.png',nrow=N,normalize=True)
+        tv_utils.save_image(burst_query[:,0],'sim_search_tgt.png',nrow=N,normalize=True)
         tv_utils.save_image(sims,'sim_search_similar_images.png',nrow=K,normalize=True)
-        # tv_utils.save_image(sim_images[0,0],'sim_search_similar_locations.png')
+        print("Saved example images!")
 
     return sim_images,csim_images,wsim_images,batch_distances,batch_indices
+
 
 
