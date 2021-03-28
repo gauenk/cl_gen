@@ -37,8 +37,9 @@ def choose_noise_transform(noise_info):
     elif ntype == "ll":
         print("[parse_noise_info]: Check order of szm and noise fxn")
         return get_ll_noise(noise_params)
+    elif ntype == "pn":
+        return get_pn_noise(noise_params)
     elif ntype == "qis":
-        print("[parse_noise_info]: Check order of szm and noise fxn")
         return get_qis_noise(noise_params)
     elif ntype == "msg":
         return get_msg_noise(noise_params)
@@ -69,10 +70,17 @@ def get_ll_noise(params):
     low_light_noise = LowLight(params['alpha'])
     return low_light_noise
 
+def get_pn_noise(params):
+    alpha,std = params['alpha'],params['std']
+    if std > 1: std /= 255. # rescale is necessary
+    pn_noise = AddLowLightNoiseBW(alpha,std,-1,False)
+    return pn_noise
+    
 def get_qis_noise(params):
-    alpha,readout,nbits = params['alpha'],params['readout'],params['nbits']
+    alpha,readout = params['alpha'],params['readout']
+    nbits,use_adc = params['nbits'],params['use_adc']
     if readout > 1: readout /= 255. # rescale is necessary
-    qis_noise = AddLowLightNoiseBW(alpha,readout,nbits)
+    qis_noise = AddLowLightNoiseBW(alpha,readout,nbits,use_adc)
     return qis_noise
 
 def get_msg_noise(params):

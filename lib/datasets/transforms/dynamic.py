@@ -120,7 +120,7 @@ class GlobalCameraMotionTransform():
         
         # -- create noisy frames -- 
         create_frames = partial(self._crop_image,pic,tl_list,crop_frame_size,out_frame_size)
-        if self.nframes <= 30:
+        if self.nframes <= 300:
             pics = []
             res = []
             for i in range(self.nframes):

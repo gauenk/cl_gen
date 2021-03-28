@@ -3,9 +3,18 @@
 import numpy as np
 import pickle,sys,os,yaml,io
 from easydict import EasyDict as edict
+import torch
 
 # this is the only allowed project import in this file.
 import settings
+
+
+def adc_forward(cfg,image):
+    params = cfg.noise_params['qis']
+    pix_max = 2**params['nbits'] - 1
+    image = torch.round(image)
+    image = torch.clamp(image, 0, pix_max)
+    return image
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)

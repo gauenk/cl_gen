@@ -39,7 +39,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -64,7 +64,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
-    cfg.n2n = False
+    cfg.n2n = True
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
@@ -78,7 +78,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.kpn_1f_frame_size = 2
     cfg.kpn_frame_size = 5
 
-    cfg.kpn_cascade = False
+    cfg.kpn_cascade = True
     cfg.kpn_cascade_output = False
     cfg.kpn_num_frames = 3
     cfg.kpn_cascade_num = 3
@@ -120,7 +120,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
     cfg.batch_size = 4
-    cfg.init_lr = 5e-4
+    cfg.init_lr = 1e-4 # used to be 5e-4, 03/27/2020
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
@@ -162,6 +162,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     bs_str = "b{}".format(cfg.batch_size)
     align_str = "yesAlignNet" if cfg.burst_use_alignment else "noAlignNet"
     unet_str = "yesUnet" if cfg.burst_use_unet else "noUnet"
+    if cfg.burst_use_unet_only: unet_str += "Only"
     kpn_cascade_str = "cascade{}".format(cfg.kpn_cascade_num) if cfg.kpn_cascade else "noCascade"
     kpnba_str = "kpnBurstAlpha{}".format(int(cfg.kpn_burst_alpha*1000))
     frame_str = "n{}".format(cfg.N)

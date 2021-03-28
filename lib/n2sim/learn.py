@@ -29,6 +29,7 @@ import torchvision.transforms.functional as tvF
 import settings
 from pyutils.timer import Timer
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from pyutils.vst import anscombe
 from datasets.transforms import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
@@ -40,6 +41,11 @@ from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 from .sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB
 from .debug import print_tensor_stats
+
+def print_tensor_stats(prefix,tensor):
+    stats_fmt = (tensor.min().item(),tensor.max().item(),tensor.mean().item())
+    stats_str = "%2.2e,%2.2e,%2.2e" % stats_fmt
+    print(prefix,stats_str)
 
 async def say_after(delay, what):
     await asyncio.sleep(delay)
@@ -248,6 +254,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         raw_zm_img = szm(raw_img.cuda(non_blocking=True))
         burst_og = burst.clone()
         mid_img_og = burst[N//2]
+        # anscombe.test(cfg,burst_og)
 
         # -- shuffle over Simulated Samples --
         k_ins,k_outs = create_k_grid(sim_burst,shuffle=True)
@@ -335,7 +342,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             #
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     
-            losses = denoiseLossMSE(denoised,denoised_ave,gt_img,cfg.global_step)
+            losses = [F.mse_loss(denoised_ave,gt_img)]
+            # losses = denoiseLossMSE(denoised,denoised_ave,gt_img,cfg.global_step)
             # losses = [ one, one ]
             # ave_loss,burst_loss = [loss.item() for loss in losses]
             rec_mse = np.sum(losses)
@@ -417,7 +425,9 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             # -- compute mse for fun --
             B = raw_img.shape[0]            
             raw_img = raw_img.cuda(non_blocking=True)
+            print_tensor_stats("raw",raw_img)
             raw_img = get_nmlz_img(cfg,raw_img)
+            print_tensor_stats("nmlz_raw",raw_img)
 
             # -- psnr for [average of aligned frames] --
             mse_loss = F.mse_loss(raw_img,aligned_ave,reduction='none').reshape(B,-1)
@@ -426,12 +436,19 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             psnr_aligned_std = np.std(mse_to_psnr(mse_loss))
 
             # -- psnr for [average of input, misaligned frames] --
+            print_tensor_stats("burst_og",burst_og)
             mis_ave = torch.mean(burst_og,dim=0)
+            print_tensor_stats("mis_ave",mis_ave)
             if noise_type == "qis": mis_ave = quantize_img(cfg,mis_ave)
+            print_tensor_stats("q_mis_ave",mis_ave)
+            print_tensor_stats("q_raw_img",raw_img)
             mse_loss = F.mse_loss(raw_img,mis_ave,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_misaligned_ave = np.mean(mse_to_psnr(mse_loss))
             psnr_misaligned_std = np.std(mse_to_psnr(mse_loss))
+
+            # tv_utils.save_image(raw_img,"raw.png",nrow=1,normalize=True,range=(-0.5,1.25))
+            # tv_utils.save_image(mis_ave,"mis.png",nrow=1,normalize=True,range=(-0.5,1.25))
 
             # -- psnr for [bm3d] --
             bm3d_nb_psnrs = []

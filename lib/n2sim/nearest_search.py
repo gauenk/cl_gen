@@ -50,7 +50,6 @@ def search_index_pytorch(index, x, k, D=None, I=None):
     torch.cuda.synchronize()
     return D, I
 
-
 def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
                              metric=faiss.METRIC_L2):
     assert xb.device == xq.device

@@ -41,7 +41,13 @@ def get_rebel2021_dataset(cfg,mode):
         data = edict()
         data.tr = Rebel2021(root)
         data.val,data.te = data.tr,data.tr
-    else: raise ValueError(f"Unknown VOC mode {mode}")
+    elif mode == 'dynamic':
+        dynamic_info = edict()
+        dynamic_info.num_frames = cfg.N
+        data = edict()
+        data.tr = Rebel2021Dynamic(root)
+        data.val,data.te = data.tr,data.tr
+    else: raise ValueError(f"Unknown Rebel2021 mode {mode}")
     loader = get_loader(cfg,data,batch_size,mode)
     return data,loader
 
@@ -56,12 +62,12 @@ class Rebel2021():
         return filenames
 
 
-    def __init__(self,root_path):
+    def __init__(self,root_path,bw=True):
 
         self.root_path = Path(root_path)
         self.image_path = self.root_path / Path("images128")
         self.spoof = torch.Tensor([0.])
-        self.bw = True
+        self.bw = bw
 
 
         # -- load filenames --
@@ -88,6 +94,26 @@ class Rebel2021():
         spoof_clean = noisy_image.clone()
         return noisy_image, spoof_res, spoof_clean, spoof_dir
 
+class DynamicRebel2021(Rebel2021):
+
+    def __init__( self, root_path, bw = True ):
+        super(DynamicRebel2021, self).__init__( root_path, bw = bw )
+        self.dynamic_info = dynamic_info
+        self.size = self.dynamic_info.frame_size
+        self.image_set = image_set
+
+    def __getitem__(self,index):
+
+        # -- create images --
+        noisy_image = Image.open( str(self.filenames[index]) )
+        if self.bw: noisy_image = noisy_image.convert("L")
+        noisy_image = np.array(noisy_image , dtype=np.float32)
+        if self.bw: noisy_image = np.repeat(noisy_image[...,None],3,-1)
+        spoof_res,spoof_dir = self.spoof,self.spoof
+        noisy_image = rearrange(noisy_image,'h w c -> c h w') / 255. - 0.5
+        noisy_image = torch.tensor( noisy_image ).unsqueeze(0)
+        spoof_clean = noisy_image.clone()
+        return noisy_image, spoof_res, spoof_clean, spoof_dir
 
 
 

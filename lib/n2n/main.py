@@ -37,8 +37,9 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg = get_cfg(args)
     cfg.use_ddp = False
     cfg.use_apex = False
+    cfg.global_steps = 0
     gpuid = rank % ngpus # set gpuid
-    gpuid = 1
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -58,10 +59,12 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.S = Sgrid[S_grid_idx]
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
+    # cfg.dataset.name = "rebel2021"
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 2
+    cfg.use_anscombe = False
 
     # -- noise 2 simulate parameters --
     cfg.sim_shuffleK = True
@@ -147,7 +150,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
     print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K} | Patchsize: {cfg.sim_patchsize}")
-
+    print(f"Ascombe Transform: {cfg.use_anscombe}")
     print("N: {} | Noise Level: {} | Noise Type: {}".format(cfg.N,noise_level_str,noise_type))
     print("PID: {}".format(os.getpid()))
     torch.cuda.set_device(gpuid)

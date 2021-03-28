@@ -19,6 +19,7 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 from pyutils.timer import Timer
+from numba_search import search_raw_array_numba
 
 # -- [local] image comparisons --
 from .nearest_search import search_raw_array_pytorch,search_mod_raw_array_pytorch
@@ -217,6 +218,10 @@ def compute_similar_bursts(cfg,burst_query,burst_database,K,noise_level,patchsiz
             elif search_method == "w":
                 search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
+                S,V = D,I
+            elif search_method == "numba":
+                search_args = [res,noise_level,database_zc,query,K]
+                D, I = search_raw_array_numba(*search_args)
                 S,V = D,I
             else: raise ValueError(f"Uknown search method [{search_method}]")
 
@@ -429,7 +434,7 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
     params: burst shape: [N, B, C, H, W]
     """
     # -- error checking --
-    if not(search_method in ["l2","w"]):
+    if not(search_method in ["l2","w","numba"]):
         raise ValueError(f"Uknown search method [{search_method}]")
     if not (db_level in ["batch","burst","frame"]):
         raise ValueError(f"Invalid Reference Database [{db_level}]")
@@ -503,6 +508,10 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
             elif search_method == "w":
                 search_args = [res,noise_level,database_zc,query,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
+                S,V = D,I
+            elif search_method == "numba":
+                search_args = [res,noise_level,database_zc,query,K]
+                D, I = search_raw_array_numba(*search_args)
                 S,V = D,I
             else: raise ValueError(f"Uknown search method [{search_method}]")
 
