@@ -76,9 +76,11 @@ class UNet(nn.Module):
 
 
 class UNet_n2n(nn.Module):
-    def __init__(self, n_channels, k_size = 3, o_channels=3, verbose = False):
+    def __init__(self, n_channels, k_size = 3, o_channels=3,
+                 use_final_relu = False, verbose = False):
         super(UNet_n2n, self).__init__()
         self.n_channels = n_channels
+        self.use_final_relu = use_final_relu
         self.verbose = False
 
         self.conv1 = DoubleConv(3*n_channels, 48, kernel_size=k_size, padding=2)
@@ -97,6 +99,7 @@ class UNet_n2n(nn.Module):
         self.out_conv = SingleConv(32,o_channels,kernel_size=3,
                                    padding=1,use_pool=False,use_relu=False)
 
+        self.final_relu = nn.ReLU(inplace=True)
         # self.end1 = SingleConv(32,32, 1, 3, 1)
         # self.end2 = SingleConv(32, 1, 0, 1, 1)
 
@@ -141,6 +144,9 @@ class UNet_n2n(nn.Module):
         self.vprint('u5',u5.shape)
         u6 = self.out_conv(u5)
         self.vprint('u6',u6.shape)
+
+        if self.use_final_relu:
+            u6 = self.final_relu(u6)
 
         return u6
 

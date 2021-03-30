@@ -137,7 +137,7 @@ def tile_patches(burst,patchsize,search_method):
     patches = rearrange(patches,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
     if search_method == "l2":
         patches_zc = patches.clone()
-        patches_zc[...,ps//2,ps//2,:] = 0
+        # patches_zc[...,ps//2,ps//2,:] = 0
     else:
         patches_zc = patches
     patches = rearrange(patches,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
@@ -235,7 +235,7 @@ def compute_similar_bursts(cfg,burst_query,burst_database,K,noise_level,patchsiz
             sim_image = rearrange(sim_pixels,shape_str,h=H)
 
             # -- concat with original image --
-            image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
+            # image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
             # if search_method != "w":
             #     sim_image = torch.cat([image_flat,sim_image],dim=0)
 
@@ -429,6 +429,15 @@ class kIndexPermLMDB():
 #
 # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
         
+def convert_edict(pix_data):
+    if not isinstance(pix_data,edict):
+        tmp = pix_data
+        pix_data = edict()
+        pix_data.pix = tmp
+        pix_data.ftr = tmp
+        pix_data.shape = tmp.shape
+    return pix_data
+
 def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_database,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2",db_level="burst"):
     """
     params: burst shape: [N, B, C, H, W]
@@ -438,6 +447,11 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
         raise ValueError(f"Uknown search method [{search_method}]")
     if not (db_level in ["batch","burst","frame"]):
         raise ValueError(f"Invalid Reference Database [{db_level}]")
+
+    # -- enable pixels and features --
+    burst_query = convert_edict(burst_query)
+    burst_database = convert_edict(burst_database)
+    clean_database = convert_edict(clean_database)
 
     # -- init shapes --
     ps = patchsize
@@ -536,9 +550,9 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
             sim_image = rearrange(sim_pixels,shape_str,h=H)
 
             # -- concat with original image --
-            image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
-            if search_method != "w":
-                sim_image = torch.cat([image_flat,sim_image],dim=0)
+            # image_flat = rearrange(burst_query[n,b],'c h w -> 1 (c h w)')
+            # if search_method != "w":
+            #     sim_image = torch.cat([image_flat,sim_image],dim=0)
 
             # -- shuffle across each k --
             R = sim_image.shape[0]

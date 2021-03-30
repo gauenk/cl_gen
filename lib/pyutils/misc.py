@@ -4,6 +4,7 @@ import numpy as np
 import pickle,sys,os,yaml,io
 from easydict import EasyDict as edict
 import torch
+import torch.nn.functional as F
 
 # this is the only allowed project import in this file.
 import settings
@@ -32,6 +33,13 @@ def normalize_image_to_zero_one(img):
 def add_noise(noise,pic):
     noisy_pic = pic + noise
     return noisy_pic
+
+def images_to_psnrs(img1,img2):
+    B = img1.shape[0]
+    mse = F.mse_loss(img1,img2,reduction='none').reshape(B,-1)
+    mse = torch.mean(mse,1).numpy() + 1e-16
+    psnrs = mse_to_psnr(mse)
+    return psnrs
 
 def mse_to_psnr(mse):
     if isinstance(mse,float):

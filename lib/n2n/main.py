@@ -39,7 +39,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.use_apex = False
     cfg.global_steps = 0
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -64,7 +64,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 2
-    cfg.use_anscombe = False
+    cfg.use_anscombe = True
 
     # -- noise 2 simulate parameters --
     cfg.sim_shuffleK = True

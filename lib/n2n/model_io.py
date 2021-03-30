@@ -11,7 +11,8 @@ from layers import UNetGP
 
 def load_model(cfg):
 
-    model = UNet_n2n(1,5)
+    use_final_relu = cfg.noise_params.ntype == "qis"
+    model = UNet_n2n(1,5,use_final_relu=use_final_relu)
     cfg.color_cat = True
 
     # model = UNet_Git(3*cfg.input_N,3)

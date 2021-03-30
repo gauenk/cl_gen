@@ -169,6 +169,7 @@ class GlobalCameraMotionTransform():
         # theta = choices[perm[0]]
 
         direction = torch.FloatTensor([radius * torch.cos(theta), radius * torch.sin(theta)])
+        # print("Axis-aligned dynamics.")
         # direction = torch.FloatTensor([1.,0.])
         return direction
 

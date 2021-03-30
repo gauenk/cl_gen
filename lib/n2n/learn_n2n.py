@@ -46,9 +46,9 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
     #     noise_level = noise_params['readout']
     #     raw_scale = ( 2**noise_params['nbits']-1 ) / noise_params['alpha']
 
-    cfg.noise_params['qis']['alpha'] = 4.0
+    cfg.noise_params['qis']['alpha'] = 255.0
     cfg.noise_params['qis']['readout'] = 0.0
-    cfg.noise_params['qis']['nbits'] = 3
+    cfg.noise_params['qis']['nbits'] = 8
     noise_xform = get_noise_transform(cfg.noise_params,
                                       use_to_tensor=False)
 
@@ -64,9 +64,8 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         
         # -- anscombe --
         if cfg.use_anscombe:
-            burst = anscombe_nmlz.forward(cfg,burst+0.5)-0.5
+            burst = anscombe_nmlz.forward(cfg,burst+0.5)
             
-        # print_tensor_stats("burst",burst)
         burst0 = burst[[0]]
         burst1 = burst[[1]]
         # img0 = burst[0]
@@ -131,6 +130,8 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         # -- compare with stacked burst --
         # loss = F.mse_loss(raw_img,rec_img)
         loss = F.mse_loss(img1,rec_img)
+        # print_tensor_stats("img1",img1)
+        # print_tensor_stats("rec",rec_img)
 
         # -- update info --
         running_loss += loss.item()
@@ -143,17 +144,32 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         if (batch_idx % cfg.log_interval) == 0 and batch_idx > 0:
 
             # -- anscombe --
+            print_tensor_stats("burst",burst)
             if cfg.use_anscombe:
-                rec_img = anscombe_nmlz.backward(cfg,rec_img + 0.5) - 0.5
+                # rec_img = torch.clamp(rec_img+0.5,0)-0.5
+                print_tensor_stats("rec",rec_img)
+                rec_img = anscombe_nmlz.backward(cfg,rec_img)-0.5
+                print_tensor_stats("nmlz-rec",rec_img)
 
             # -- qis noise --
-            if noise_type == "qis": rec_img = quantize_img(cfg,rec_img+0.5)-0.5
+            # if noise_type == "qis":
+                # rec_img += 0.5
+                # rec_img *= 4
+                # rec_img = torch.round(rec_img)
+                # rec_img = torch.clamp(rec_img,0,4)
+                # rec_img /= 4
+                # rec_img -= 0.5
+                # rec_img = quantize_img(cfg,rec_img+0.5)-0.5
+                # rec_img = get_nmlz_img(cfg,rec_img+0.5)
 
             # -- raw image normalized for noise --
-            raw_img = get_nmlz_img(cfg,raw_img)
+            # raw_img = torch.round(7*raw_img)/7. - 0.5
+            # raw_img = get_nmlz_img(cfg,raw_img)
+            # raw_img = get_nmlz_img(cfg,raw_img)
+
 
             # -- psnr finally --
-            loss = F.mse_loss(raw_img,rec_img,reduction='none').reshape(BS,-1)
+            loss = F.mse_loss(raw_img,rec_img+0.5,reduction='none').reshape(BS,-1)
             loss = torch.mean(loss,1).detach().cpu().numpy()
             psnr = mse_to_psnr(loss)
             psnr_ave = np.mean(psnr)
@@ -161,7 +177,7 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
 
             # print( f"Ratio of noisy to clean: {img0.mean().item() / nmlz_raw.mean().item()}" )
             # print_tensor_stats("img1",img1)
-            print_tensor_stats("rec_img",rec_img)
+            print_tensor_stats("rec_img",rec_img+0.5)
             print_tensor_stats("raw_img",raw_img)
             # print_tensor_stats("nmlz_raw",nmlz_raw)
             # tv_utils.save_image(img0,'learn_noisy0.png',nrow=BS,normalize=True)
@@ -252,18 +268,18 @@ def test_loop_n2n(cfg,model,criterion,test_loader,epoch):
 
             # compare with stacked targets
             # rec_img = rescale_noisy_image(rec_img)
-            if noise_type == "qis": rec_img = quantize_img(cfg,rec_img+0.5)-0.5
-            nmlz_raw = get_nmlz_img(cfg,raw_img)
-            loss = F.mse_loss(nmlz_raw,rec_img,reduction='none').reshape(BS,-1)
+            # if noise_type == "qis": rec_img = quantize_img(cfg,rec_img+0.5)-0.5
+            # nmlz_raw = get_nmlz_img(cfg,raw_img)
+            loss = F.mse_loss(raw_img,rec_img+0.5,reduction='none').reshape(BS,-1)
             loss = torch.mean(loss,1).detach().cpu().numpy()
 
             # -- check for perfect matches --
-            PSNR_MAX = 50
-            if np.any(np.isinf(loss)):
-                loss = []
-                for b in range(BS):
-                    if np.isinf(loss[b]): loss.append(PSNR_MAX)
-                    else: loss.append(loss[b])
+            # PSNR_MAX = 50
+            # if np.any(np.isinf(loss)):
+            #     loss = []
+            #     for b in range(BS):
+            #         if np.isinf(loss[b]): loss.append(PSNR_MAX)
+            #         else: loss.append(loss[b])
             psnr = mse_to_psnr(loss)
 
             total_psnr += np.mean(psnr)

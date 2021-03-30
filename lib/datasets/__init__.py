@@ -7,7 +7,7 @@ from .cbsd68 import get_cbsd68_dataset
 from .sun2009 import get_sun2009_dataset
 from .yiheng import get_eccv2020_dataset
 from .rebel2021 import get_rebel2021_dataset
-
+from .rots import get_rots_dataset
 
 def load_dataset(cfg,cfg_type):
     return get_dataset(cfg,cfg_type)
@@ -37,6 +37,8 @@ def get_dataset(cfg,cfg_type):
         return get_eccv2020_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "rebel2021":
         return get_rebel2021_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "rots":
+        return get_rots_dataset(cfg,cfg_type)
     else:
         raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 

@@ -9,3 +9,13 @@ logs/
 *pdf
 \.ipynb*
 Pipfile\.lock
+cache/
+reports/
+runs/
+*events.out*
+*model_checkpoint*
+*optim_checkpoint*
+*after_scheduler_checkpoint*
+*scheduler_checkpoint*
+*png
+*prototxt

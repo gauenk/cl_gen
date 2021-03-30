@@ -84,7 +84,7 @@ def collate_dict(batch):
 
     # -- shape tensors --
     for key,elem in fbatch.items():
-        if key in ['burst','noisy','res']:
+        if key in ['burst','noisy','res','clean_burst']:
             fbatch[key] = torch.stack(elem,dim=1)
         else:
             fbatch[key] = torch.stack(elem,dim=0)
