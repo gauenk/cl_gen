@@ -1,3 +1,4 @@
+
 # -- python imports --
 import numpy as np
 from einops import rearrange
@@ -9,7 +10,60 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as tvF
 
-class PatchHelper():
+# -- project imports --
+from layers.unet import UNet_small
+
+
+class UNetBYOL(nn.Module):
+
+    def __init__(self, num_frames, num_ftrs, patchsize, nh_size, img_size, attn_params = None):
+        super().__init__()
+
+        # -- init --
+        self.num_frames = num_frames
+        self.num_ftrs = num_ftrs
+        self.nh_size = nh_size # number of patches around center pixel
+        self._patchsize = patchsize
+        self.img_size = img_size
+
+        # -- create model --
+        self.unet = UNet_small(num_ftrs+3,num_ftrs)
+
+    def forward(self,patches):
+        """
+        params:
+           [patches] shape: (B*L,C,H,W)
+        """
+
+        # -- init shapes --
+        BL,C,H,W = patches.shape
+        L = self.nh_size**2 + 1 # all my neighbors + myself
+        B = BL // L
+
+        # -- BYOL init coniditon --
+        # F = 1200
+        # if LNB != L*N*B: return torch.zeros(B,F)
+
+
+        # -- forward pass starts here --
+        patches = rearrange(patches,'(b l) c h w -> b (l c) h w',b=B)
+        embeddings = self.unet(patches)
+        embeddings = rearrange(embeddings,'b l h w -> b (l h w)')
+        return embeddings
+
+
+# -- python imports --
+import numpy as np
+from einops import rearrange
+from easydict import EasyDict as edict
+
+# -- pytorch imports --
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torchvision.transforms.functional as tvF
+
+class UNetPatchHelper():
 
     def __init__(self, num_frames, patchsize, nh_size, img_size):
         
@@ -122,9 +176,13 @@ class PatchHelper():
         features = rearrange(features,'(h w) f -> f h w',b=B,n=N,h=H)
         return features
 
-    def form_input_patches(self,patches):
-        patches = rearrange(patches,'n b l c h w -> (n b l) c h w')
-        return patches
+    def form_input_patches(self,local_patches):
+        N,B,L,C,H,W = local_patches.shape
+        mid_idx = L//2
+        ref_patch = local_patches[0][:,mid_idx]
+        nh_patches = rearrange(local_patches[1],'b l c h w -> (b l) c h w')
+        inputs = torch.cat([ref_patch,nh_patches],dim=0)
+        return inputs
 
     def shape_embeddings(self,embeddings):
         R,L = self.img_size**2,self.nh_size**2
@@ -134,3 +192,4 @@ class PatchHelper():
         ftr_img = rearrange(embeddings,'(h w) b f -> 1 b f h w',h=self.img_size)
         return ftr_img
 
+    

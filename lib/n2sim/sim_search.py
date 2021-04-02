@@ -3,6 +3,7 @@ import pickle,lmdb
 import numpy as np
 from pathlib import Path
 import numpy.random as npr
+from easydict import EasyDict as edict
 from einops import rearrange, repeat, reduce
 
 # -- faiss imports --
@@ -123,30 +124,47 @@ def tile_patches(burst,patchsize,search_method):
     """
     prepares a sequence of patches centered at each pixel location
     """
+    # -- backward compat --
+    pix_only = not isinstance(burst,edict)
+    burst = convert_edict(burst)
+
     # -- init --
-    N = burst.shape[0]
+    N,B = burst.shape[:2]
     ps = patchsize
+    unfold = nn.Unfold(ps,1,0,1)
+    patches = edict()
 
-    # -- tile patches --
-    unfold = nn.Unfold(patchsize,1,0,1)
-    burst_pad = rearrange(burst,'n b c h w -> (b n) c h w')
-    burst_pad = F.pad(burst_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
-    patches = unfold(burst_pad)
+    # -- tile pixel patches --
+    pix_pad = rearrange(burst.pix,'n b c h w -> (b n) c h w')
+    pix_pad = F.pad(pix_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
+    patches.pix = unfold(pix_pad)
 
-    # -- remove center pixels from patches for search --
-    patches = rearrange(patches,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
-    if search_method == "l2":
-        patches_zc = patches.clone()
-        # patches_zc[...,ps//2,ps//2,:] = 0
+    # -- tile feature patches --
+    if pix_only:
+        patches.pix = rearrange(patches.pix,'bn (c ps1 ps2) r -> bn r ps1 ps2 c',ps1=ps,ps2=ps)
+        if search_method == "l2":
+            patches.ftr = patches.pix.clone()
+            # patches.ftr[...,ps//2,ps//2,:] = 0
+        else: patches.ftr = patches.pix
+        shape_str = '(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)'
+        patches.pix = rearrange(patches.pix,shape_str,n=N)
+        patches.ftr = rearrange(patches.ftr,shape_str,n=N)
     else:
-        patches_zc = patches
-    patches = rearrange(patches,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
-    patches_zc = rearrange(patches_zc,'(b n) r ps1 ps2 c -> b n r (ps1 ps2 c)',n=N)
+        ftr_pad = rearrange(burst.ftr,'n b c h w -> (b n) c h w')
+        ftr_pad = F.pad(ftr_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
+        patches.ftr = unfold(ftr_pad)
+        shape_str = '(b n) (c ps1 ps2) r -> b n r (ps1 ps2 c)'
+        patches.pix = rearrange(patches.pix,shape_str,b=B,ps1=ps,ps2=ps)
+        patches.ftr = rearrange(patches.ftr,shape_str,b=B,ps1=ps,ps2=ps)
 
     # -- contiguous for faiss --
-    patches = patches.contiguous()
-    patches_zc = patches_zc.contiguous()
-    return patches,patches_zc
+    patches.pix = patches.pix.contiguous()
+    patches.ftr = patches.ftr.contiguous()
+    patches.shape = patches.pix.shape
+
+    # -- return for backward compat --
+    if pix_only: return patches.pix,patches.ftr
+    else: return patches
     
 def compute_similar_bursts(cfg,burst_query,burst_database,K,noise_level,patchsize=3,shuffle_k=True,kindex=None,pick_2=False,only_middle=True,search_method="l2",db_level="burst"):
     """
@@ -459,14 +477,16 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
     Nd,Bd,Cd,Hd,Wd = burst_database.shape
 
     # -- tile patches --
-    q_patches,q_patches_zc = tile_patches(burst_query,patchsize,search_method)
+    q_patches = tile_patches(burst_query,patchsize,search_method)
     B,N,R,ND = q_patches.shape
 
-    db_patches,db_patches_zc = tile_patches(burst_database,patchsize,search_method)
+    db_patches = tile_patches(burst_database,patchsize,search_method)
     Bd,Nd,Rd,NDd = db_patches.shape
 
-    clean_patches,clean_patches_zc = tile_patches(clean_database,patchsize,search_method)
+    clean_patches = tile_patches(clean_database,patchsize,search_method)
     Bd,Nd,Rd,NDd = clean_patches.shape
+
+    ND = q_patches.ftr.shape[-1]
 
     # -- faiss setup --
     res = faiss.StandardGpuResources()
@@ -474,13 +494,17 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
     faiss_cfg.useFloat16 = False
     faiss_cfg.device = cfg.gpuid
 
+    # -- init searching vars --
+    database = edict()
+    cdatabase = edict()
+
     # -- search across entire batch --
     if db_level == "batch":
-        database = rearrange(db_patches,'b n r l -> (b n r) l')
-        database_zc = rearrange(db_patches_zc,'b n r l -> (b n r) l')
-        cdatabase = rearrange(clean_patches,'b n r l -> (b n r) l')        
+        database.pix = rearrange(db_patches.pix,'b n r l -> (b n r) l')
+        database.ftr = rearrange(db_patches.ftr,'b n r l -> (b n r) l')
+        cdatabase.pix = rearrange(clean_patches.pix,'b n r l -> (b n r) l')        
         gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-        gpu_index.add(database_zc)
+        gpu_index.add(database.ftr)
 
     sim_images = []
     csim_images = []
@@ -491,11 +515,11 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
 
         # -- setup database --
         if db_level == "burst":
-            database = rearrange(db_patches[b],'n r l -> (n r) l')
-            database_zc = rearrange(db_patches_zc[b],'n r l -> (n r) l')
-            cdatabase = rearrange(clean_patches[b],'n r l -> (n r) l')
+            database.pix = rearrange(db_patches.pix[b],'n r l -> (n r) l')
+            database.ftr = rearrange(db_patches.ftr[b],'n r l -> (n r) l')
+            cdatabase.pix = rearrange(clean_patches.pix[b],'n r l -> (n r) l')
             gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-            gpu_index.add(database_zc)
+            gpu_index.add(database.ftr)
 
         sim_frames = []
         csim_frames = []
@@ -507,24 +531,24 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
 
             # -- setup database --
             if db_level == "frame":
-                database = db_patches[b,n]
-                database_zc = db_patches_zc[b,n]
-                cdatabase = clean_patches[b,n]
+                database.pix = db_patches.pix[b,n]
+                database.ftr = db_patches.ftr[b,n]
+                cdatabase.pix = clean_patches.pix[b,n]
                 gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
-                gpu_index.add(database_zc)
+                gpu_index.add(database.ftr)
 
             # -- run faiss search --
-            query = q_patches_zc[b,n].contiguous()
+            query_ftr = q_patches.ftr[b,n].contiguous()
             if search_method == "l2":
-                D, I = gpu_index.search(query,K)
+                D, I = gpu_index.search(query_ftr,K)
                 # -- locations of smallest K patches; no identity so no first column --
                 S,V = D[:,:], I[:,:]
             elif search_method == "w":
-                search_args = [res,noise_level,database_zc,query,K]
+                search_args = [res,noise_level,database.ftr,query_ftr,K]
                 D, I = search_mod_raw_array_pytorch(*search_args)
                 S,V = D,I
             elif search_method == "numba":
-                search_args = [res,noise_level,database_zc,query,K]
+                search_args = [res,noise_level,database.ftr,query_ftr,K]
                 D, I = search_raw_array_numba(*search_args)
                 S,V = D,I
             else: raise ValueError(f"Uknown search method [{search_method}]")
@@ -535,14 +559,14 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
 
             # -- extract middle pixel from patch in clean image --
             shape_str = 'hw k (ps1 ps2 c) -> hw k ps1 ps2 c'
-            csim_patches = rearrange(cdatabase[V],shape_str,ps1=ps,ps2=ps)
+            csim_patches = rearrange(cdatabase.pix[V],shape_str,ps1=ps,ps2=ps)
             csim_pixels = csim_patches[...,ps//2,ps//2,:]
             shape_str = '(h w) k c -> 1 k c h w'
             csim_image = rearrange(csim_pixels,shape_str,h=H)
 
             # -- reshape to extract middle pixel from nearest patches --
             shape_str = 'hw k (ps1 ps2 c) -> hw k ps1 ps2 c'
-            sim_patches = rearrange(database[V],shape_str,ps1=ps,ps2=ps)
+            sim_patches = rearrange(database.pix[V],shape_str,ps1=ps,ps2=ps)
 
             # -- create image from nearest pixels --
             sim_pixels = sim_patches[...,ps//2,ps//2,:]

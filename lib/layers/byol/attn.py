@@ -31,7 +31,7 @@ class AttnBYOL(nn.Module):
 
         if attn_params is None:
             attn_params = edict()
-            attn_params.d_model = 81*3
+            attn_params.d_model = num_ftrs
             attn_params.n_heads = 3
             attn_params.n_enc_layers = 2
             attn_params.n_dec_layers = 2
@@ -69,11 +69,7 @@ class AttnBYOL(nn.Module):
 
         embeddings = self.performer(inputs,outputs)
         embeddings = rearrange(embeddings,'b l hf -> (b l) hf')
-
-        print("emb",embeddings.shape,LNB,B,F)
-
         return embeddings
-
 
 class PerformerEncDec(nn.Module):
 

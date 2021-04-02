@@ -289,9 +289,8 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             # final_loss = model(st_burst)
             index = 0
             patches = model.patch_helper.gather_local_patches(burst, index)
-            patches = rearrange(patches,'n b l c h w -> (n b l) c h w')
-            # embedding = model(patches,return_embedding=True)
-            final_loss = model(patches)
+            input_patches = model.patch_helper.form_input_patches(patches)
+            final_loss = model(input_patches)
     
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #

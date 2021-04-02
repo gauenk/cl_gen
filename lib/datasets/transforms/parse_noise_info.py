@@ -30,6 +30,7 @@ def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True):
 def choose_noise_transform(noise_info):
     ntype = noise_info.ntype
     noise_params = noise_info[ntype]
+    # print(f"NoiseTransformType: {ntype}")
     if ntype == "g":
         return get_g_noise(noise_params)
     if ntype == "hg":
@@ -45,6 +46,9 @@ def choose_noise_transform(noise_info):
         return get_msg_noise(noise_params)
     elif ntype == "msg_simcl":
         return get_msg_simcl_noise(noise_params)
+    elif ntype == "none":
+        def null(image): return image
+        return null
     else:
         raise ValueError(f"Unknown noise_type [{ntype}]")
 

@@ -21,7 +21,7 @@ from layers.denoise_gan import DCGAN_D
 from .optim_io import load_optimizer,load_optimizer_kpn,load_optimizer_gan
 from learning.utils import save_model
 from layers.csbdeep import CSBDeepBN,init_net
-from layers.byol import BYOL,AttnBYOL,PatchHelper
+from layers.byol import BYOL,AttnBYOL,PatchHelper,UNetBYOL,UNetPatchHelper
 
 def load_model(cfg):
     # backbone = torchvision.models.resnet50(pretrained=True)
@@ -31,23 +31,33 @@ def load_model(cfg):
     # backbone = UNet_small_vec( 3 * cfg.N, cfg.byol_ftr_size )
     
     burst_dim = True
-    backbone = AttnBYOL( cfg.N,
-                         cfg.byol_ftr_size,
-                         cfg.byol_patchsize,
-                         cfg.byol_nh_size,
-                         cfg.frame_size)
-
-    
-    patch_helper = PatchHelper(cfg.N,
-                               cfg.byol_patchsize,
-                               cfg.byol_nh_size,
-                               cfg.frame_size)
+    if cfg.byol_backbone_name == "attn":
+        backbone = AttnBYOL( cfg.N,
+                             cfg.byol_ftr_size,
+                             cfg.byol_patchsize,
+                             cfg.byol_nh_size,
+                             cfg.frame_size)
+        patch_helper = PatchHelper(cfg.N,
+                                   cfg.byol_patchsize,
+                                   cfg.byol_nh_size,
+                                   cfg.frame_size)
+    elif cfg.byol_backbone_name == "unet":
+        backbone = UNetBYOL( cfg.N,
+                             cfg.byol_ftr_size,
+                             cfg.byol_patchsize,
+                             cfg.byol_nh_size,
+                             cfg.frame_size)
+        patch_helper = UNetPatchHelper(cfg.N,
+                                   cfg.byol_patchsize,
+                                   cfg.byol_nh_size,
+                                   cfg.frame_size)
                                
     learner = BYOL(
         backbone,
+        batch_size = 2*(cfg.byol_nh_size**2+1),
         image_size = cfg.byol_patchsize,
         hidden_layer = -1,#'avgpool',
-        projection_size = cfg.byol_ftr_size,
+        projection_size = 1200,#cfg.byol_ftr_size,
         patch_helper = patch_helper
     )
     return learner

@@ -163,6 +163,7 @@ class BYOL(nn.Module):
         self,
         net,
         image_size,
+        batch_size = 2,
         hidden_layer = -2,
         projection_size = 256,
         projection_hidden_size = 4096,
@@ -211,7 +212,7 @@ class BYOL(nn.Module):
         self.to(device)
 
         # send a mock image tensor to instantiate singleton parameters
-        rdata = torch.randn(2, 3, image_size, image_size, device=device)
+        rdata = torch.randn(batch_size, 3, image_size, image_size, device=device)
         self.forward(rdata)
 
     @singleton('target_encoder')

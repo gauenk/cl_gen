@@ -72,7 +72,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 8
-    cfg.frame_size = 64
+    cfg.frame_size = 48
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
@@ -100,12 +100,17 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_patchsize = 5
 
     # -- byol parameters --
-    cfg.byol_patchsize = 9
-    cfg.byol_nh_size = 3
-    cfg.byol_ftr_size = cfg.byol_nh_size*cfg.byol_patchsize**2
+    cfg.byol_patchsize = 5
+    cfg.byol_nh_size = 5
+    cfg.byol_ftr_size = 3*cfg.byol_patchsize**2
     cfg.byol_st_cat = 'v1'
     cfg.byol_num_test_samples = 1    
     cfg.byol_num_train_rand_crop = 1
+    # cfg.byol_backbone_name = "attn"
+    cfg.byol_backbone_name = "unet"
+    byol_str = f"[BYOL]: {cfg.byol_backbone_name} {cfg.byol_patchsize} {cfg.byol_nh_size} {cfg.byol_ftr_size}"
+    print(byol_str)
+
 
     # -- dataset params --
     cfg.dataset.triplet_loader = False
@@ -134,13 +139,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
-    cfg.batch_size = 16
+    cfg.batch_size = 32
     cfg.init_lr = 3e-4 # used to be 5e-4, 03/27/2020
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
     cfg.color_cat = True
-    cfg.log_interval = 600 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 4

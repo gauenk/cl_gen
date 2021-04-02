@@ -36,8 +36,8 @@ def add_noise(noise,pic):
 
 def images_to_psnrs(img1,img2):
     B = img1.shape[0]
-    mse = F.mse_loss(img1,img2,reduction='none').reshape(B,-1)
-    mse = torch.mean(mse,1).numpy() + 1e-16
+    mse = F.mse_loss(img1.detach().cpu(),img2.detach().cpu(),reduction='none').reshape(B,-1)
+    mse = torch.mean(mse,1).detach().numpy() + 1e-16
     psnrs = mse_to_psnr(mse)
     return psnrs
 
