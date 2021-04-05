@@ -267,6 +267,7 @@ def set_cfg(args):
     cfg.dataset.bw = False
     cfg.use_lmdb = False
     cfg.use_kindex_lmdb = False
+    cfg.zero_mean_images = True
 
     cfg.batch_size = args.batch_size
     cfg.world_size = args.world_size

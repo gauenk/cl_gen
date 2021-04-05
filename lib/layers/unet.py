@@ -634,27 +634,27 @@ class UNet_small(nn.Module):
         self.n_channels = n_channels
         self.verbose = verbose
 
-        self.conv1 = SingleConv(n_channels, 32, kernel_size=3,stride=1, padding=1)
-        self.conv2 = SingleConv(32, 64, kernel_size=3, stride=1, padding=1)
+        self.conv1 = SingleConv(n_channels, 64, kernel_size=3,stride=1, padding=1)
+        self.conv2 = SingleConv(64, 128, kernel_size=3, stride=1, padding=1)
         # self.conv3 = SingleConv(64, 128, 1)
         # self.conv4 = SingleConv(128, 256, 1)
         # self.conv5 = SingleConv(256, 256, 1)
         # self.conv6 = SingleConv(256, 256, 1)
 
-        self.up1 = SingleUpConv(64,64,kernel_size=3,padding=1,stride=1)
+        self.up1 = SingleUpConv(128,128,kernel_size=3,padding=1,stride=1)
         # self.up1 = SingleUpConv(256,256)
         # self.up2 = SingleUpConv(256,256)
         # self.up3 = SingleUpConv(512,128)
         # self.up4 = SingleUpConv(256,64)
-        self.up5 = SingleUpConv(128,32,kernel_size=2,padding=0,stride=2)
-        self.up6 = SingleUpConv(64,32,kernel_size=2,padding=0,stride=2)
+        self.up5 = SingleUpConv(256,64,kernel_size=2,padding=0,stride=2)
+        self.up6 = SingleUpConv(128,64,kernel_size=2,padding=0,stride=2)
 
         # -- this reduces (H,W) to (H/2, W/2) each time --
         # self.end1 = SingleConv(32, 32, 1, 3, 1, False, False)
         # # self.end1 = nn.Conv2d(32,32, 3, 1, 1)
         # self.end2 = SingleConv(32, 3, 0, 1, 1, False, False)
 
-        self.end1 = nn.Conv2d(32, 32, kernel_size=1,stride=1, padding=0)
+        self.end1 = nn.Conv2d(64, 32, kernel_size=1,stride=1, padding=0)
         self.end2 = nn.Conv2d(32, o_channels, kernel_size=1,stride=1, padding=0)
 
     def forward(self, x):

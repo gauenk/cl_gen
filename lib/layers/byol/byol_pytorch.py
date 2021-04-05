@@ -8,6 +8,13 @@ import torch.nn.functional as F
 
 from torchvision import transforms as T
 
+# import contrastive learning stuff
+from easydict import EasyDict as edict
+from layers.simcl import ClBlockLoss
+
+# -- transforms for _supervised_ augmentations --
+from datasets.transforms.noise import AddGaussianNoise,AddPoissonNoiseBW
+
 
 # helper functions
 
@@ -57,6 +64,15 @@ class RandomApply(nn.Module):
             return x
         return self.fn(x)
 
+class PickOnlyOne(nn.Module):
+    def __init__(self, fn_l):
+        super().__init__()
+        self.fn_l = fn_l
+
+    def __call__(self):
+        fn = random.choice(self.fn_l)
+        return fn
+
 # exponential moving average
 
 class EMA():
@@ -77,7 +93,7 @@ def update_moving_average(ema_updater, ma_model, current_model):
 # MLP class for projector and predictor
 
 class MLP(nn.Module):
-    def __init__(self, dim, projection_size, hidden_size = 4096):
+    def __init__(self, dim, projection_size, hidden_size = 256):
         super().__init__()
         self.net = nn.Sequential(
             nn.Linear(dim, hidden_size),
@@ -164,6 +180,7 @@ class BYOL(nn.Module):
         net,
         image_size,
         batch_size = 2,
+        rand_batch_size = 2,
         hidden_layer = -2,
         projection_size = 256,
         projection_hidden_size = 4096,
@@ -179,27 +196,36 @@ class BYOL(nn.Module):
 
         # default SimCLR augmentation
 
+        """
+        In our function, color is an important property
+        """
         DEFAULT_AUG = torch.nn.Sequential(
-            RandomApply(
-                T.ColorJitter(0.8, 0.8, 0.8, 0.2),
-                p = 0.3
-            ),
-            T.RandomGrayscale(p=0.2),
-            T.RandomHorizontalFlip(),
-            RandomApply(
-                T.GaussianBlur((3, 3), (1.0, 2.0)),
-                p = 0.2
-            ),
-            T.RandomResizedCrop((image_size, image_size)),
-            T.Normalize(
-                mean=torch.tensor([0.485, 0.456, 0.406]),
-                std=torch.tensor([0.229, 0.224, 0.225])),
+            # RandomApply(
+            #     T.ColorJitter(0.8, 0.8, 0.8, 0.2),
+            #     p = 0.3
+            # ),
+            # T.RandomGrayscale(p=0.5),
+            # T.RandomHorizontalFlip(),
+            # RandomApply(
+            #     T.GaussianBlur((3, 3), (1.0, 2.0)),
+            #     p = 0.2
+            # ),
+            # T.RandomResizedCrop((image_size, image_size)),
+            # T.Normalize(
+            #     mean=torch.tensor([0.485, 0.456, 0.406]),
+            #     std=torch.tensor([0.229, 0.224, 0.225])),
         )
 
         self.augment1 = default(augment_fn, DEFAULT_AUG)
         self.augment2 = default(augment_fn2, self.augment1)
 
-        self.online_encoder = NetWrapper(net, projection_size, projection_hidden_size, layer=hidden_layer)
+        def null(image): return image
+        gn,pn = AddGaussianNoise(std=75.),AddPoissonNoiseBW(4.),
+        self.gn = gn
+        self.choose_noise = PickOnlyOne([gn,null])
+
+        self.online_encoder = NetWrapper(net, projection_size,
+                                         projection_hidden_size, layer=hidden_layer)
 
         self.use_momentum = use_momentum
         self.target_encoder = None
@@ -207,12 +233,18 @@ class BYOL(nn.Module):
 
         self.online_predictor = MLP(projection_size, projection_size, projection_hidden_size)
 
+        # simclr since byol isn't working well
+        hyper = edict()
+        hyper.temperature = 1
+        self.simclr_loss = ClBlockLoss(hyper,2,batch_size)
+
+
         # get device of network and make wrapper same device
         device = get_module_device(net)
         self.to(device)
 
         # send a mock image tensor to instantiate singleton parameters
-        rdata = torch.randn(batch_size, 3, image_size, image_size, device=device)
+        rdata = torch.abs(torch.randn(rand_batch_size, 3, image_size, image_size, device=device))
         self.forward(rdata)
 
     @singleton('target_encoder')
@@ -231,8 +263,16 @@ class BYOL(nn.Module):
         update_moving_average(self.target_ema_updater, self.target_encoder, self.online_encoder)
 
     def forward(self, x, return_embedding = False):
+        
         if return_embedding:
             return self.online_encoder(x,True)
+
+        noisy_xform = self.choose_noise()
+        order = torch.randperm(2)
+        # noisy1,noisy2 = noisy_xform(x),noisy_xform(x)
+        noisy1,noise2 = self.gn(x),x
+        noisy_l = [noisy1,noise2]
+        noisy1,noise2 = noisy_l[order[0]],noisy_l[order[1]]
 
         image_one, image_two = self.augment1(x), self.augment2(x)
 
@@ -252,5 +292,8 @@ class BYOL(nn.Module):
         loss_one = loss_fn(online_pred_one, target_proj_two.detach())
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
 
-        loss = loss_one + loss_two
+        simclr_input = torch.stack([online_proj_one,online_proj_two],dim=0)
+        loss_simclr = self.simclr_loss(simclr_input)
+
+        loss = loss_one + loss_two + loss_simclr
         return loss.mean()

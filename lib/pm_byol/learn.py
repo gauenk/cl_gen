@@ -29,7 +29,7 @@ import torchvision.transforms.functional as tvF
 # -- project code --
 import settings
 from pyutils.timer import Timer
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,images_to_psnrs
 from datasets.transforms import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
 from layers.burst import BurstRecLoss,EntropyLoss
@@ -41,8 +41,9 @@ from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 from n2sim.sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB
 from n2sim.debug import print_tensor_stats
-from .test_sim_search import test_sim_search,test_sim_search_pix,print_psnr_results
+from .test_sim_search import test_sim_search,test_sim_search_pix,print_psnr_results,test_sim_search_serial_batch
 from .noise_settings import get_keys_noise_level_grid
+from .test_ps_nh_sizes import test_ps_nh_sizes
 
 def print_tensor_stats(prefix,tensor):
     stats_fmt = (tensor.min().item(),tensor.max().item(),tensor.mean().item())
@@ -60,6 +61,18 @@ async def run_both(cfg,burst,K,patchsize,kindex):
     )
     await both
     return both
+
+def sample_burst_patches(cfg,model,burst):
+    n_indices = 2
+    indices = np.random.choice(cfg.frame_size**2,n_indices)
+    patches = []
+    for index in indices:
+        index_window = model.patch_helper.index_window(index,ps=3)
+        for nh_index in index_window:
+            patches_i = model.patch_helper.gather_local_patches(burst, nh_index)
+            patches.append(patches_i)
+    patches = torch.cat(patches,dim=1)
+    return patches
 
 def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,writer):
 
@@ -276,19 +289,22 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
 
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #
+            #   Experimentally Set Hyperparams
+            #
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+            # -- [before training] setting the ps and nh --
+            # test_ps_nh_sizes(cfg,model,burst) 
+
+            # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            #
             #      Formatting Images & FP
             #
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-    
-            num_rc = cfg.byol_num_train_rand_crop
 
-            # crop_burst = torch.cat([random_crop(burst) for i in range(num_rc)],dim=1)
-            #stacked_burst = rearrange(crop_burst,'n b c h w -> b n c h w')
-            #cat_burst = rearrange(crop_burst,'n b c h w -> (b n) c h w')
-            # st_burst = rearrange(crop_burst,'n b c h w -> b (n c) h w')
-            # final_loss = model(st_burst)
-            index = 0
-            patches = model.patch_helper.gather_local_patches(burst, index)
+            psnrs_sim = test_sim_search(cfg,burst[:,:2]+0.5,model)
+            
+            patches = sample_burst_patches(cfg, model, burst+0.5)
             input_patches = model.patch_helper.form_input_patches(patches)
             final_loss = model(input_patches)
     
@@ -332,11 +348,19 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             write_info = (epoch, cfg.epochs, batch_idx, steps_per_epoch, running_loss)
             print("[%d/%d][%d/%d]: %2.3e" % write_info)
 
-            burst = burst[:,:2] # limit batch size to run test
-            psnrs = test_sim_search(cfg,burst,model)
-            print_psnr_results(psnrs,"[PSNR-ftr]")
-            psnrs = test_sim_search_pix(cfg,burst,model)
-            print_psnr_results(psnrs,"[PSNR-pix]")
+            nbatches = 2
+            burst = burst[:,:nbatches] # limit batch size to run test
+            psnrs_sim = test_sim_search(cfg,burst+0.5,model)
+            psnrs_ftr = psnrs_sim[cfg.byol_backbone_name]
+            psnrs_pix = psnrs_sim["pix"]
+            print_psnr_results(psnrs_ftr,"[PSNR-ftr]")
+            print_psnr_results(psnrs_pix,"[PSNR-pix]")
+            print_edge_info(burst)
+
+            # psnrs = test_sim_search(cfg,burst,model)
+            # print_psnr_results(psnrs,"[PSNR-ftr]")
+            # psnrs = test_sim_search_pix(cfg,burst,model)
+            # print_psnr_results(psnrs,"[PSNR-pix]")
 
             # -- reset loss --
             running_loss = 0
@@ -350,6 +374,27 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
 
     total_loss /= len(train_loader)
     return total_loss,record_losses
+
+def print_edge_info(burst):
+
+    # -- get sobel filter to detect edges --
+    burstNB = rearrange(burst,'n b c h w -> (n b) c h w')
+    sobel = torch.FloatTensor([[1, 2, 1], [0, 0, 0], [-1, -2, -1]])
+    sobel_t = sobel.t()
+    sobel = sobel.reshape(1,3,3).repeat(3,1,1)
+    sobel_t = sobel_t.reshape(1,3,3).repeat(3,1,1)
+    weights = torch.stack([sobel,sobel_t],dim=0)
+    weights = weights.to(burst.device)
+
+    # -- conv --
+    edges = []
+    for c in range(weights.shape[0]):
+        edges_c = torch.mean(F.conv2d(burstNB,weights[[c]],padding=2)).item()
+        edges.append(edges_c)
+    edges = np.mean(edges)
+    title = "[Edges]:"
+    edge_str = "%2.2e" % edges
+    print(f"{title: >15} {edge_str}")
 
 def add_color_channel(bw_pic):
     repeat = [1 for i in bw_pic.shape]
@@ -427,15 +472,16 @@ def test_loop(cfg,model,test_data,test_loader,epoch,writer=None):
             raw_img = raw_img.cuda(non_blocking=True)
             burst = burst.cuda(non_blocking=True)
 
-            sim_search_bs = 2 # stops memory error
-            for b in range(0,B,2):
-                # -- compute psnr --
-                bs,be = b,b+sim_search_bs
-                psnrs_ftr = test_sim_search(cfg,burst[:,bs:be],model)
-                psnrs_pix = test_sim_search_pix(cfg,burst[:,bs:be],model)
-                for name in results.pix.keys():
-                    results.ftr[name].psnrs.extend(psnrs_ftr[name].psnrs)
-                    results.pix[name].psnrs.extend(psnrs_pix[name].psnrs)
+            # -- run testing --
+            psnrs_sim = test_sim_search_serial_batch(cfg,burst,model)
+            psnrs_ftr = psnrs_sim[cfg.byol_backbone_name]
+            psnrs_pix = psnrs_sim["pix"]
+            # print_psnr_results(psnrs_ftr,"[PSNR-ftr]")
+            # print_psnr_results(psnrs_pix,"[PSNR-pix]")
+                
+            for name in results.pix.keys():
+                results.ftr[name].psnrs.extend(psnrs_ftr[name].psnrs)
+                results.pix[name].psnrs.extend(psnrs_pix[name].psnrs)
 
     pix_ftr = ['pix','ftr']
     for name in results.pix.keys():

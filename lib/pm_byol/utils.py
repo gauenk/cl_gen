@@ -1,4 +1,9 @@
 
+def print_tensor_stats(name,tensor):
+    stats_fmt = (tensor.min().item(),tensor.max().item(),tensor.mean().item())
+    stats_str = "%2.2e,%2.2e,%2.2e" % stats_fmt
+    print(f"[{name}]",stats_str)
+
 
 class EMA():
     def __init__(self, beta):

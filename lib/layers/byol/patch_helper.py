@@ -126,7 +126,12 @@ class PatchHelper():
         patches = rearrange(patches,'n b l c h w -> (n b l) c h w')
         return patches
 
-    def shape_embeddings(self,embeddings):
+    def split_bl_embeddings(self,embeddings):
+        R,L = self.img_size**2,self.nh_size**2
+        embeddings = rearrange(embeddings,'(b l) f -> b l f',l=L)
+        return embeddings
+
+    def embeddings_to_image(self,embeddings):
         R,L = self.img_size**2,self.nh_size**2
         embeddings = rearrange(embeddings,'(b l) f -> b l f',l=L)
         embeddings = torch.mean(embeddings,dim=2)

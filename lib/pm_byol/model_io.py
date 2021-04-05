@@ -33,7 +33,7 @@ def load_model(cfg):
     burst_dim = True
     if cfg.byol_backbone_name == "attn":
         backbone = AttnBYOL( cfg.N,
-                             cfg.byol_ftr_size,
+                             cfg.byol_in_ftr_size,
                              cfg.byol_patchsize,
                              cfg.byol_nh_size,
                              cfg.frame_size)
@@ -43,7 +43,9 @@ def load_model(cfg):
                                    cfg.frame_size)
     elif cfg.byol_backbone_name == "unet":
         backbone = UNetBYOL( cfg.N,
-                             cfg.byol_ftr_size,
+                             cfg.byol_in_ftr_size,
+                             cfg.byol_out_ftr_size,
+                             10, # unet output channels
                              cfg.byol_patchsize,
                              cfg.byol_nh_size,
                              cfg.frame_size)
@@ -54,10 +56,11 @@ def load_model(cfg):
                                
     learner = BYOL(
         backbone,
-        batch_size = 2*(cfg.byol_nh_size**2+1),
+        batch_size = cfg.batch_size,
+        rand_batch_size = cfg.batch_size*(cfg.byol_nh_size**2+1),
         image_size = cfg.byol_patchsize,
         hidden_layer = -1,#'avgpool',
-        projection_size = 1200,#cfg.byol_ftr_size,
+        projection_size = cfg.byol_out_ftr_size,#cfg.byol_ftr_size,
         patch_helper = patch_helper
     )
     return learner

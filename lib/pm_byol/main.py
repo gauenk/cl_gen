@@ -72,7 +72,8 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 8
-    cfg.frame_size = 48
+    cfg.frame_size = 64
+    cfg.zero_mean_images = True
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False
@@ -100,15 +101,16 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_patchsize = 5
 
     # -- byol parameters --
-    cfg.byol_patchsize = 5
-    cfg.byol_nh_size = 5
-    cfg.byol_ftr_size = 3*cfg.byol_patchsize**2
+    cfg.byol_patchsize = 7
+    cfg.byol_nh_size = 9
+    cfg.byol_in_ftr_size = 3*cfg.byol_nh_size**2
+    cfg.byol_out_ftr_size = 32 # 3*cfg.byol_patchsize**2
     cfg.byol_st_cat = 'v1'
     cfg.byol_num_test_samples = 1    
     cfg.byol_num_train_rand_crop = 1
     # cfg.byol_backbone_name = "attn"
     cfg.byol_backbone_name = "unet"
-    byol_str = f"[BYOL]: {cfg.byol_backbone_name} {cfg.byol_patchsize} {cfg.byol_nh_size} {cfg.byol_ftr_size}"
+    byol_str = f"[BYOL]: {cfg.byol_backbone_name} {cfg.byol_patchsize} {cfg.byol_nh_size} {cfg.byol_in_ftr_size} {cfg.byol_out_ftr_size}"
     print(byol_str)
 
 
@@ -148,10 +150,10 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 4
+    cfg.dynamic.ppf = 2
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = cfg.frame_size
-    cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
+    cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.N-1)
     
     # -- asdf --
     cfg.solver = edict()
@@ -239,8 +241,10 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     #   init summary writer
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-    log_dir = "{}".format(cfg.exp_name)
-    writer = SummaryWriter(log_dir=log_dir)
+    log_base = Path(f"runs/{name}")
+    if not log_base.exists(): log_base.mkdir(parents=True)
+    log_dir = log_base / Path(f"{cfg.exp_name}")
+    writer = SummaryWriter(log_dir=str(log_dir))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
@@ -334,6 +338,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     #       Training Loop
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    def check_test_epoch(epoch): return (epoch % 20) == 0 and (epoch > 0)
 
     for epoch in range(cfg.current_epoch,cfg.epochs):
         lr = optimizer.param_groups[0]["lr"]
@@ -350,10 +355,11 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
         if epoch % cfg.save_interval == 0 and epoch > 0:
             save_burst_model(cfg,"model",model,optimizer)
 
-        ave_psnr,record_test = test_loop(cfg,model,data.te,loader.te,epoch)
-        if use_record:        
-            write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test,writer)
-        te_ave_psnr[epoch] = ave_psnr
+        if check_test_epoch(epoch):
+            ave_psnr,record_test = test_loop(cfg,model,data.te,loader.te,epoch)
+            if use_record:        
+                write_record_test_file(cfg.current_epoch,postfix,loss_type,record_test,writer)
+            te_ave_psnr[epoch] = ave_psnr
 
     epochs,psnr = zip(*te_ave_psnr.items())
     best_index = np.argmax(psnr)

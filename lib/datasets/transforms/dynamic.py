@@ -55,6 +55,7 @@ class GlobalCameraMotionTransform():
         middle_index = self.nframes // 2
         w,h = pic.size
         direction = self.sample_direction()
+
         tl = self.init_coordinate(direction,h,w)
 
         out_frame_size = (self.frame_size,self.frame_size)

@@ -219,8 +219,10 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     #   init summary writer
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
-    log_dir = "{}".format(cfg.exp_name)
-    writer = SummaryWriter(log_dir=log_dir)
+    log_base = Path(f"runs/{name}")
+    if not log_base.exists(): log_base.mkdir(parents=True)
+    log_dir = log_base / Path(f"{cfg.exp_name}")
+    writer = SummaryWriter(log_dir=str(log_dir))
 
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
     #
