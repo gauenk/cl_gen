@@ -372,6 +372,7 @@ def set_cfg(args):
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = 20
     cfg.dynamic.random_eraser = False
+    cfg.dynamic.reset_seed = False
 
     # set current config from simcl config
     cfg.enc_size = cfg.simcl.enc_size
@@ -383,7 +384,7 @@ def set_cfg(args):
 
     # add dataset size as parameter
     cfg.S = -1
-    cfg.set_worker_seed = False
+    cfg.set_worker_seed = True
 
     return cfg
     

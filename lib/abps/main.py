@@ -53,6 +53,12 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     G_grid_idx = grid_idx // (nNgrid * 2) % nGgrid
     S_grid_idx = grid_idx // (nGgrid * nNgrid * 2) 
 
+    # -- random seeding --
+    cfg.set_worker_seed = False
+    if cfg.set_worker_seed:
+        cfg.dynamic.reset_seed = True
+        torch.manual_seed(123)
+
     # -- force blind --
     B_grid_idx = 0
 
@@ -75,13 +81,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.N = 5
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
-    cfg.num_workers = 8
+    cfg.num_workers = 0
     cfg.frame_size = 96
     cfg.zero_mean_images = True
 
     # -- abp search params --
-    cfg.patchsize = 3
-    cfg.nh_size = 10
+    cfg.patchsize = 15
+    cfg.nh_size = 5
 
     # -- kpn params --
     cfg.kpn_filter_onehot = False

@@ -5,7 +5,10 @@ Code to search for the aligned patches from bursts
 
 # -- python imports --
 import numpy as np
-from einops import rearrange
+from einops import rearrange,repeat
+from itertools import chain, combinations
+from pathlib import Path
+import matplotlib.pyplot as plt
 
 # -- pytorch imports --
 import torch
@@ -17,85 +20,159 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 from pyutils.misc import images_to_psnrs
+from .tile_utils import *
+from .abps_utils import *
 
 def abp_search(cfg,burst):
-    """
-    burst: shape = (N,B,C,H,W)
-    """
-    N,B,C,H,W = burst.shape
-    n_grid = torch.arange(N)
-    mid = torch.LongTensor([N//2])
-    no_mid = torch.LongTensor(np.r_[np.r_[:N//2],np.r_[N//2+1:N]])
+    return abp_global_search(cfg,burst)
 
+def abp_global_search(cfg,burst):
+
+    # -- create vars for search --
+    N,B,C,H,W = burst.shape
     PS = cfg.patchsize
     NH = cfg.nh_size
+
+    # -- setup for best_indices --
     patches = tile_burst_patches(burst,PS,NH)
-    gn_noisy = torch.normal(patches,75./255.)
-    alpha = 4.
-    pn_noisy = torch.poisson(alpha* (patches+0.5) )/alpha
-    # patches.shape = (R,B,N,NH^2,C,PS,PS)
 
+    # -- run search --
+    # indices = run_abp_patch_search_pairs_global_dynamics(patches,PS,NH)
+    scores,indices = run_abp_patch_search_global_dynamics(patches,PS,NH)
+    indices.cuda(non_blocking=True)
+
+    # -- recover aligned burst images --
+    aligned = aligned_burst_image_from_indices_global_dynamics(patches,indices)
     
-    unrolled_img = tile_batches_to_image(gn_noisy,NH,PS,H)
-    tv_utils.save_image(unrolled_img,"gn_noisy.png",normalize=True,range=(-.5,.5))
-
-    unrolled_img = tile_batches_to_image(pn_noisy,NH,PS,H)
-    tv_utils.save_image(unrolled_img,"pn_noisy.png",normalize=True,range=(0.,1.))
-
-
-    """
-    For each N we pick 1 element from NH^2.
-
-    Integer programming problem with state space size (NH^2)^(N-1)
+    return scores,aligned
     
-    Dynamic programming to the rescue. Divide-and-conquer?
-    """
-    if N != 5: print("\n\n\n\n\n[WARNING]: This program is only coded for N == 5\n\n\n\n\n")
 
-    best_idx = torch.zeros(B,N).type(torch.long)
-    # features = gn_noisy
-    features = pn_noisy
+def run_abp_patch_search_global_dynamics(patches,PS,NH):
+
+    # -- shapes --
+    R,B,N = patches.shape[:3]
+    REF_NH = get_ref_nh(NH)
+
+    # -- init -- 
+    best_scores = torch.zeros(B)
+    best_indices = torch.zeros(B,N).type(torch.long)
+
+    # -- run comparisons --
     for b in range(B):
-        features_b = features[:,[b]]
-        REF_NH = NH**2//2 + NH//2
-        mid = torch.LongTensor([REF_NH])
-        # m_patch = features_b[:,:,N//2,REF_NH,:,:,:]
-        # s_features = features[:,:,no_mid,select,:,:,:] # (R,B,N-1,C,PS,PS)
-        # ave_features = torch.mean(s_features,dim=2) # (R,B,C,PS,PS)
-        # psnr = F.mse_loss(ave_features,m_patch).item()
-    
-        left_idx = torch.LongTensor(np.r_[:N//2])
-        # best_left = torch.zeros(len(left_idx))
-        best_left = abp_search_split(features_b,left_idx,PS,NH)
-    
-        right_idx = torch.LongTensor(np.r_[N//2+1:N])
-        # best_right = torch.zeros(len(right_idx))
-        best_right = abp_search_split(features_b,right_idx,PS,NH)
-        
-        best_idx_b = torch.cat([best_left,mid,best_right],dim=0).type(torch.long)
-        best_idx[b] = best_idx_b
+        features_b = patches[:,[b]]
+        burst_indices = np.r_[np.r_[:N//2],np.r_[N//2+1:N]]
+        args = [features_b,burst_indices,PS,NH]
+        best_score_b,best_indices_b = abp_search_global_dynamics(*args)            
+        best_indices_b = insert_middle(best_indices_b,NH,burst_indices.shape[0])
+        best_scores[b] = best_score_b
+        best_indices[b] = best_indices_b
+    return best_scores,best_indices
 
-    best_idx = best_idx.to(patches.device)
-    best_patches = []
-    for b in range(B):
-        patches_n = []
-        for n in range(N):
-            patches_n.append(patches[:,b,n,best_idx[b,n],:,:,:])
-        patches_n = torch.stack(patches_n,dim=1)
-        best_patches.append(patches_n)
-    best_patches = torch.stack(best_patches,dim=1)
-    # best_patches = torch.stack([patches[:,:,n,best_idx[b,n],:,:,:] for n in range(N)],dim=1)
-    print("bp",best_patches.shape)
-    ave_patches = torch.mean(best_patches,dim=2)
-    set_imgs = rearrange(best_patches[:,:,:,:,PS//2,PS//2],'(h w) b n c -> b n c h w',h=H)
-    ave_img = rearrange(ave_patches[:,:,:,PS//2,PS//2],'(h w) b c -> b c h w',h=H)
-    print("A",ave_img.shape)
-    return best_idx,ave_img,set_imgs
 
-def abp_search_split(patches,burst_idx,PS,NH):
+#
+# Primary Coordinate Desc. Search Function
+# 
+
+def abp_search_global_dynamics(patches,burst_indices,PS,NH,K=10,verbose=False):
+    
+    if burst_indices.shape[0] <= 3:
+        return abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=K,verbose=False)
+
+
+    # -- init shapes --
     R,B,N = patches.shape[:3]
     FMAX = np.finfo(np.float).max
-    REF_NH = NH**2//2 + NH//2
+    REF_NH = get_ref_nh(NH)
+    BI = burst_indices.shape[0]
+    H = int(np.sqrt(patches.shape[0]))
+    
+    # -- split the burst grid up --
+    split_grids = create_split_burst_grid(N)
+
+    # -- init shapes --
+
+
+def abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=-1,verbose=False):
+
+    # -- init vars --
+    R,B,N = patches.shape[:3]
+    FMAX = np.finfo(np.float).max
+    REF_NH = get_ref_nh(NH)
+    if verbose: print(f"REF_NH: {REF_NH}")
+    BI = burst_indices.shape[0]
+    H = int(np.sqrt(patches.shape[0]))
+    ref_patch = patches[:,:,[N//2],[REF_NH],:,:,:]
+
+    # -- create search grids --
+    nh_grids = create_nh_grids(BI,NH)
+    n_grids = create_n_grids(BI)
+    if verbose: print(f"NH_GRIDS {len(nh_grids)} | N_GRIDS {len(n_grids)}")
+    
+    # -- randomly initialize grids --
+    # np.random.shuffle(nh_grids)
+    np.random.shuffle(n_grids)
+
+    # -- init loop vars --
+    scores = np.zeros(len(nh_grids))
+    best_score,best_select = FMAX,None
+
+    # -- remove boundary --
+    subR = torch.arange(H*H-2*NH*H)+NH*H
+    search = patches[subR]
+    ref_patch = ref_patch[subR]
+
+    # -- coordinate descent --
+    for nh_index,nh_grid in enumerate(nh_grids):
+        # -- compute score --
+        grid_patches = search[:,:,burst_indices,nh_grid,:,:,:] 
+        grid_patches = torch.cat([ref_patch,grid_patches],dim=2)
+        score,count = 0,0
+        for (nset0,nset1) in n_grids[:100]:
+
+            # -- original --
+            denoised0 = torch.mean(grid_patches[:,:,nset0],dim=2)
+            denoised1 = torch.mean(grid_patches[:,:,nset1],dim=2)
+            # score += F.mse_loss(denoised0,denoised1).item()
+
+            # -- neurips 2019 --
+            rep0 = repeat(denoised0,'r b c p1 p2 -> r b tile c p1 p2',tile=len(nset0))
+            rep01 = repeat(denoised0,'r b c p1 p2 -> r b tile c p1 p2',tile=len(nset1))
+            res0 = grid_patches[:,:,nset0] - rep0
+
+            rep1 = repeat(denoised1,'r b c p1 p2 -> r b tile c p1 p2',tile=len(nset1))
+            rep10 = repeat(denoised1,'r b c p1 p2 -> r b tile c p1 p2',tile=len(nset0))
+            res1 = grid_patches[:,:,nset1] - rep1
+
+            xterms01 = res0 + rep10
+            xterms10 = res1 + rep01
+
+            # score += F.mse_loss(xterms01,xterms10).item()
+            score += F.mse_loss(xterms01,grid_patches[:,:,nset0]).item()
+            score += F.mse_loss(xterms10,grid_patches[:,:,nset1]).item()
+
+            count += 1
+        score /= count
+
+        # -- store best score --
+        if score < best_score:
+            best_score = score
+            best_select = nh_grid
+
+        # -- add score to results --
+        scores[nh_index] = score
+
+    if K == -1:
+        return best_score,best_select
+    else:
+        indices = np.argsort(scores)[:K]
+        scores_topK = scores[indices]
+        indices_topK = nh_grids[indices]
+        return scores_topK,indices_topK
+
+def abp_search_pair(patches,burst_idx,PS,NH):
+    R,B,N = patches.shape[:3]
+    FMAX = np.finfo(np.float).max
+    REF_NH = get_ref_nh(NH)
     ref_patch = patches[:,:,N//2,REF_NH,:,:,:]
     assert len(burst_idx) == 2, "Chunks of 2 right now."
     # best_value,best_select = FMAX*torch.ones(R,B),torch.zeros(R,B,2).type(torch.long)
@@ -122,69 +199,124 @@ def abp_search_split(patches,burst_idx,PS,NH):
             if value < best_value:
                 best_value = value
                 best_select = select
-    print(best_select)
     return best_select
 
-def tile_burst_patches(burst,PS,NH):
+#
+# ABP "Pairs" Search (old)
+# 
+
+def run_abp_patch_search_pairs_global_dynamics(patches,PS,NH):
+
+    # -- shapes --
+    R,B,N = patches.shape[:3]
+    REF_NH = get_ref_nh(NH)
+    mid_NH = torch.LongTensor([REF_NH])
+
+    # -- init -- 
+    best_indices = torch.zeros(B,N).type(torch.long)
+
+    alpha = 4.
+    pn_noisy = torch.poisson(alpha* (patches+0.5) )/alpha
+
+    # -- run comparisons --
+    for b in range(B):
+        features_b = pn_noisy[:,[b]]
+
+        if N == 5:
+            left_idx = torch.LongTensor(np.r_[:N//2])
+            best_left = abp_search_pair(features_b,left_idx,PS,NH)
+    
+            right_idx = torch.LongTensor(np.r_[N//2+1:N])
+            best_right = abp_search_pair(features_b,right_idx,PS,NH)
+        
+            best_idx_b = torch.cat([best_left,mid_NH,best_right],dim=0).type(torch.long)
+        elif N == 3:
+            no_mid_idx = torch.LongTensor(np.r_[0,2])
+            best_idx = abp_search_pair(features_b,no_mid_idx,PS,NH)
+            best_idx_b = torch.cat([best_idx[[0]],mid_NH,best_idx[[1]]],dim=0).type(torch.long)
+        best_indices[b] = best_idx_b
+    return best_indices
+
+
+#
+# ABP Test Search
+# 
+
+def abp_test_search_old(cfg,burst):
+    """
+    burst: shape = (N,B,C,H,W)
+    """
+
+    # -- prepare variables --
+
     N,B,C,H,W = burst.shape
-    dilation,padding,stride = 1,0,1
-    unfold = nn.Unfold(PS,dilation,padding,stride)
-    batch = rearrange(burst,'n b c h w -> (n b) c h w')
-    tiled = tile_batch(batch,PS,NH)
+    n_grid = torch.arange(N)
+    mid = torch.LongTensor([N//2])
+    no_mid = torch.LongTensor(np.r_[np.r_[:N//2],np.r_[N//2+1:N]])
+    PS = cfg.patchsize
+    NH = cfg.nh_size
 
-    save_ex = rearrange(tiled,'nb t1 t2 c h w -> nb t1 t2 c h w')
-    save_ex = save_ex[:,NH//2,NH//2,:,:,:]
-    tv_utils.save_image(save_ex,"save_ex.png",normalize=True)
-    print("tiled_ex.shape",save_ex.shape)
+    # -- apply noise for testing --
+    patches = tile_burst_patches(burst,PS,NH)
+    gn_noisy = torch.normal(patches,75./255.)
+    alpha = 4.
+    pn_noisy = torch.poisson(alpha* (patches+0.5) )/alpha
+    # patches.shape = (R,B,N,NH^2,C,PS,PS)
 
-    tiled = rearrange(tiled,'nb t1 t2 c h w -> nb (t1 t2 c) h w')
-    patches = unfold(tiled)
-    patches = rearrange(patches,'nb (t c ps1 ps2) r -> nb r t ps1 ps2 c',c=C,ps1=PS,ps2=PS)
-    patches = rearrange(patches,'(n b) r t ps1 ps2 c -> r b n t c ps1 ps2',n=N)
-
-    unrolled_img = tile_batches_to_image(patches,NH,PS,H)
-    tv_utils.save_image(unrolled_img,"unroll_img.png",normalize=True)
-
-    return patches
     
-def tile_batches_to_image(patches,NH,PS,H):
-    REF_NH = NH**2//2 + NH//2
-    unrolled_img = patches[:,:,:,REF_NH,:,PS//2,PS//2]
-    unrolled_img = rearrange(unrolled_img,'(h w) b n c -> (b n) c h w',h=H)
-    return unrolled_img
+    unrolled_img = tile_batches_to_image(gn_noisy,NH,PS,H)
+    tv_utils.save_image(unrolled_img,"gn_noisy.png",normalize=True,range=(-.5,.5))
 
-def tile_batch(batch,PS,NH):
+    unrolled_img = tile_batches_to_image(pn_noisy,NH,PS,H)
+    tv_utils.save_image(unrolled_img,"pn_noisy.png",normalize=True,range=(0.,1.))
+
+
     """
-    Creates a tiled version of the input batch to be able to be rolled out using "unfold"
-    
-    The number of neighborhood pixels to include around each center pixel is "NH"
-    The size of the patch around each chosen index (including neighbors) is "PS"
-    
-    We want to only pad the image once with "reflect". Padding an already padded image
-    leads to a "reflection" of a "reflection", and this leads to even stranger boundary 
-    condition behavior than whatever one "reflect" will do.
+    For each N we pick 1 element from NH^2.
 
-    We extend the image to its final size to apply "unfold" (hence the Hnew, Wnew)
+    Integer programming problem with state space size (NH^2)^(N-1)
     
-    We tile the image w.r.t the neighborhood size so each original center pixel
-    has NH neighboring patches.
+    Dynamic programming to the rescue. Divide-and-conquer?
     """
-    B,C,H,W = batch.shape
-    Hnew,Wnew = H + 2*(PS//2),W + 2*(PS//2)
-    M = PS//2 + NH//2 # reaching up NH/2 center-pixels. Then reach up PS/2 more pixels
-    batch_pad = F.pad(batch, [M,]*4, mode="reflect")
-    tiled,idx = [],0
-    for i in range(NH):
-        img_stack = []
-        for j in range(NH):
-            img_stack.append(batch_pad[..., i:i + Hnew, j:j + Wnew])
-            # -- test we are correctly cropping --
-            # print(i+Hnew,j+Wnew,H,W,batch_pad.shape)
-            # cmpr = tvF.crop(img_stack[j],PS//2,PS//2,H,W)
-            # print("i,j,idx",i,j,idx,images_to_psnrs(batch,cmpr))
-            # idx += 1
-        img_stack = torch.stack(img_stack, dim=1)
-        tiled.append(img_stack)
-    tiled = torch.stack(tiled,dim=1)
-    return tiled
+    if N != 5: print("\n\n\n\n\n[WARNING]: This program is only coded for N == 5\n\n\n\n\n")
 
+    best_idx = torch.zeros(B,N).type(torch.long)
+    # features = gn_noisy
+    features = pn_noisy
+    # features = torch.zeros_like(pn_noisy)
+    for b in range(B):
+        features_b = features[:,[b]]
+        REF_NH = get_ref_nh(NH)
+        mid = torch.LongTensor([REF_NH])
+        # m_patch = features_b[:,:,N//2,REF_NH,:,:,:]
+        # s_features = features[:,:,no_mid,select,:,:,:] # (R,B,N-1,C,PS,PS)
+        # ave_features = torch.mean(s_features,dim=2) # (R,B,C,PS,PS)
+        # psnr = F.mse_loss(ave_features,m_patch).item()
+    
+        left_idx = torch.LongTensor(np.r_[:N//2])
+        # best_left = torch.zeros(len(left_idx))
+        best_left = abp_search_pair(features_b,left_idx,PS,NH)
+    
+        right_idx = torch.LongTensor(np.r_[N//2+1:N])
+        # best_right = torch.zeros(len(right_idx))
+        best_right = abp_search_pair(features_b,right_idx,PS,NH)
+        
+        best_idx_b = torch.cat([best_left,mid,best_right],dim=0).type(torch.long)
+        best_idx[b] = best_idx_b
+
+    best_idx = best_idx.to(patches.device)
+    best_patches = []
+    for b in range(B):
+        patches_n = []
+        for n in range(N):
+            patches_n.append(patches[:,b,n,best_idx[b,n],:,:,:])
+        patches_n = torch.stack(patches_n,dim=1)
+        best_patches.append(patches_n)
+    best_patches = torch.stack(best_patches,dim=1)
+    # best_patches = torch.stack([patches[:,:,n,best_idx[b,n],:,:,:] for n in range(N)],dim=1)
+    print("bp",best_patches.shape)
+    ave_patches = torch.mean(best_patches,dim=2)
+    set_imgs = rearrange(best_patches[:,:,:,:,PS//2,PS//2],'(h w) b n c -> b n c h w',h=H)
+    ave_img = rearrange(ave_patches[:,:,:,PS//2,PS//2],'(h w) b c -> b c h w',h=H)
+    print("A",ave_img.shape)
+    return best_idx,ave_img,set_imgs

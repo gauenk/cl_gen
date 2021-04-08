@@ -41,7 +41,8 @@ from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 from n2sim.sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB,compute_similar_bursts_analysis
 from n2sim.debug import print_tensor_stats
-from .abp_search import abp_search
+from .abp_search import abp_test_search_old,abp_search
+from .test_abp_search import test_abp_global_search
 from .noise_settings import get_keys_noise_level_grid
 from .utils import compute_similar_psnr
 
@@ -220,6 +221,10 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
         # -- grab data batch --
         if small_ds and batch_idx >= ds_size: train_iter = iter(train_loader) # reset if too big
         sample = next(train_iter)
+        sample = next(train_iter)
+        sample = next(train_iter)
+        sample = next(train_iter)
+
         burst,raw_img,directions = sample['burst'],sample['clean'],sample['directions']
         burst = burst.cuda(non_blocking=True)
 
@@ -292,6 +297,7 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             #      Formatting Images & FP
             #
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+            print("Directions: ",directions)
 
             alpha = 4.
             batch = burst #rearrange(burst,'n b c h w -> b n c h w')
@@ -302,28 +308,81 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             db_index = torch.LongTensor(np.r_[np.r_[:N//2],np.r_[N//2+1:N]])
             psnrs,sims = compute_similar_psnr(cfg,noisy_img,ftr_img,clean,
                                               q_index,db_index,crop=False)
-            print(psnrs)
+            print("Noise2Sim: {}".format(psnrs))
             tv_utils.save_image(sims,"n2sim_images.png",normalize=True)
 
             clean = raw_img-0.5
-            indices,ave,set_imgs = abp_search(cfg,burst)
+            # print("NO NOISE")
+            # print("Using all 5 frames")
+            # scores,aligned = abp_search(cfg,burst)
+            # print(f"[Scores]: {scores}")
+            # for n in range(aligned.shape[0]):
+            #     psnrs = images_to_psnrs(aligned[n],clean)
+            #     print("[ALIGNED-CLEAN][{}]: {}".format(n,psnrs))
+
+            # print("Using only middle 3 of 5 frames")
+            # clean = raw_img-0.5
+            # scores,aligned = abp_search(cfg,burst[1:4])
+            # print(f"[Scores]: {scores}")
+            # for n in range(aligned.shape[0]):
+            #     psnrs = images_to_psnrs(aligned[n],clean)
+            #     print("[ALIGNED-CLEAN][{}]: {}".format(n,psnrs))
+
+
+            print("NOISE")
+
+            print("Using all 5 frames")
+            indices,ave,set_imgs = test_abp_global_search(cfg,burst)
+            print("set_imgs.shape",set_imgs.shape)
+            print(f"Indices: {indices}")
+            # indices,ave,set_imgs = abp_test_search(cfg,burst)
             tv_utils.save_image(ave,'ave.png',normalize=True)
-            set_imgs_BR = rearrange(set_imgs,'b r c h w -> (b r) c h w')
-            tv_utils.save_image(set_imgs_BR,'set_imgs.png',normalize=True)
+            R = set_imgs.shape[0]
+            set_imgs_BR = rearrange(set_imgs,'n b c h w -> (b n) c h w')
+            tv_utils.save_image(set_imgs_BR,'set_imgs_noisy_5.png',normalize=True)
+
+            delta_imgs = set_imgs.cpu() - clean.unsqueeze(0).repeat(R,1,1,1,1)
+            delta_imgs = rearrange(delta_imgs,'n b c h w -> (b n) c h w')
+            tv_utils.save_image(delta_imgs,'delta_imgs_noisy_5.png',normalize=True)
 
             burstNB = rearrange(burst,'n b c h w -> (n b) c h w')
             tv_utils.save_image(burstNB,'burst.png',normalize=True)
             tv_utils.save_image(clean,'clean.png',normalize=True)
             print(ave.shape,burst.shape,clean.shape)
             print("[AVE-CLEAN]:",images_to_psnrs(ave,clean))
-            R = set_imgs.shape[1]
-            for r in range(R):
+            N = set_imgs.shape[0]
+            for n in range(N):
                 # print(set_imgs.min(),set_imgs.max(),set_imgs.mean())
                 # print(clean.min(),clean.max(),clean.mean())
-                psnrs = images_to_psnrs(set_imgs[:,r],clean)
-                print("[SET-CLEAN][{}]: {}".format(r,psnrs))
+                psnrs = images_to_psnrs(set_imgs[n,:],clean)
+                print("[SET-CLEAN][{}]: {}".format(n,psnrs))
 
-            exit()
+            print("Using only 3 of 5 frames")
+            indices,ave,set_imgs = test_abp_global_search(cfg,burst[1:4])
+            print(f"Indices: {indices}")
+            # indices,ave,set_imgs = abp_test_search(cfg,burst)
+            tv_utils.save_image(ave,'ave.png',normalize=True)
+            set_imgs_BR = rearrange(set_imgs,'n b c h w -> (b n) c h w')
+            tv_utils.save_image(set_imgs_BR,'set_imgs_noisy_3.png',normalize=True)
+
+            burstNB = rearrange(burst,'n b c h w -> (n b) c h w')
+            tv_utils.save_image(burstNB,'burst.png',normalize=True)
+            tv_utils.save_image(clean,'clean.png',normalize=True)
+            print(ave.shape,burst.shape,clean.shape)
+            print("[AVE-CLEAN]:",images_to_psnrs(ave,clean))
+            N = set_imgs.shape[0]
+            for n in range(N):
+                # print(set_imgs.min(),set_imgs.max(),set_imgs.mean())
+                # print(clean.min(),clean.max(),clean.mean())
+                psnrs = images_to_psnrs(set_imgs[n,:],clean)
+                print("[SET-CLEAN][{}]: {}".format(n,psnrs))
+
+            print(set_imgs.shape,clean.shape)
+            delta_imgs = set_imgs.cpu() - clean.unsqueeze(0).repeat(N,1,1,1,1)
+            delta_imgs = rearrange(delta_imgs,'b r c h w -> (b r) c h w')
+            tv_utils.save_image(delta_imgs,'delta_imgs_noisy_3.png',normalize=True)
+
+            continue
 
 
             patches = sample_burst_patches(cfg, model, burst+0.5)
