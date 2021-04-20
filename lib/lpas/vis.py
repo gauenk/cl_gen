@@ -18,7 +18,7 @@ def explore_record(record):
     # order = ['score_function','patchsize','noise_type','nframes','nblocks','ppf']
     # patchsize = 13
     nframes = 3
-    nblocks = 5
+    nblocks = 3
     ppf = 1.0
     score_function = ['ave','pairwise','refcmp']
 
@@ -55,9 +55,9 @@ def explore_record(record):
                     # print("a",np.argsort(noise_scores[0])[0],noise_index)
 
                     sub = 2
-                    C = 6*(75./255.)**2
-                    noise_sort = np.argsort((noise_scores-C)**2,axis=1)[:sub,:100]
-                    align_sort = np.argsort(align_scores,axis=1)[:sub,:100]
+                    C = 0#6*(75./255.)**2
+                    noise_sort = np.argsort(noise_scores,axis=1)[:sub,:20]
+                    align_sort = np.argsort(align_scores,axis=1)[:sub,:20]
                     
                     acc,mindist = 0,0
                     for i in range(noise_sort.shape[0]):
@@ -65,7 +65,7 @@ def explore_record(record):
                         acc += float(np.any(noise_sort[i] == align_index[i]))
                     acc /= noise_sort.shape[0]
                     mindist /= noise_sort.shape[0]
-                    print("Noisy Type %s Catch It?: %2.3f | Min Dist: %2.3f" % (noise_type, acc, mindist) )
+                    print("Noisy Type %s | Score Function %s | Catch It?: %2.3f | Min Dist: %2.3f" % (noise_type, score_fxn, acc, mindist) )
                     colors = np.arange(1,align_sort.shape[0]+1)[:,None] * np.ones_like(align_sort)
                     noise_sort = noise_sort.ravel().astype(np.float)
                     align_sort = align_sort.ravel().astype(np.float)
@@ -95,7 +95,7 @@ def explore_record(record):
                     # print(np.min(align_scores))
     
                     # print(nframes,score_fxn,noise_type,noise_acc,clean_acc)
-                    # print(patchsize,nframes,score_fxn,noise_type,noise_acc,clean_acc)
+                    print(patchsize,nframes,score_fxn,noise_type,noise_acc,clean_acc)
                     # psnrs = np.array([noise_psnr,clean_psnr,align_psnr])
                     # print(psnrs)
 

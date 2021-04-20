@@ -64,11 +64,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
-    cfg.n2n = True
+    cfg.n2n = False
+    cfg.abps = True
+    cfg.abps_inputs = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 5
+    cfg.N = 3
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 8
@@ -88,9 +90,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.kpn_1f_cascade_num = 1
 
     cfg.burst_use_alignment = False
-    cfg.burst_use_unet = True
-    cfg.burst_use_unet_only = True
+    cfg.burst_use_unet = False
+    cfg.burst_use_unet_only = False
     cfg.kpn_burst_alpha = 0.998
+
+    # -- abp search parameters --
+    cfg.patchsize = 15
+    cfg.nh_size = 3
 
     # -- noise-2-similar parameters --
     cfg.sim_shuffleK = True
@@ -105,7 +111,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # -- gaussian noise --
     # cfg.noise_type = 'g'
     # cfg.noise_params.ntype = cfg.noise_type
-    # cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    # cfg.noise_params['g']['stddev'] = 75.
     # noise_level = Ggrid[G_grid_idx] # don't worry about
     # noise_level_str = f"{int(noise_level)}"
 
@@ -128,10 +134,11 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.log_interval = 25 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
-    cfg.dynamic.ppf = 0
+    cfg.dynamic.ppf = 1
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
-    cfg.dynamic.total_pixels = cfg.dynamic.ppf*cfg.N
+    cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.N-1)
+    cfg.dataset.load_residual = True
     
     # -- asdf --
     cfg.solver = edict()
@@ -156,7 +163,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
 
     # -- experiment info --
-    name = "n2sim_burstv2"
+    name = "n2sim_burstv2_testingAlignedAbps"
     ds_name = cfg.dataset.name.lower()
     sup_str = "sup" if cfg.supervised else "unsup"
     bs_str = "b{}".format(cfg.batch_size)
@@ -209,6 +216,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     checkpoint = cfg.model_path / Path("checkpoint_{}.tar".format(cfg.epochs))
     # if checkpoint.exists(): return
 
+    print(f"Supervised: {cfg.supervised} | Noise2Noise: {cfg.n2n} | APBS: {cfg.abps} | ABPS-Inputs: {cfg.abps_inputs}")
     print(f"Sim Method: {cfg.sim_method} | Shuffle K {cfg.sim_shuffleK} | Sim K: {cfg.sim_K} | Patchsize: {cfg.sim_patchsize}")
     print("N: {} | Noise Level: {} | Noise Type: {}".format(cfg.N,noise_level_str,noise_type))
 

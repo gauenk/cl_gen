@@ -70,7 +70,7 @@ def test_run_abp_patch_search_exhaustive_global_dynamics(noisy,clean,PS,NH):
 
 def test_abp_search_global_dynamics(patches,clean,burst_indices,PS,NH,K=2,verbose=False):
     
-    if burst_indices.shape[0] <= 3:
+    if burst_indices.shape[0] <= 2:
         return test_abp_search_exhaustive_global_dynamics(patches,clean,burst_indices,PS,NH,K=K)
 
     # -- init shapes --

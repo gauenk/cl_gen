@@ -258,6 +258,7 @@ def compute_similar_bursts(cfg,burst_query,burst_database,K,noise_level,patchsiz
             #     sim_image = torch.cat([image_flat,sim_image],dim=0)
 
             # -- shuffle across each k --
+            # POSSIBLE ERROR: indexing each color channel separately
             R = sim_image.shape[0]
             if shuffle_k:
                 if kindex is None:
@@ -479,14 +480,19 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
     # -- tile patches --
     q_patches = tile_patches(burst_query,patchsize,search_method)
     B,N,R,ND = q_patches.shape
+    print(B,N,R,ND,"B,N,R,ND")
+
 
     db_patches = tile_patches(burst_database,patchsize,search_method)
     Bd,Nd,Rd,NDd = db_patches.shape
+    print(Bd,Nd,Rd,NDd,"B,N,R,ND")
 
     clean_patches = tile_patches(clean_database,patchsize,search_method)
     Bd,Nd,Rd,NDd = clean_patches.shape
+    print(Bd,Nd,Rd,NDd,"B,N,R,ND")
 
     ND = q_patches.ftr.shape[-1]
+
 
     # -- faiss setup --
     res = faiss.StandardGpuResources()
@@ -531,6 +537,8 @@ def compute_similar_bursts_analysis(cfg,burst_query,burst_database,clean_databas
 
             # -- setup database --
             if db_level == "frame":
+                print(db_patches.pix.shape)
+                print(clean_patches.ftr.shape)
                 database.pix = db_patches.pix[b,n]
                 database.ftr = db_patches.ftr[b,n]
                 cdatabase.pix = clean_patches.pix[b,n]

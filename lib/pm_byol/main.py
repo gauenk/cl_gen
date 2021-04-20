@@ -39,7 +39,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -98,13 +98,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_shuffleK = True
     cfg.sim_method = "l2"
     cfg.sim_K = 8
-    cfg.sim_patchsize = 5
+    cfg.sim_patchsize = 7
 
     # -- byol parameters --
     cfg.byol_patchsize = 7
     cfg.byol_nh_size = 9
     cfg.byol_in_ftr_size = 3*cfg.byol_nh_size**2
-    cfg.byol_out_ftr_size = 32 # 3*cfg.byol_patchsize**2
+    cfg.byol_out_ftr_size = 5 # 3*cfg.byol_patchsize**2
     cfg.byol_st_cat = 'v1'
     cfg.byol_num_test_samples = 1    
     cfg.byol_num_train_rand_crop = 1
@@ -141,13 +141,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
-    cfg.batch_size = 32
-    cfg.init_lr = 3e-4 # used to be 5e-4, 03/27/2020
+    cfg.batch_size = 4
+    cfg.init_lr = 5e-5 # used to be 5e-4, 03/27/2020
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
     cfg.epochs = 100
     cfg.color_cat = True
-    cfg.log_interval = 10 #int(int(50000 / cfg.batch_size) / 500)
+    cfg.log_interval = 300 #int(int(50000 / cfg.batch_size) / 500)
     cfg.save_interval = 2
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 2

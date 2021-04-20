@@ -221,7 +221,7 @@ class BYOL(nn.Module):
 
         def null(image): return image
         gn,pn = AddGaussianNoise(std=75.),AddPoissonNoiseBW(4.),
-        self.gn = gn
+        self.gn,self.pn = gn,pn
         self.choose_noise = PickOnlyOne([gn,null])
 
         self.online_encoder = NetWrapper(net, projection_size,
@@ -267,14 +267,21 @@ class BYOL(nn.Module):
         if return_embedding:
             return self.online_encoder(x,True)
 
+
+        # -- this works for Gaussian(75); basically just denoising --
+        # PSNR: 22.74 v.s. 27.46 & 22.36 v.s. 26.85 | Harms clean images; 29 v 26 and 31 v 42
         noisy_xform = self.choose_noise()
         order = torch.randperm(2)
         # noisy1,noisy2 = noisy_xform(x),noisy_xform(x)
-        noisy1,noise2 = self.gn(x),x
-        noisy_l = [noisy1,noise2]
-        noisy1,noise2 = noisy_l[order[0]],noisy_l[order[1]]
+        noisy1,noisy2 = self.gn(x),x
+        noisy_l = [noisy1,noisy2]
+        noisy1,noisy2 = noisy_l[order[0]],noisy_l[order[1]]
 
-        image_one, image_two = self.augment1(x), self.augment2(x)
+        # -- test 2 --
+        # noisy_xform1,noisy_xform2 = self.choose_noise(),self.choose_noise()
+        # noisy1,noisy2 = noisy_xform1(x),noisy_xform2(x)
+
+        image_one, image_two = self.augment1(noisy1), self.augment2(noisy2)
 
         online_proj_one, _ = self.online_encoder(image_one)
         online_proj_two, _ = self.online_encoder(image_two)
@@ -292,8 +299,8 @@ class BYOL(nn.Module):
         loss_one = loss_fn(online_pred_one, target_proj_two.detach())
         loss_two = loss_fn(online_pred_two, target_proj_one.detach())
 
-        simclr_input = torch.stack([online_proj_one,online_proj_two],dim=0)
+        simclr_input = torch.stack([online_pred_one,online_pred_two],dim=0)
         loss_simclr = self.simclr_loss(simclr_input)
 
-        loss = loss_one + loss_two + loss_simclr
+        loss = 0.1*(loss_one + loss_two) + loss_simclr
         return loss.mean()

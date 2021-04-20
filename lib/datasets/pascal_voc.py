@@ -32,24 +32,23 @@ from .common import get_loader
 
 class DenoiseVOC(VOCDetection):
 
-    def __init__(self,root,N,noise_info,train=True, rtype='list'):
+    def __init__(self,root, N, noise_info, image_set, rtype='list'):
 
         # -- correctly super with new name for path considerations --
         self.__class__.__name__ = "voc"
-        super(DenoiseVOC, self).__init__( root, train=train, transform=None)
+        super(DenoiseVOC, self).__init__( root, image_set=image_set,transform=None)
 
         # -- set params --
         self.N = N
-        self.noise_params = noise_params
+        self.noise_params = noise_info
         self.spoof = torch.Tensor([0.])
 
         # -- noise transform --
         noise_trans = get_noise_transform(noise_info)
 
         # -- create transform of raw image --
-        raw_trans = [torchvision.transforms.Resize(size=32),
-                 tvT.ToTensor()]
-        raw_trans = tvT.Compose(trans)
+        raw_trans = [tvT.ToTensor()]
+        raw_trans = tvT.Compose(raw_trans)
 
         # -- set the transforms --
         self.raw_trans = raw_trans
@@ -73,8 +72,8 @@ class DenoiseVOC(VOCDetection):
         noisy_img = self.noise_trans(img)
         raw_img = self.raw_trans(img)
 
+        spoof_res,spoof_dir = self.spoof,self.spoof
         if self._return_type == "list":
-            spoof_res,spoof_dir = self.spoof,self.spoof
             return noisy_img, spoof_res, raw_img, spoof_dir
         elif self._return_type == "dict":
             return noisy_img, spoof_res, raw_img, spoof_dir
@@ -342,11 +341,11 @@ def get_voc_dataset(cfg,mode):
         noise_info = cfg.noise_params
         dynamic = cfg.dynamic
         rtype = 'dict' if cfg.dataset.dict_loader else 'list'
-        data.tr = DenoiseVOC(root,N,cfg.noise_info,train=True,rtype=rtype)
-        data.val = DenoiseVOC(root,N,cfg.noise_info,train=False,rtype=rtype)
-        data.val.data = data.val.data[0:2*2048]
-        data.val.targets = data.val.targets[0:2*2048]
-        data.te = DenoiseVOC(root,N,cfg.noise_info,train=False,rtype=rtype)
+        data.tr = DenoiseVOC(root,N,noise_info,image_set='train',rtype=rtype)
+        data.val = DenoiseVOC(root,N,noise_info,image_set='train',rtype=rtype)
+        # data.val.data = data.val.data[0:2*2048]
+        # data.val.targets = data.val.targets[0:2*2048]
+        data.te = DenoiseVOC(root,N,noise_info,image_set='val',rtype=rtype)
     elif mode == "dynamic":
         batch_size = cfg.batch_size
         N = cfg.N

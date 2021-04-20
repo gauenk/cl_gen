@@ -134,6 +134,7 @@ def test_sim_search_ftr(cfg,clean,model,ftr_types):
     patches = model.patch_helper.prepare_burst_patches(clean)
     patches = patches.cuda(non_blocking=True)
     ps = cfg.byol_patchsize
+
     # shape = (r n b nh_size^2 c ps_B ps_B)
 
     # -- start loop --
@@ -168,8 +169,14 @@ def test_sim_search_ftr(cfg,clean,model,ftr_types):
                     test_patch_helper_indexing(cfg,noisy_img,ftr_img,clean,ftype)
 
                 # -- construct similar image --
-                psnrs_np = compute_similar_psnr(cfg,noisy_img,ftr_img,clean)
-        
+                if ftype != "pix":
+                    sim_patchsize = cfg.sim_patchsize
+                    cfg.sim_patchsize = 1
+                    psnrs_np = compute_similar_psnr(cfg,noisy_img,ftr_img,clean)
+                    cfg.sim_patchsize = sim_patchsize
+                else:
+                    psnrs_np = compute_similar_psnr(cfg,noisy_img,ftr_img,clean)
+                    
                 # -- compute psnr --
                 psnrs[ftype][noise_params.name] = edict()
                 psnrs[ftype][noise_params.name].psnrs = psnrs_np
@@ -475,6 +482,14 @@ def print_psnr_results(psnrs,title):
 
     name = 'clean'
     name_str = "[c]:"
+    ave_std = "%2.2f +/- %2.2f" % (psnrs[name].ave,psnrs[name].std)
+    min_max = "(%2.2f,%2.2f)" % (psnrs[name].min,psnrs[name].max)
+    w_str = f"{title: >15} {name_str: <10} {ave_std: >18} {sep: ^4} {min_max: >12}"
+    print(w_str)
+
+    title = ""
+    name = 'g-25p0'
+    name_str = "[g-25]:"
     ave_std = "%2.2f +/- %2.2f" % (psnrs[name].ave,psnrs[name].std)
     min_max = "(%2.2f,%2.2f)" % (psnrs[name].min,psnrs[name].max)
     w_str = f"{title: >15} {name_str: <10} {ave_std: >18} {sep: ^4} {min_max: >12}"

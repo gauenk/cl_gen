@@ -27,7 +27,8 @@ def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True):
 
     return transform
 
-def choose_noise_transform(noise_info):
+def choose_noise_transform(noise_info, verbose=False):
+    if verbose: print("[datasets/transforms/parse_noise_info.py]: ",noise_info)
     ntype = noise_info.ntype
     noise_params = noise_info[ntype]
     # print(f"NoiseTransformType: {ntype}")
@@ -46,7 +47,7 @@ def choose_noise_transform(noise_info):
         return get_msg_noise(noise_params)
     elif ntype == "msg_simcl":
         return get_msg_simcl_noise(noise_params)
-    elif ntype == "none":
+    elif ntype in ["none","clean"]:
         def null(image): return image
         return null
     else:

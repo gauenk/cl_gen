@@ -41,7 +41,7 @@ from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
 from n2sim.sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB,compute_similar_bursts_analysis
 from n2sim.debug import print_tensor_stats
-from .abp_search import abp_test_search_old,abp_search
+from .abp_search import abp_test_search_old,abp_search,abi_global_search
 from .test_abp_search import test_abp_global_search
 from .noise_settings import get_keys_noise_level_grid
 from .utils import compute_similar_psnr
@@ -300,6 +300,7 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             print("Directions: ",directions)
 
             alpha = 4.
+            clean_burst = burst
             batch = burst #rearrange(burst,'n b c h w -> b n c h w')
             noisy_img = torch.poisson( alpha * (batch+0.5) ) / alpha
             ftr_img = noisy_img
@@ -332,7 +333,13 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             print("NOISE")
 
             print("Using all 5 frames")
-            indices,ave,set_imgs = test_abp_global_search(cfg,burst)
+            # indices,ave,set_imgs = test_abp_global_search(cfg,burst)
+
+            indices = None
+            set_imgs = abi_global_search(cfg,noisy_img,clean_burst)
+            # set_imgs = abp_search(cfg,burst)
+            ave = torch.mean(set_imgs,dim=0)
+
             print("set_imgs.shape",set_imgs.shape)
             print(f"Indices: {indices}")
             # indices,ave,set_imgs = abp_test_search(cfg,burst)
@@ -357,8 +364,42 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
                 psnrs = images_to_psnrs(set_imgs[n,:],clean)
                 print("[SET-CLEAN][{}]: {}".format(n,psnrs))
 
+            print("CLEAN ROUND")
+            indices = None
+            set_imgs = abi_global_search(cfg,clean_burst,clean_burst)
+            # set_imgs = abp_search(cfg,burst)
+            ave = torch.mean(set_imgs,dim=0)
+
+            print("set_imgs.shape",set_imgs.shape)
+            print(f"Indices: {indices}")
+            # indices,ave,set_imgs = abp_test_search(cfg,burst)
+            tv_utils.save_image(ave,'ave.png',normalize=True)
+            R = set_imgs.shape[0]
+            set_imgs_BR = rearrange(set_imgs,'n b c h w -> (b n) c h w')
+            tv_utils.save_image(set_imgs_BR,'set_imgs_noisy_5.png',normalize=True)
+
+            delta_imgs = set_imgs.cpu() - clean.unsqueeze(0).repeat(R,1,1,1,1)
+            delta_imgs = rearrange(delta_imgs,'n b c h w -> (b n) c h w')
+            tv_utils.save_image(delta_imgs,'delta_imgs_noisy_5.png',normalize=True)
+
+            burstNB = rearrange(burst,'n b c h w -> (n b) c h w')
+            tv_utils.save_image(burstNB,'burst.png',normalize=True)
+            tv_utils.save_image(clean,'clean.png',normalize=True)
+            print(ave.shape,burst.shape,clean.shape)
+            print("[AVE-CLEAN]:",images_to_psnrs(ave,clean))
+            N = set_imgs.shape[0]
+            for n in range(N):
+                # print(set_imgs.min(),set_imgs.max(),set_imgs.mean())
+                # print(clean.min(),clean.max(),clean.mean())
+                psnrs = images_to_psnrs(set_imgs[n,:],clean)
+                print("[SET-CLEAN][{}]: {}".format(n,psnrs))
+
+
+            exit()
             print("Using only 3 of 5 frames")
-            indices,ave,set_imgs = test_abp_global_search(cfg,burst[1:4])
+            # indices,ave,set_imgs = test_abp_global_search(cfg,burst[1:4])
+            set_imgs = abi_global_search(cfg,burst)
+            # set_imgs = abp_search(cfg,burst[1:4])
             print(f"Indices: {indices}")
             # indices,ave,set_imgs = abp_test_search(cfg,burst)
             tv_utils.save_image(ave,'ave.png',normalize=True)

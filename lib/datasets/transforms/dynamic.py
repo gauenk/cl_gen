@@ -112,6 +112,7 @@ class GlobalCameraMotionTransform():
         # print("pix diff",torch.sqrt(torch.sum(( a - b)**2)).item())
         # print(tl_list[0],tl_list[-1],d,w,h,pic.size)
 
+        # print("d",torch.LongTensor([np.array(tl) for tl in tl_list]))
         # -- get clean image --
         w_new,h_new = pic.size
         tl_mid = tl_list[middle_index]

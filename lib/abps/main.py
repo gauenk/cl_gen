@@ -43,7 +43,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 2
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -78,7 +78,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 5
+    cfg.N = 3
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 0

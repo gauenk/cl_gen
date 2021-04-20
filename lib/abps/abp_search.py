@@ -8,7 +8,13 @@ import numpy as np
 from einops import rearrange,repeat
 from itertools import chain, combinations
 from pathlib import Path
-import matplotlib.pyplot as plt
+from easydict import EasyDict as edict
+
+# from torch.multiprocessing import Pool, Process, set_start_method, Manager
+# try:
+#      set_start_method('spawn')
+# except RuntimeError:
+#     pass
 
 # -- pytorch imports --
 import torch
@@ -22,6 +28,7 @@ import torchvision.transforms.functional as tvF
 from pyutils.misc import images_to_psnrs
 from .tile_utils import *
 from .abps_utils import *
+from .abi_global_search import abi_global_search
 
 def abp_search(cfg,burst):
     return abp_global_search(cfg,burst)
@@ -42,7 +49,7 @@ def abp_global_search(cfg,burst):
     indices.cuda(non_blocking=True)
 
     # -- recover aligned burst images --
-    aligned = aligned_burst_image_from_indices_global_dynamics(patches,indices)
+    aligned = aligned_burst_image_from_indices_global_dynamics(patches,np.arange(N),indices)
     
     return scores,aligned
     
@@ -59,24 +66,27 @@ def run_abp_patch_search_global_dynamics(patches,PS,NH):
 
     # -- run comparisons --
     for b in range(B):
-        features_b = patches[:,[b]]
         burst_indices = np.r_[np.r_[:N//2],np.r_[N//2+1:N]]
-        args = [features_b,burst_indices,PS,NH]
-        best_score_b,best_indices_b = abp_search_global_dynamics(*args)            
-        best_indices_b = insert_middle(best_indices_b,NH,burst_indices.shape[0])
+        args = [patches[:,[b]],burst_indices,PS,NH]
+        scores_b,indices_b = abp_search_global_dynamics(*args)
+        best_score_b,best_indices_b = scores_b[0],indices_b[0]
+        best_indices_b = insert_nh_middle(best_indices_b,NH,burst_indices.shape[0])
         best_scores[b] = best_score_b
         best_indices[b] = best_indices_b
     return best_scores,best_indices
-
 
 #
 # Primary Coordinate Desc. Search Function
 # 
 
-def abp_search_global_dynamics(patches,burst_indices,PS,NH,K=10,verbose=False):
+def mp_abp_search_global_dynamics(procnum,returns,patches,burst_indices,PS,NH,K=2,verbose=False):
+    scores,patches = abp_search_global_dynamics(patches,burst_indices,PS,NH,K=K,verbose=verbose)
+    returns[procnum] = [scores,patches]
+
+def abp_search_global_dynamics(patches,burst_indices,PS,NH,K=2,verbose=False):
     
-    if burst_indices.shape[0] <= 3:
-        return abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=K,verbose=False)
+    if burst_indices.shape[0] <= 2:
+        return abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=K)
 
 
     # -- init shapes --
@@ -88,11 +98,72 @@ def abp_search_global_dynamics(patches,burst_indices,PS,NH,K=10,verbose=False):
     
     # -- split the burst grid up --
     split_grids = create_split_burst_grid(N)
+    S = split_grids.shape[0]
 
-    # -- init shapes --
+    #
+    # -- recurse --
+    #
+
+    agg = edict()
+    agg.scores = edict({str(n):[] for n in range(N)})
+    agg.indices = edict({str(n):[] for n in range(N)})
+
+    for s,burst_grid in enumerate(split_grids):
+        scores,indices = abp_search_global_dynamics(patches,burst_grid,PS,NH,K=K)
+
+        # -- append to aggregate --
+        for i,n_int in enumerate(burst_grid):
+            n = str(n_int)
+            agg.scores[n].extend(scores)
+            agg.indices[n].extend(indices[:,i])
+
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+    #
+    # -- multiprocessing code --
+    #
+    # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-
+
+    # manager = Manager()
+    # returns = manager.dict()
+    # tasks = []
+    # results = []
+    # for s,burst_grid in enumerate(split_grids):
+    #     task = Process(target=mp_abp_search_global_dynamics,args=(s,returns,patches,burst_grid,PS,NH,),kwargs=dict(K=K))
+    #     tasks.append(task)
+
+    # -- execute tasks --
+    # for t,task in enumerate(tasks):
+    #     task.start()
+    #     if t > 0 and t % 3 == 0: task.join()
+
+    # -- convert to numpy --
+    for n_int in range(N):
+        n = str(n_int)
+        agg.scores[n] = np.array(agg.scores[n])
+        agg.indices[n] = np.array(agg.indices[n])
+
+    # -- pick top K --
+    top_nh_indices = []
+    for n_int in range(N):
+        if n_int == N//2: continue
+        n = str(n_int)
+        search_topK = np.argsort(agg.scores[n])
+        nh_indices_topK = agg.indices[n][search_topK]
+        top_nh_indices.append(np.array(nh_indices_topK))
+
+    # -- create global search grid --
+    top_nh_grid = create_grid_from_ndarrays(top_nh_indices)
+    if verbose: print(f"Top NH Grid {len(top_nh_grid)}")
+
+    # -- final global search --
+    scores,indices = abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,
+                                                                K=K,nh_grids=top_nh_grid)
+
+    return scores,indices
 
 
-def abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=-1,verbose=False):
+def abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,
+                                          K=-1,nh_grids=None,verbose=True):
 
     # -- init vars --
     R,B,N = patches.shape[:3]
@@ -104,7 +175,7 @@ def abp_search_exhaustive_global_dynamics(patches,burst_indices,PS,NH,K=-1,verbo
     ref_patch = patches[:,:,[N//2],[REF_NH],:,:,:]
 
     # -- create search grids --
-    nh_grids = create_nh_grids(BI,NH)
+    if nh_grids is None: nh_grids = create_nh_grids(BI,NH)
     n_grids = create_n_grids(BI)
     if verbose: print(f"NH_GRIDS {len(nh_grids)} | N_GRIDS {len(n_grids)}")
     

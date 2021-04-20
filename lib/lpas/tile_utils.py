@@ -6,16 +6,29 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-def aligned_burst_image_from_indices_global_dynamics(patches,block_indices):
-    patches[np.arange(T),block_indices]
 
+def aligned_burst_from_indices_global_dynamics(patches,t_indices,bl_indices):
+    # new: 4:02, added n_indices
+    R,B = patches.shape[:2]
+    T = t_indices.shape[0]
+    best_patches = []
+    for b in range(B):
+        patches_n = []
+        for t in range(T):
+            patches_n.append(patches[:,b,t_indices[t],bl_indices[b,t],:,:,:])
+        patches_n = torch.stack(patches_n,dim=1)
+        best_patches.append(patches_n)
+    best_patches = torch.stack(best_patches,dim=1)
+    return best_patches
+
+def aligned_burst_image_from_indices_global_dynamics(patches,t_indices,block_indices):
+    aligned_patches = aligned_burst_from_indices_global_dynamics(patches,t_indices,block_indices)
     R,PS = aligned_patches.shape[0],aligned_patches.shape[-1]
     H = int(np.sqrt(R))
     aligned = rearrange(aligned_patches[:,:,:,:,PS//2,PS//2],'(h w) b n c -> n b c h w',h=H)
     return aligned
-    
 
-def tile_burst_patches(burst,PS,N):
+def tile_burst_patches(burst,PS,T):
 
     # -- prepare --
     T,B,C,H,W = burst.shape
@@ -26,7 +39,7 @@ def tile_burst_patches(burst,PS,N):
     batch = rearrange(burst,'t b c h w -> (t b) c h w')
 
     # -- tile images with padding for unfold -- --
-    tiled = tile_batch(batch,PS,N)
+    tiled = tile_batch(batch,PS,T)
 
     # -- unfold to patches --
     tiled = rearrange(tiled,'tb n1 n2 c h w -> tb (n1 n2 c) h w')
@@ -38,11 +51,11 @@ def tile_burst_patches(burst,PS,N):
 
     return patches
 
-def tile_batch(batch,PS,N):
+def tile_batch(batch,PS,T):
     """
     Creates a tiled version of the input batch to be able to be rolled out using "unfold"
     
-    The number of neighborhood pixels to include around each center pixel is "NH"
+    The number of neighborhood pixels to include around each center pixel is "TH"
     The size of the patch around each chosen index (including neighbors) is "PS"
     
     We want to only pad the image once with "reflect". Padding an already padded image
@@ -52,16 +65,16 @@ def tile_batch(batch,PS,N):
     We extend the image to its final size to apply "unfold" (hence the Hnew, Wnew)
     
     We tile the image w.r.t the neighborhood size so each original center pixel
-    has NH neighboring patches.
+    has TH neighboring patches.
     """
     B,C,H,W = batch.shape
     Hnew,Wnew = H + 2*(PS//2),W + 2*(PS//2)
-    M = PS//2 + N//2 # reaching up N/2 center-pixels. Then reach up PS/2 more pixels
+    M = PS//2 + T//2 # reaching up T/2 center-pixels. Then reach up PS/2 more pixels
     batch_pad = F.pad(batch, [M,]*4, mode="reflect")
     tiled,idx = [],0
-    for i in range(N):
+    for i in range(T):
         img_stack = []
-        for j in range(N):
+        for j in range(T):
             img_stack.append(batch_pad[..., i:i + Hnew, j:j + Wnew])
         img_stack = torch.stack(img_stack, dim=1)
         tiled.append(img_stack)

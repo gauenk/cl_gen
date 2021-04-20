@@ -15,8 +15,19 @@ import torchvision.utils as tv_utils
 
 # -- project imports --
 from layers.unet import UNet_small
-from .byol_pytorch import MLP
 from pyutils.misc import images_to_psnrs
+
+class MLP(nn.Module):
+    def __init__(self, dim, projection_size, hidden_size = 256):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_size),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_size, projection_size)
+        )
+
+    def forward(self, x):
+        return self.net(x)
 
 
 class UNetBYOL(nn.Module):
@@ -39,7 +50,7 @@ class UNetBYOL(nn.Module):
         # self.unet_out_size = num_out_channels * patchsize**2
         patchsize_e = patchsize + (patchsize % 2) # add one dim for odd input size
         self.unet_out_size = num_out_channels * patchsize_e**2
-        self.mlp = MLP( self.unet_out_size, num_out_ftrs, hidden_size = 1024)
+        self.mlp = MLP( self.unet_out_size, num_out_ftrs, hidden_size = 256)
 
     def forward(self,input_patches):
         """
@@ -169,6 +180,21 @@ class UNetPatchHelper():
         return ftr_img
 
     def tile_batch(self,batch,PS,NH):
+        """
+        Creates a tiled version of the input batch to be able to be rolled out using "unfold"
+        
+        The number of neighborhood pixels to include around each center pixel is "NH"
+        The size of the patch around each chosen index (including neighbors) is "PS"
+        
+        We want to only pad the image once with "reflect". Padding an already padded image
+        leads to a "reflection" of a "reflection", and this leads to even stranger boundary 
+        condition behavior than whatever one "reflect" will do.
+
+        We extend the image to its final size to apply "unfold" (hence the Hnew, Wnew)
+        
+        We tile the image w.r.t the neighborhood size so each original center pixel
+        has NH neighboring patches.
+        """
         B,C,H,W = batch.shape
         Hnew,Wnew = H + 2*(PS//2),W + 2*(PS//2)
         M = PS//2 + NH//2 # reaching up NH/2 center-pixels. Then reach up PS/2 more pixels
@@ -196,9 +222,7 @@ class UNetPatchHelper():
 
         """
         if burst.shape[0] > 2: print("WARNING: not using N > 2 right now")
-        # from joblib import Parallel, delayed
-        # >>> Parallel(n_jobs=2)(delayed(sqrt)(i ** 2) for i in range(10))
-        # [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
+
         N,B,C,H,W = burst.shape
         burstNB = rearrange(burst,'n b c h w -> (n b) c h w')
 
@@ -207,6 +231,7 @@ class UNetPatchHelper():
         tiled = rearrange(self.tile_batch(burstNB,PS,NH),'nb t1 t2 c h w -> nb (t1 t2 c) h w')
         patches = self.unfold_input(tiled)
         patches = rearrange(patches,'nb (t c ps1 ps2) r -> nb r t ps1 ps2 c',c=C,ps1=PS,ps2=PS)
+        patches = rearrange(patches,'(n b) r t ps1 ps2 c -> r n b t c ps1 ps2',n=N)
 
         # -- parallel code --
         # patches = [None for i in range(HW)]
@@ -216,13 +241,12 @@ class UNetPatchHelper():
         # Parallel(n_jobs=8,prefer="threads")(delayed(pp_setup)(index) for index in range(HW))
 
         # -- serial code --
-        patches = []
-        for index in range(self.img_size**2):
-            patches_i = self.gather_local_patches(burst, index)
-            patches.append(patches_i)
+        # patches = []
+        # for index in range(self.img_size**2):
+        #     patches_i = self.gather_local_patches(burst, index)
+        #     patches.append(patches_i)
+        # patches = torch.stack(patches,dim=0)
 
-        patches = torch.stack(patches,dim=0)
-        print("p",patches.shape)
         return patches
 
     def gather_local_patches(self, burst, in_index):

@@ -57,7 +57,7 @@ def create_split_burst_grid(N):
     # -- shuffle and select some --
     # np.random.shuffle(splits)
     splits = splits[:3]
-
+    splits = np.array([[1,3],[0,4]])
     return splits
 
 def create_nh_grids(BI,NH):
@@ -74,6 +74,21 @@ def create_grid_from_ndarrays(ndarrays):
     grids = torch.LongTensor(grids)
     return grids
 
+def create_powerset_pair_grids(S):
+    indices = np.arange(S)
+    subset_lg = chain.from_iterable(combinations(list(indices), r+1 ) for r in range(S-2,S))
+    subset_lg = np.array([np.array(elem) for elem in list(subset_lg)])
+
+    subset_sm = chain.from_iterable(combinations(list(indices) , r+1 ) for r in range(0,2))
+    subset_sm = np.array([np.array(elem) for elem in list(subset_sm)])
+
+    l_indices = [np.array([i]) for i in indices]
+    subset_ex = list(subset_lg) + list(l_indices)
+    subset_ex.extend(l_indices)
+
+    grids = np.array(np.meshgrid(*[subset_ex,subset_ex]))
+    grids = np.array([grid.ravel() for grid in grids]).T
+    return grids
 
 def create_n_grids(BI):
     # -- adjust for ref patch --

@@ -28,8 +28,9 @@ from datasets import load_dataset
 from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 
 # -- [this folder] project code --
+from .utils import get_ref_block_index,get_block_arangements
 from .config import get_cfg,get_args
-from .fast_unet import fast_unet
+from .explore_fast_unet import fast_unet
 from .eval_score import eval_score
 
 
@@ -41,7 +42,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 1
+    gpuid = 0
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -250,5 +251,6 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     data,loader = load_dataset(cfg,'denoising')
     # data,loader = load_dataset(cfg,'dynamic')
-    fast_unet(cfg,data)
-    # eval_score(cfg,data,overwrite=False)
+    fast_unet(cfg,data,overwrite=False)
+    # eval_score(cfg,data,overwrite=True)
+

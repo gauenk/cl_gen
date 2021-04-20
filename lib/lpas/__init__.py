@@ -1,1 +1,1 @@
-from lpas import *
+from .lpas import lpas_search

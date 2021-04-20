@@ -68,8 +68,8 @@ def sample_burst_patches(cfg,model,burst):
     patches = []
     for index in indices:
         index_window = model.patch_helper.index_window(index,ps=3)
-        for nh_index in index_window:
-            patches_i = model.patch_helper.gather_local_patches(burst, nh_index)
+        for aug_nh_index in index_window:
+            patches_i = model.patch_helper.gather_local_patches(burst, aug_nh_index)
             patches.append(patches_i)
     patches = torch.cat(patches,dim=1)
     return patches
@@ -302,11 +302,12 @@ def train_loop(cfg,model,optimizer,scheduler,train_loader,epoch,record_losses,wr
             #
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
-            psnrs_sim = test_sim_search(cfg,burst[:,:2]+0.5,model)
-            
             patches = sample_burst_patches(cfg, model, burst+0.5)
-            input_patches = model.patch_helper.form_input_patches(patches)
-            final_loss = model(input_patches)
+            input_patches_0 = model.patch_helper.form_input_patches(patches)
+            f_patches = torch.flip(patches,dims=(0,)) # reverse
+            input_patches_1 = model.patch_helper.form_input_patches(f_patches)
+            final_loss = model(input_patches_0)
+            final_loss += model(input_patches_1)
     
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #
@@ -389,9 +390,10 @@ def print_edge_info(burst):
     # -- conv --
     edges = []
     for c in range(weights.shape[0]):
-        edges_c = torch.mean(F.conv2d(burstNB,weights[[c]],padding=2)).item()
+        edges_c = F.conv2d(burstNB,weights[[c]],padding=2)
         edges.append(edges_c)
-    edges = np.mean(edges)
+    edges = torch.stack(edges,dim=0)
+    edges = torch.mean(torch.abs(torch.mean(edges,dim=0)/len(edges))).item()
     title = "[Edges]:"
     edge_str = "%2.2e" % edges
     print(f"{title: >15} {edge_str}")

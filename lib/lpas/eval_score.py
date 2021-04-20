@@ -22,7 +22,7 @@ from .vis import explore_record,plot_ave_nframes_scoreacc_noisetype
 from .tile_utils import tile_burst_patches,aligned_burst_image_from_indices_global_dynamics
 from .scores import get_score_function,refcmp_score
 from .noise import get_noise_config
-from .utils import create_meshgrid,get_ref_block_index
+from .utils import create_meshgrid,get_ref_block_index,get_block_arangements
 
 def eval_score(cfg,data,overwrite=False):
 
@@ -47,28 +47,32 @@ def run_eval_score(cfg,data,eval_fn):
     record = init_record(exp_fields)
     align_clean_score = refcmp_score
 
-    # -- run over each experiment --
-    for exp in tqdm(exp_mesh):
-        noise_xform,dynamic_xform,score_function = init_exp(cfg,exp)
-        block_search_space = get_block_arangements(exp.nblocks,exp.nframes)
-        block_search_space.cuda(non_blocking=True)
+    # -- sample images --
+    noise_xform,dynamic_xform,score_function = init_exp(cfg,exp_mesh[0])
+    for image_id in tqdm(range(3)):
 
-        # -- sample images --
-        for image_id in range(3):
+        # -- sample image --
+        full_image = data.tr[image_id][2]
 
-            # -- sample image --
-            full_image = data.tr[image_id][2]
+        # -- simulate dynamics --
+        torch.manual_seed(123)
+        burst = dynamic_xform(full_image)
+        burst = burst.cuda(non_blocking=True)
 
-            # -- simulate dynamics --
-            burst = dynamic_xform(full_image)
-            burst = burst.cuda(non_blocking=True)
+        # -- tile clean --
+        clean = tile_burst_patches(burst,cfg.patchsize,cfg.nblocks)
 
-            # -- sample clean and noisy information --
-            clean = tile_burst_patches(burst,cfg.patchsize,cfg.nblocks)
+        # -- run over each experiment --
+        for exp in tqdm(exp_mesh,leave=False):
+            noise_xform,dynamic_xform,score_function = init_exp(cfg,exp)
+            block_search_space = get_block_arangements(exp.nblocks,exp.nframes)
+            block_search_space.cuda(non_blocking=True)
+    
+            # -- sample noise --
             noisy = noise_xform(clean)
             
             # -- sample block collections --
-            for block_id in range(960,990):
+            for block_id in tqdm(range(960,990,10),leave=False):
                 # -- create blocks from patches and block index --
                 clean_blocks = get_pixel_blocks(clean,block_id)
                 noisy_blocks = get_pixel_blocks(noisy,block_id)
@@ -91,6 +95,11 @@ def run_eval_score(cfg,data,eval_fn):
                                                        clean_blocks,clean_blocks,
                                                        block_search_space,
                                                        score_paths.align)
+                results['dpixClean'] = compute_pixel_difference(clean_blocks,
+                                                                     block_search_space)
+                results['dpixNoisy'] = compute_pixel_difference(noisy_blocks,
+                                                                     block_search_space)
+
             
                 # -- append to record --
                 record = update_record(record,exp,results,image_id,block_id)
@@ -99,6 +108,25 @@ def run_eval_score(cfg,data,eval_fn):
     print(f"Saving record of information to [{eval_fn}]")
     record.to_csv(eval_fn)
     return record
+
+def compute_pixel_difference(blocks,block_search_space):
+    # -- vectorize search since single patch --
+    R,B,T,N,C,PS1,PS2 = blocks.shape
+    REF_N = get_ref_block_index(int(np.sqrt(N)))
+    #print(cfg.nframes,T,cfg.nblocks,N,block_search_space.shape)
+    assert (R == 1) and (B == 1), "single pixel's block and single sample please."
+    expanded = blocks[:,:,np.arange(T),block_search_space]
+    E = expanded.shape[2]
+    R,B,E,T,C,H,W = expanded.shape
+    PS = PS1
+
+    ref = repeat(expanded[:,:,:,T//2],'r b e c h w -> r b e tile c h w',tile=T-1)
+    neighbors = torch.cat([expanded[:,:,:,:T//2],expanded[:,:,:,T//2+1:]],dim=3)
+    delta = F.mse_loss(ref[...,PS//2,PS//2],neighbors[...,PS//2,PS//2],reduction='none')
+    delta = delta.view(R,B,E,-1)
+    delta = torch.mean(delta,dim=3)
+    pix_diff = delta[0,0]
+    return pix_diff
 
 def score_path_from_exp(eval_fn,exp,image_id,block_id):
     write_dir = eval_fn.parent
@@ -263,10 +291,16 @@ def create_eval_mesh(cfg):
     # scores = ['powerset','ave','extrema','lgsubset','lgsubset_v_indices',
     #           'lgsubset_v_ref','powerset_v_indices']
     # scores = ['lgsubset_v_ref','extrema','lgsubset','ave','lgsubset_v_indices']
-    scores = ['lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices']
+    # scores = ['lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices',
+    #           'fast_unet_lgsubset','fast_unet_lgsubset_v_indices','fast_unet_ave',
+    #           'fast_unet_lgsubset_v_ref']
+    scores = ['fast_unet_lgsubset','fast_unet_lgsubset_v_indices','fast_unet_ave',
+              'fast_unet_lgsubset_v_ref',
+              'lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices',]
 
     # -- create patchsize grid --
-    psgrid = [13,5]
+    # psgrid = [13,5]
+    psgrid = [16]
 
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
@@ -274,10 +308,10 @@ def create_eval_mesh(cfg):
 
     # -- create frame number grid --
     #frames = np.arange(3,9+1,2)
-    frames = [5,3]
+    frames = [3]
 
     # -- create number of local regions grid --
-    blocks = [5] #np.arange(3,9+1,2)
+    blocks = [3] #np.arange(3,9+1,2)
     
     # -- dynamics grid --
     ppf = [1] #np.arange(3,9+1,2)

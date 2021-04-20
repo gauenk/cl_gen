@@ -10,6 +10,7 @@ import torch
 import torch.nn.functional as F
 
 # -- project imports --
+from .fast_unet import run_fast_unet
 from .utils import get_ref_block_index
 
 def get_score_functions(names):
@@ -21,8 +22,8 @@ def get_score_functions(names):
 def get_score_function(name):
     if name == "ave":
         return ave_score
-    elif name == "got":
-        return got_score
+    elif name == "gaussian_ot":
+        return gaussian_ot_score
     elif name == "emd":
         return emd_score        
     elif name == "powerset":
@@ -43,6 +44,14 @@ def get_score_function(name):
         return pairwise_delta_score
     elif name == "refcmp":
         return refcmp_score
+    elif name == "fast_unet_ave":
+        return fast_unet_ave
+    elif name == "fast_unet_lgsubset":
+        return fast_unet_lgsubset
+    elif name == "fast_unet_lgsubset_v_indices":
+        return fast_unet_lgsubset_v_indices
+    elif name == "fast_unet_lgsubset_v_ref":
+        return fast_unet_lgsubset_v_ref
     else:
         raise ValueError(f"Uknown score function [{name}]")
 
@@ -203,55 +212,52 @@ def powerset_v_ref_score(cfg,expanded):
     delta = delta_over_grids(cfg,expanded,grids)
     return delta
 
+#
+# Fast UNet Scores
+#
 
-def create_n_grids(T):
-    # -- create init indices --
-    indices = np.arange(T)
-    I = indices.shape[0]
+def fast_unet_search(cfg,expanded,search_method):
+    R,B,E,T,C,H,W = expanded.shape
+    assert (R == 1) and (B == 1), "Must have one patch and one batch item."
+    scores = torch.zeros(R,B,E)
+    for e in range(E):
+        burst = expanded[0,0,e]
+        score = run_fast_unet(cfg,burst,search_method)
+        scores[0,0,e] = score
+    return scores
 
-    # -- powerset --
-    powerset = chain.from_iterable(combinations(list(indices) , r+1 ) for r in range(I))
-    powerset = np.array([np.array(elem) for elem in list(powerset)])
+def fast_unet_ave(cfg,expanded):
+    search_method = get_score_function("ave")
+    return fast_unet_search(cfg,expanded,search_method)
 
-    # -- subset --
-    subset_lg = chain.from_iterable(combinations(list(indices) , r+1 ) for r in range(I-2,I))
-    subset_lg = np.array([np.array(elem) for elem in list(subset_lg)])
+def fast_unet_lgsubset(cfg,expanded):
+    search_method = get_score_function("lgsubset")
+    return fast_unet_search(cfg,expanded,search_method)
 
-    subset_sm = chain.from_iterable(combinations(list(indices) , r+1 ) for r in range(0,2))
-    subset_sm = np.array([np.array(elem) for elem in list(subset_sm)])
+def fast_unet_lgsubset_v_indices(cfg,expanded):
+    search_method = get_score_function("lgsubset_v_indices")
+    return fast_unet_search(cfg,expanded,search_method)
 
-    subset_ex = np.r_[subset_sm,subset_lg]
+def fast_unet_lgsubset_v_ref(cfg,expanded):
+    search_method = get_score_function("lgsubset_v_ref")
+    return fast_unet_search(cfg,expanded,search_method)
 
-    # -- indices appended with group --
-    l_indices = [[i] for i in indices]
-    l_indices.append(list(np.arange(T)))
+#
+# Optimal Transport Based Losses
+# 
 
-    # -- create grid --
+def gaussian_ot_score(cfg,expanded):
+    R,B,E,T,C,H,W = expanded.shape
+    vectorize = rearrange(expanded,'r b e t c h w -> (r b e t) (c h w)')
+    means = torch.mean(vectorize,dim=1)
+    stds = torch.std(vectorize,dim=1)
 
-    # grids = np.array(np.meshgrid(*[l_indices,l_indices]))
-    # grids = np.array(np.meshgrid(*[indices,indices]))
-    # grids = np.array(np.meshgrid(*[subset_ex,subset_ex]))
-    grids = np.array(np.meshgrid(*[subset_lg,subset_lg]))
-    # grids = np.array(np.meshgrid(*[subset_lg,subset_sm]))
-    # grids = np.array(np.meshgrid(*[subset_sm,subset_sm]))
-    # grids = np.array(np.meshgrid(*[powerset,subset_lg]))
-    # grids = np.array(np.meshgrid(*[powerset,indices]))
-    # grids = np.array(np.meshgrid(*[powerset,powerset]))
-    # grids = np.array(np.meshgrid(*[powerset,[0]]))
-    # grids = np.array(np.meshgrid(*[subset_lg,[0]]))
-    # grids = np.array(np.meshgrid(*[subset_sm,[0]]))
-    # grids = np.array(np.meshgrid(*[ [[0,1],[0,2],[1,2]] ,[0] ]))
-    # grids = np.array(np.meshgrid(*[ [[0,1],[0,2],[0,1,2]] ,[[0]] ]))
-    # grids = np.array(np.meshgrid(*[ [[2],] ,[[0]] ]))
-    grids = np.array([grid.ravel() for grid in grids]).T
-    return grids
-
-def largesmallset_score(cfg,expanded):
-    pass
-
-
-def got_score(cfg,expanded):
-    pass
+    # -- gaussian zero mean, var = noise_level --
+    gt_std = cfg.noise_params['g']['stddev']/255.
+    loss = means**2
+    loss += (stds**2 - 2*gt_std**2)**2
+    losses = torch.mean(rearrange(loss,'(r b e t) -> r b e t',r=R,b=B,e=E,t=T),dim=3)
+    return losses
 
 def emd_score(cfg,expanded):
     pass

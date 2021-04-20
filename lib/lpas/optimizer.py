@@ -6,15 +6,18 @@ from .samplers import FrameIndexSampler,BlockIndexSampler
 
 class AlignmentOptimizer():
 
-    def __init__(self,patches,motion_type,nsteps):
+    def __init__(self,patches,motion_type,nsteps,motion,score_params):
         self.patches = patches
         self.motion_type = motion_type
         self.nsteps = nsteps
+        self.motion = motion
+        self.score_params = score_params
 
         # -- create frame sampler --
         B,R,T,H,C,H,W = patches.shape
-        self.frame_sampler = FrameIndexSampler(T,H)
-        self.block_sampler = BlockIndexSampler(T,H)
+        self.frame_sampler = FrameIndexSampler(T,H,motion)
+        self.block_sampler = BlockIndexSampler(T,H,motion)
+        self.motion_sampler = MotionSampler(T,H,motion)
 
         # -- samples of nh indices for each frame --
         self.samples = {t:[] for t in range(patches.shape[2])}
@@ -22,7 +25,7 @@ class AlignmentOptimizer():
     
     def get_ref_h(self):
         H = int(np.sqrt(self.patches.shape[3]))
-        return H**2//2 + H//2*(NH%2==0)
+        return H**2//2 + H//2*(H%2==0)
 
     def step(self,search_frames,fixed_frames):
         # -- setup --
@@ -72,15 +75,24 @@ class AlignmentOptimizer():
         return samples
 
     def compute_frame_scores(self,ref,nh_patches):
+        stype = self.score_params.stype
+        if stype == "raw":
+            return self.compute_raw_frame_scores(ref,nh_patches)
+        elif stype == "cog":
+            return self.compute_cog_frame_scores(ref,nh_patches)
+        else:
+            raise ValueError(f"Uknown score type [{stype}]")
 
+    def compute_cog_frame_scores(self,ref,nh_patches):
+        pass
+
+    def compute_raw_frame_scores(self,ref,nh_patches):
         # -- include the reference patch --
         aug_patches = torch.cat([ref,nh_patches],dim=2)
         for (nset0,nset1) in n_grids[:100]:
-
             # -- original --
             denoised0 = torch.mean(grid_patches[:,:,nset0],dim=2)
             denoised1 = torch.mean(grid_patches[:,:,nset1],dim=2)
-
 
     def update(self,samples,search,fixed):
         pass
