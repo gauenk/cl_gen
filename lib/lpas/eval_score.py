@@ -24,11 +24,12 @@ from .scores import get_score_function,refcmp_score
 from .noise import get_noise_config
 from .utils import create_meshgrid,get_ref_block_index,get_block_arangements
 
+EVAL_DIR = Path(f"{ROOT_PATH}/output/lpas/eval_score")
+if not EVAL_DIR.exists(): EVAL_DIR.mkdir(parents=True)
+
 def eval_score(cfg,data,overwrite=False):
 
-    eval_dir = Path(f"{ROOT_PATH}/output/lpas/eval_score")
-    if not eval_dir.exists(): eval_dir.mkdir(parents=True)
-    eval_fn = Path(eval_dir / "./default.csv")
+    eval_fn = Path(EVAL_DIR / "./default.csv")
     print(f"Eval filepath [{eval_fn}]")
     if (not eval_fn.exists()) or overwrite: record = run_eval_score(cfg,data,eval_fn)
     else: record = pd.read_csv(eval_fn)
@@ -65,7 +66,9 @@ def run_eval_score(cfg,data,eval_fn):
         # -- run over each experiment --
         for exp in tqdm(exp_mesh,leave=False):
             noise_xform,dynamic_xform,score_function = init_exp(cfg,exp)
-            block_search_space = get_block_arangements(exp.nblocks,exp.nframes)
+            # block_search_space = get_block_arangements(exp.nblocks,exp.nframes)
+            bss = get_small_test_block_arangements(EVAL_DIR,cfg.nblocks,cfg.nframes,2,3)
+            block_search_space = bss 
             block_search_space.cuda(non_blocking=True)
     
             # -- sample noise --
@@ -142,6 +145,9 @@ def score_path_from_exp(eval_fn,exp,image_id,block_id):
     return paths
     
     
+def cog_evaluation(cfg,score_fxn,blocks,clean,block_search_space,scores_path):
+    pass
+
 def alignment_optimizer(cfg,score_fxn,blocks,clean,block_search_space,scores_path):
 
     # -- vectorize search since single patch --
@@ -304,14 +310,14 @@ def create_eval_mesh(cfg):
 
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
-    noise_types = ['pn-4p0-0p0','g-75p0']
+    noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
 
     # -- create frame number grid --
     #frames = np.arange(3,9+1,2)
-    frames = [3]
+    frames = [3,5,7]
 
     # -- create number of local regions grid --
-    blocks = [3] #np.arange(3,9+1,2)
+    blocks = [3,5,7] #np.arange(3,9+1,2)
     
     # -- dynamics grid --
     ppf = [1] #np.arange(3,9+1,2)

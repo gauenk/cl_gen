@@ -35,16 +35,17 @@ from pyutils.plot import add_legend
 from layers.unet import UNet_n2n,UNet_small
 from .trace import activation_trace
 from .scores import get_score_function
-from .utils import get_block_arangements,get_ref_block_index,save_image,get_block_arangements_subset
+from .utils import get_block_arangements,get_ref_block_index,save_image,get_block_arangements_subset,pixel_shuffle_uniform,rand_sample_two
 from .cog import COG
 
 FAST_UNET_DIR = Path(f"{settings.ROOT_PATH}/output/lpas/fast_unet/")
 if not FAST_UNET_DIR.exists(): FAST_UNET_DIR.mkdir()
 
+
 def train(cfg,image,clean,burst,model,optim):
-    T = burst.shape[0]
-    picks = list(np.r_[np.r_[:T//2],np.r_[T//2+1:T]])
-    train_steps = 300
+    B,T = 10,burst.shape[0]
+    # picks = list(np.r_[np.r_[:T//2],np.r_[T//2+1:T]])
+    train_steps = 1000
     for i in range(train_steps):
 
         # -- reset --
@@ -52,16 +53,11 @@ def train(cfg,image,clean,burst,model,optim):
         optim.zero_grad()
 
         # -- rand in and out --
-        if T == 2:
-            order = npr.permutation(T)
-            input_idx = order[0]
-            i,j = order[1],order[1]
-        else:
-            input_idx = T//2
-            i,j = random.sample(picks,2)
-        # i,j = random.sample(list(range(burst.shape[0])),2)
-        noisy = burst[[input_idx]]
-        target = burst[[j]]
+        noisy = pixel_shuffle_uniform(burst,B)
+        target = pixel_shuffle_uniform(burst,B)
+        # input_idx = rand_sample_two(R)
+        # noisy = burst[[input_idx]]
+        # target = burst[[j]]
         
         # -- forward --
         rec = model(noisy)
@@ -183,40 +179,6 @@ def score_function_wrapper(score_fxn):
         scores = score_fxn(cfg,tmp)
         return scores[0,0,0]
     return wrapper
-
-
-def explore_cog_record(cfg,record,block_search_space_fn=None):
-    REF_H = get_ref_block_index(3)
-    cfg.nblocks,cfg.nframes = 5,7
-
-    # -- load block search space --
-    if block_search_space_fn:
-        block_search_space = np.load(block_search_space_fn,allow_pickle=True)
-    else:
-        block_search_space = get_block_arangements(cfg.nblocks,cfg.nframes)
-
-    # -- prepare data for plotting --
-    P = len(record)
-    psnr_clean = record['psnr_clean'].to_numpy()
-    cog = record['cog'].to_numpy()
-
-    # -- plot --
-    fig,ax = plt.subplots(2,1,figsize=(8,8))
-    ax[0].plot(np.arange(P),psnr_clean,'x',label='clean')
-    ax[1].plot(np.arange(P),cog,'+',label='cog')
-    # add_legend(ax[1],"cmp",['cog'])
-    plot_dir = Path("./output/lpas/cog/")
-    if not plot_dir.exists(): plot_dir.mkdir()
-    plt.savefig(plot_dir / Path("cog_psnrs.png"))
-
-    for field in record.columns:
-        index = np.argmin(record[field])
-        search = block_search_space[index]
-        print(field,search,index)
-        index = np.argmax(record[field])
-        search = block_search_space[index]
-        print(field,search,index)
-
 
 def explore_fast_unet_record(cfg,record,block_search_space_fn=None):
     REF_H = get_ref_block_index(3)
@@ -456,12 +418,11 @@ def single_image_unet(cfg,queue,full_image,device):
     full_image = full_image.to(device)
     image = tvF.crop(full_image,128,128,32,32)
     T = 5
-    noise_level = 50./255.
 
     # -- poisson noise --
     noise_type = "pn"
     cfg.noise_type = noise_type
-    cfg.noise_params['pn']['alpha'] = 4.0
+    cfg.noise_params['pn']['alpha'] = 40.0
     cfg.noise_params['pn']['readout'] = 0.0
     cfg.noise_params.ntype = cfg.noise_type
     noise_xform = get_noise_transform(cfg.noise_params,use_to_tensor=False)
@@ -474,51 +435,8 @@ def single_image_unet(cfg,queue,full_image,device):
         image_mis = tvF.crop(full_image,128+1,128,32,32)
         m_clean[i] = image_mis
         m_noisy[i] = noise_xform(m_clean[i])
-    # m_clean[1] = image_mis
-    # m_noisy[1] = torch.normal(m_clean[0]-0.5,noise_level)
 
-    save_image(clean,"clean.png")
-    save_image(noisy,"noisy.png")
-    save_image(m_clean,"mis_clean.png")
-    save_image(m_noisy,"m_noisy.png")
-
-    lacc = []
-    acc,nruns = 0,3
-    train_steps = 100
-    for i in range(nruns):
-
-        # -- create COG --
-        print("aligned")
-        cog = COG(UNet_small,T,image.device,nn_params=None,train_steps=train_steps)
-        cog.train_models_mp(noisy)
-        recs = cog.test_models(noisy)
-        score_align = cog.operator_consistency(recs,noisy)
-        save_image(noisy,"noisy.png")
-        save_image(recs,"recs_aligned.png")
-        # noisy_rep = repeat(noisy,'t c h w -> tile t c h w',tile=T)
-        # score_align = cog.compute_consistency(recs,noisy_rep)
-        
-        print("misaligned")
-        cog = COG(UNet_small,T,image.device,nn_params=None,train_steps=train_steps)
-        cog.train_models_mp(m_noisy)
-        recs = cog.test_models(m_noisy)
-        save_image(m_noisy,"m_noisy.png")
-        save_image(recs,"recs_misaligned.png")
-        score_misalign = cog.operator_consistency(recs,m_noisy)
-        # print("misaligned")
-        # m_noisy_rep = repeat(m_noisy,'t c h w -> tile t c h w',tile=T)
-        # score_misalign = cog.compute_consistency(recs,m_noisy_rep)
-
-        # print(f"[Run {i}]:",score_align,score_misalign)
-        lacc.append((score_align > score_misalign))
-        acc += score_align > score_misalign
-
-    # print("Acc: %2.3f" % (100*(acc / nruns)) )
-    acc = acc.item() / float(nruns)
-    if not (queue is None): queue.put((lacc,acc))
-    # print(F.mse_loss(m_clean[0][:,32//2,32//2],clean[0][:,32//2,32//2]).item())
-    return acc
-
+    noise_level = 50./255.
 
     # -- model all --
     print("-- All Aligned --")
@@ -538,7 +456,8 @@ def single_image_unet(cfg,queue,full_image,device):
 
     og_clean,og_noisy = clean.clone(),noisy.clone()
     clean[0] = image_mis
-    noisy[0] = torch.normal(clean[0]-0.5,noise_level)
+    noisy[0] = noise_xform(clean[[0]])[0]
+
     # -- model all --
     print("-- All Misligned --")
     model = UNet_small(3) # UNet_n2n(1)
@@ -646,18 +565,7 @@ def single_image_unet(cfg,queue,full_image,device):
         print("rec0-rec1",images_to_psnrs(rec[[0]],rec[[1]]))
 
 
-def explore_cog(cfg,data):
-    for i in range(1):
-        iter_over_image_unet(cfg,data)
-        # single_image_unet(cfg,data)
-        print(f"completed run {i}.")
-
 def fast_unet(cfg,data,overwrite=False):
-    
-
-    cfg.nframes = 5
-    explore_cog(cfg,data)
-    exit()
 
     cfg.nframes = 7
     cfg.nblocks = 5
@@ -667,8 +575,7 @@ def fast_unet(cfg,data,overwrite=False):
     # fn = "/home/gauenk/Documents/experiments/cl_gen/output/lpas/fast_unet/default_3f_3b.csv"
     if (not record_fn.exists()) or overwrite: record = run_experiment(cfg,data,record_fn,bss_fn)
     else: record = pd.read_csv(record_fn)
-    # explore_fast_unet_record(cfg,record,bss_fn)
-    explore_cog_record(cfg,record,bss_fn)
+    explore_fast_unet_record(cfg,record,bss_fn)
 
     
 

@@ -1,6 +1,12 @@
 
+# -- python imports --
 import numpy as np
 from easydict import EasyDict as edict
+
+# -- pytorch imports --
+
+# -- project imports --
+from .utils import get_ref_block_index
 
 class FrameIndexSampler():
 
@@ -49,9 +55,8 @@ class BlockIndexSampler():
         self.H = H
         self.motion = motion
         self._terminated = False
-        self.search_frames = None
-        self.fixed_frames = None
-        self.full_grid = self.create_full_grid()
+        self.fixed_frames = {T//2:[get_ref_block_index(nblocks)]}
+        self.full_grid = get_block_arangements_freeze(H,self.fixed_frames)
 
     def set_frames(search_frames,fixed_frames):
         self.search_frames = search_frames
@@ -70,7 +75,8 @@ class BlockIndexSampler():
         pass
 
     def update(self,scores,nh_grid):
-        pass
+        self.samples.scores.append(scores)
+        self.samples.block_grid.append(nh_grid)
 
     def get_samples(self):
         pass

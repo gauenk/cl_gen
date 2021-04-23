@@ -1,7 +1,15 @@
 
+# -- python imports --
 import numpy as np
+
+# -- pytorch imports --
 import torch
 
+# -- project imports --
+from layers.unet import UNet_n2n,UNet_small
+
+# -- [local] project imports --
+from .cog import COG
 from .samplers import FrameIndexSampler,BlockIndexSampler
 
 class AlignmentOptimizer():
@@ -61,34 +69,38 @@ class AlignmentOptimizer():
         while not block_sampler.terminated():
 
             # -- sample a neighborhood grid --
-            nh_grid = block_sampler.sample(scores)
+            bl_grid = block_sampler.sample(scores)
 
             # -- index the patch for the neighborhood --
-            nh_patches = patches[:,:,nh_grid,:,:,:] 
+            bl_patches = patches[:,:,bl_grid,:,:,:] 
 
             # -- compute the scores per search frame --
-            scores = self.compute_frame_scores(ref,nh_patches)
+            scores = self.compute_frame_scores(ref,bl_patches)
 
-            block_sampler.update(scores,nh_grid)
+            block_sampler.update(scores,bl_grid)
 
         samples = block_sampler.get_results()
         return samples
 
-    def compute_frame_scores(self,ref,nh_patches):
+    def compute_frame_scores(self,ref,bl_patches):
         stype = self.score_params.stype
         if stype == "raw":
-            return self.compute_raw_frame_scores(ref,nh_patches)
+            return self.compute_raw_frame_scores(ref,bl_patches)
         elif stype == "cog":
-            return self.compute_cog_frame_scores(ref,nh_patches)
+            return self.compute_cog_frame_scores(ref,bl_patches)
         else:
             raise ValueError(f"Uknown score type [{stype}]")
 
-    def compute_cog_frame_scores(self,ref,nh_patches):
-        pass
+    def compute_cog_frame_scores(self,ref,bl_patches):
+        cog = COG(UNet_small,T,noisy.device,nn_params=None,train_steps=train_steps)
+        cog.train_models(noisy_prop)
+        recs = cog.test_models(noisy_prop)
+        score = cog.operator_consistency(recs,noisy_prop)
+        return score
 
-    def compute_raw_frame_scores(self,ref,nh_patches):
+    def compute_raw_frame_scores(self,ref,bl_patches):
         # -- include the reference patch --
-        aug_patches = torch.cat([ref,nh_patches],dim=2)
+        aug_patches = torch.cat([ref,bl_patches],dim=2)
         for (nset0,nset1) in n_grids[:100]:
             # -- original --
             denoised0 = torch.mean(grid_patches[:,:,nset0],dim=2)

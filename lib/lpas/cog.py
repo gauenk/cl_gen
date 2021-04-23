@@ -31,18 +31,31 @@ import torch.multiprocessing as mp
 from pyutils.misc import images_to_psnrs
 from .utils import save_image
 
+class Logistic(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(Logistic, self).__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        nn.init.xavier_uniform_(self.linear.weight,gain=1.0)
+        self.s = nn.Sigmoid()
+
+    def forward(self, x):
+        return self.s(self.linear(x))
+        
 class COG():
     
     def __init__(self,nn_backbone,nframes,device,nn_params=None,train_steps=100):
         self.nn_backbone = nn_backbone
         self.device = device
         self.nframes = nframes
-        if nn_params is None: self.nn_params = edict({'lr':1e-4})
+        if nn_params is None: self.nn_params = edict({'lr':1e-3})
         else: self.nn_params = nn_params
         self.train_steps = train_steps
         self.models = []
         self.optims = []
         self._init_learning(nframes)
+
+        input_dim = 10
+        self.logit = Logistic(input_dim,nframes).to(device)
         self.idx = -1
 
     def reset(self):
@@ -67,7 +80,7 @@ class COG():
         self.idx = 0
         T = burst.shape[0]
         for i in range(self.train_steps):
-            self.save_tr = True
+            self.save_tr = False
             self.idx += 1
             for t in range(T):
                 if t == T//2: continue
@@ -157,7 +170,21 @@ class COG():
                         simmat[m_i,m_j,l,k] = np.mean(images_to_psnrs(recs[m_i,l],cmpr[m_j,k]))
         return simmat
 
-    def _pixel_shuffle(self,burst):
+    def _pixel_shuffle_uniform(self,burst,B):
+        T,C,H,W = burst.shape
+        R = H*W
+        indices = torch.randint(0,T,(B,R),device=burst.device)
+        shuffle = torch.zeros((C,B,R),device=burst.device)
+        along = torch.arange(T)
+        cburst = rearrange(burst,'t c h w -> c t (h w)')
+        for c in range(C):
+            shuffle[c] = torch.gather(cburst[c],0,indices)
+        shuffle = rearrange(shuffle,'c t (h w) -> t c h w',h=H)
+        # save_image(burst,"burst.png")
+        # save_image(shuffle,"shuffle.png")
+        return shuffle
+
+    def _pixel_shuffle_perm(self,burst):
         T,C,H,W = burst.shape
         R = H*W
         order = torch.stack([torch.randperm(T,device=burst.device) for _ in range(R)],dim=1)
@@ -166,9 +193,6 @@ class COG():
         target = torch.zeros_like(cburst,device=cburst.device)
         target.scatter_(0,order,cburst)
         target = rearrange(target,'t c (h w) -> t c h w',h=H)
-        # print(images_to_psnrs(target,burst))
-        # save_image(burst,'burst.png')
-        # save_image(target,'target.png')
         return target
 
     def _train_model_step(self,burst,model,optim):
@@ -178,17 +202,21 @@ class COG():
     
         # -- rand in and out --
         T = burst.shape[0]
-        order = npr.permutation(T)
-        noisy = burst[order]
+        B = 10
+        # order = npr.permutation(T)
+        # noisy = burst[order]
         # target = burst[order]
-        target = self._pixel_shuffle(burst)
+        noisy = self._pixel_shuffle_uniform(burst,B)
+        target = self._pixel_shuffle_uniform(burst,B)
             
         # -- forward --
         rec = model(noisy)
         loss = F.mse_loss(rec,target)
-        # if self.idx % 25 == 0 and self.save_tr:
-        #     self.save_tr = False
-        #     save_image(rec,f"train_rec_{self.idx}.png")
+        if self.idx % 25 == 0 and self.save_tr:
+            fn = f"train_rec_{self.idx}.png"
+            print(f"Saving image to {fn}")
+            self.save_tr = False
+            save_image(rec,fn)
 
         # -- optim step --
         loss.backward()
@@ -240,17 +268,56 @@ class COG():
     def _compute_consistency_rec_noisy_terms(self,mat_rn,mat_nn):
         pass
 
+    def logit_consistency_score(self,recs,noisy):
+
+        T = recs.shape[1]
+
+        # -- matrices --
+        mat_rr = self.compute_consistency_mat(recs,recs)
+        mat_rn = self.compute_consistency_mat(recs,noisy[None,:])
+        mat_nn = self.compute_consistency_mat(noisy[None,:],noisy[None,:])
+
+        # -- flatten --
+        v_rr = mat_rr.reshape(-1)
+        v_rn = mat_rn.reshape(-1)
+        v_nn = mat_nn.reshape(-1)
+        
+        # -- cat --
+        features = torch.cat([v_rr,v_rn,v_nn],dim=0)[None,:]
+        features /= 160.
+
+        # -- nn --
+        # print("f",features.shape,v_rr.shape,v_rn.shape,v_nn.shape)
+        features = features.to(self.device)
+        # self.logit = self.logit.to(self.device)
+        scores = self.logit(features)
+        return scores
+        
+
     def operator_consistency(self,recs,noisy):
         T = recs.shape[1]
         mat_rr = self.compute_consistency_mat(recs,recs)
         mat_rn = self.compute_consistency_mat(recs,noisy[None,:])
         mat_nn = self.compute_consistency_mat(noisy[None,:],noisy[None,:])
 
+        # print("-"*10,"MAT_RR","-"*10)
         # print(mat_rr)
+        # print("-"*10,"MAT_RN","-"*10)
         # print(mat_rn)
+        # print("-"*10,"MAT_NN","-"*10)
         # print(mat_nn)
+        
+
         # diags,msc = self._compute_all_xmodel_rec_terms(mat_rr)
         diags,msc = self._compute_loo_xmodel_rec_terms(mat_rr)
         # distortion = self._compute_consistency_rec_noisy_terms(mat_rn,mat_nn)
         # print(diags,msc,torch.mean(mat_rn))
-        return (torch.mean(diags) + torch.mean(mat_rn)).item()/3.
+        # print("DIAGS,MSC")
+        # print(diags)
+        # print(msc)
+
+        score = (torch.mean(diags) + torch.mean(mat_rn)).item()/3.
+        # print("SCORE")
+        # print(score)
+
+        return score

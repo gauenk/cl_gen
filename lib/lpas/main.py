@@ -32,7 +32,7 @@ from .utils import get_ref_block_index,get_block_arangements
 from .config import get_cfg,get_args
 from .explore_fast_unet import fast_unet
 from .eval_score import eval_score
-
+from .explore_cog import explore_cog
 
 def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):
     
@@ -42,7 +42,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_ddp = False
     cfg.use_apex = False
     gpuid = rank % ngpus # set gpuid
-    gpuid = 0
+    gpuid = 1
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
 
@@ -250,7 +250,8 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
 
     data,loader = load_dataset(cfg,'denoising')
+    explore_cog(cfg,data,overwrite=False)
     # data,loader = load_dataset(cfg,'dynamic')
-    fast_unet(cfg,data,overwrite=False)
+    # fast_unet(cfg,data,overwrite=False)
     # eval_score(cfg,data,overwrite=True)
 
