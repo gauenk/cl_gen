@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from sklearn.manifold import TSNE
 
 
-def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,fontsize=15,framealpha=1.0,ncol=1,shrink_perc=.90):
+def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,fontsize=15,framealpha=1.0,ncol=1,shrink_perc=.80):
     box = ax.get_position()
     if shrink:
         ax.set_position([box.x0, box.y0, box.width * shrink_perc, box.height])

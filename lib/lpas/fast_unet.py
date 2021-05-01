@@ -45,14 +45,15 @@ def test(cfg,burst,model,score_fxn):
 
     # -- compute scores --
     wrapped_score = score_function_wrapper(score_fxn)
-    score = wrapped_score(cfg,rec).item()
-    return score
+    score,scores_t = wrapped_score(cfg,rec).item()
+    return score,scores_t
 
 def score_function_wrapper(score_fxn):
     def wrapper(cfg,image):
+        # R,B,E,T,C,H,W
         tmp = image.unsqueeze(0).unsqueeze(0).unsqueeze(0)
-        scores = score_fxn(cfg,tmp)
-        return scores[0,0,0]
+        scores,scores_t = score_fxn(cfg,tmp,True)
+        return scores[0,0,0],scores_t[0,0,0]
     return wrapper
 
 def run_fast_unet(cfg,burst,score_fxn):
@@ -60,5 +61,5 @@ def run_fast_unet(cfg,burst,score_fxn):
     model = model.to(burst.device)
     optim = torch.optim.Adam(model.parameters(),lr=1e-4,betas=(0.9,0.99))
     train(cfg,burst,model,optim,300)
-    score = test(cfg,burst,model,score_fxn)    
-    return score
+    score,scores_t = test(cfg,burst,model,score_fxn)    
+    return score,scores_t

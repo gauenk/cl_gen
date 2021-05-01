@@ -43,7 +43,6 @@ def eval_score(cfg,data,overwrite=False):
 
 def run_eval_score(cfg,data,eval_fn):
 
-
     exp_mesh,exp_fields = create_eval_mesh(cfg)
     record = init_record(exp_fields)
     align_clean_score = refcmp_score

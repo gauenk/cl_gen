@@ -103,10 +103,13 @@ class GlobalCameraMotionTransform():
 
         # -- create list of indices -- 
         tl_list = [tl.clone()]
+        delta_list = [torch.LongTensor([0,0])]
         for i in range(self.nframes-1):
             step = (torch.round((i+1) * direction * ppf)).type(torch.int)
             tl_i = tl + step
+            delta_list.append(step)
             tl_list.append(tl_i)
+        delta_list = torch.stack(delta_list,dim=0)
         # a = tl_list[0].type(torch.float)
         # b = tl_list[-1].type(torch.float)
         # print("pix diff",torch.sqrt(torch.sum(( a - b)**2)).item())
@@ -138,7 +141,7 @@ class GlobalCameraMotionTransform():
         res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
         if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
-        directions = torch.stack([direction],dim=0)
+        directions = delta_list
         return pics,res,clean_target,directions
 
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):

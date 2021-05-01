@@ -71,6 +71,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
     cfg.N = 3
+    cfg.nframes = cfg.N
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 8
@@ -96,7 +97,8 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 
     # -- abp search parameters --
     cfg.patchsize = 15
-    cfg.nh_size = 3
+    cfg.nblocks = 3
+    cfg.nh_size = cfg.nblocks
 
     # -- noise-2-similar parameters --
     cfg.sim_shuffleK = True
@@ -109,19 +111,20 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.dataset.dict_loader = True
     
     # -- gaussian noise --
-    # cfg.noise_type = 'g'
-    # cfg.noise_params.ntype = cfg.noise_type
-    # cfg.noise_params['g']['stddev'] = 75.
-    # noise_level = Ggrid[G_grid_idx] # don't worry about
-    # noise_level_str = f"{int(noise_level)}"
+    cfg.noise_type = 'g'
+    noise_level = 25.
+    cfg.noise_params.ntype = cfg.noise_type
+    cfg.noise_params['g']['stddev'] = noise_level
+    #noise_level = Ggrid[G_grid_idx] # don't worry about
+    noise_level_str = f"{int(noise_level)}"
 
     # -- low-light noise --
-    noise_type = "qis"
-    cfg.noise_type = noise_type
-    cfg.noise_params['qis']['alpha'] = 4.0
-    cfg.noise_params['qis']['readout'] = 0.0
-    cfg.noise_params['qis']['nbits'] = 3
-    cfg.noise_params.ntype = cfg.noise_type
+    # noise_type = "qis"
+    # cfg.noise_type = noise_type
+    # cfg.noise_params['qis']['alpha'] = 4.0
+    # cfg.noise_params['qis']['readout'] = 0.0
+    # cfg.noise_params['qis']['nbits'] = 3
+    # cfg.noise_params.ntype = cfg.noise_type
 
     # cfg.N = 30
     cfg.dynamic.frames = cfg.N
@@ -158,9 +161,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
 
     # -- noise info --
     noise_type = cfg.noise_params.ntype
-    noise_params = cfg.noise_params['qis']
-    noise_level = noise_params['readout']
-    noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
+    noise_params = cfg.noise_params['g']
+    noise_level = noise_params['stddev']
+    noise_level_str = f"{int(noise_params['stddev'])}"
+
+    # noise_params = cfg.noise_params['qis']
+    # noise_level = noise_params['readout']
+    # noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
 
     # -- experiment info --
     name = "n2sim_burstv2_testingAlignedAbps"

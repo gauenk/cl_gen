@@ -9,7 +9,6 @@ import torch.nn.functional as F
 # this is the only allowed project import in this file.
 import settings
 
-
 def adc_forward(cfg,image):
     params = cfg.noise_params['qis']
     pix_max = 2**params['nbits'] - 1

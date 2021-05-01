@@ -71,6 +71,13 @@ def train(cfg,image,clean,burst,model,optim):
 
 def test(cfg,image,clean,burst,model,idx):
 
+    # i3 = len(image.shape) == 3
+    # c3 = len(clean.shape) == 3
+    # b3 = len(burst.shape) == 3
+    # 
+    # assert (i3 == c3) and (i3 == b3), "All three dims same"
+    # if i3 and c3 and b3:
+
     T = burst.shape[0]
     # -- create results --
     results = {}
@@ -102,7 +109,6 @@ def test(cfg,image,clean,burst,model,idx):
 
 
     psnr = float(np.mean(images_to_psnrs(rec,rep)))
-    results['mse'] = loss.item()
     results['psnr_burst'] = psnr
 
     # -- intra and input --
@@ -131,18 +137,22 @@ def test(cfg,image,clean,burst,model,idx):
         score_fxn = get_score_function(name)
         wrapped_score = score_function_wrapper(score_fxn)
         if name == "gaussian_ot":
-            score = wrapped_score(cfg,rec-rep).item()
+            score,scores_t = wrapped_score(cfg,rec-rep).item()
         else:
-            score = wrapped_score(cfg,rec).item()
+            score,scores_t = wrapped_score(cfg,rec).item()
         results[f"fu_{name}"] = score
+        for t in range(T):
+            results[f"fu_{name}_{t}"] = scores_t[t].item()
 
     # -- on raw pixels too --
     for name in score_fxn_names:
         if name == "gaussian_ot": continue
         score_fxn = get_score_function(name)
         wrapped_score = score_function_wrapper(score_fxn)
-        score = wrapped_score(cfg,burst).item()
+        score,scores_t = wrapped_score(cfg,burst).item()
         results[name] = score
+        for t in range(T):
+            results[f"{name}_{t}"] = scores_t[t].item()
         
     # print("Test Loss",loss.item())
     # print("Test PSNR: %2.3e" % np.mean(images_to_psnrs(rec+0.5,rep)))
@@ -176,8 +186,8 @@ def fill_results(cfg,image,clean,burst,model,idx):
 def score_function_wrapper(score_fxn):
     def wrapper(cfg,image):
         tmp = image.unsqueeze(0).unsqueeze(0).unsqueeze(0)
-        scores = score_fxn(cfg,tmp)
-        return scores[0,0,0]
+        scores,scores_t = score_fxn(cfg,tmp)
+        return scores[0,0,0],scores_t[0,0,0]
     return wrapper
 
 def explore_fast_unet_record(cfg,record,block_search_space_fn=None):

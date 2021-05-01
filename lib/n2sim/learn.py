@@ -269,7 +269,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             
         if (sim_burst is None) and cfg.abps:
             # scores,aligned = abp_search(cfg,burst)
-            scores,aligned = lpas_search(cfg,burst)
+            scores,aligned = lpas_search(cfg,burst,directions)
             sim_burst = torch.stack([burst,aligned],dim=2)
 
         # print(sample['burst'].shape,sample['res'].shape)

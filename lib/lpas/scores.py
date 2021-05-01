@@ -57,37 +57,49 @@ def get_score_function(name):
 
 def ave_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
+    """
+    R = different patches from same image
+    B = different images
+    E = differnet block regions around centered patch
+    T = burst of frames along a batch dimension
+    """
 
     ref = repeat(expanded[:,:,:,T//2],'r b e c h w -> r b e tile c h w',tile=T-1)
     neighbors = torch.cat([expanded[:,:,:,:T//2],expanded[:,:,:,T//2+1:]],dim=3)
     delta = F.mse_loss(ref,neighbors,reduction='none')
-    delta = delta.view(R,B,E,-1)
-    delta = torch.mean(delta,dim=3)
-
-    return delta
+    delta = delta.view(R,B,E,T,-1)
+    delta_t = torch.mean(delta,dim=4)
+    delta = torch.mean(delta_t,dim=3)
+    return delta,delta_t
 
 def refcmp_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
     ref = expanded[:,:,:,T//2]
     neighbors = torch.cat([expanded[:,:,:,:T//2],expanded[:,:,:,T//2+1:]],dim=3)
+    delta_t = torch.zeros(R,B,E,T,device=expanded.device)
     delta = torch.zeros(R,B,E,device=expanded.device)
     for t in range(T-1):
-        delta_t = F.mse_loss(neighbors[:,:,:,t],ref,reduction='none')
+        delta_pair = F.mse_loss(neighbors[:,:,:,t],ref,reduction='none')
+        delta_t += delta_pair
         delta += torch.mean(delta_t.view(R,B,E,-1),dim=3)
-    delta /= T
-    return delta
+    delta_t /= (T-1)
+    delta /= (T-1)
+    return delta,delta_t
 
 def pairwise_delta_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
     # ref = repeat(expanded[:,:,:,[T//2]],'r b e c h w -> r b e tile c h w',tile=T-1)
     # neighbors = torch.cat([expanded[:,:,:,:T//2],expanded[:,:,:,T//2+1:]],dim=3)
+    delta_t = torch.zeros(R,B,E,T,device=expanded.device)
     delta = torch.zeros(R,B,E,device=expanded.device)
     for t1 in range(T):
         for t2 in range(T):
-            delta_t = F.mse_loss(expanded[:,:,:,t1],expanded[:,:,:,t2],reduction='none')
+            delta_pair = F.mse_loss(expanded[:,:,:,t1],expanded[:,:,:,t2],reduction='none')
+            delta_t[:,:,:,[t1,t2]] += delta_pair
             delta += torch.mean(delta_t.view(R,B,E,-1),dim=3)
     delta /= T*T
-    return delta
+    delta_t /= T*T
+    return delta,delta_t
 
 #
 # Grid Functions
@@ -96,15 +108,18 @@ def pairwise_delta_score(cfg,expanded):
 # -- run over the grids for below --
 def delta_over_grids(cfg,expanded,grids):
     R,B,E,T,C,H,W = expanded.shape
+    delta_t = torch.zeros(R,B,E,T,device=expanded.device)
     delta = torch.zeros(R,B,E,device=expanded.device)
     for set0,set1 in grids:
         set0,set1 = np.atleast_1d(set0),np.atleast_1d(set1)
         ave0 = torch.mean(expanded[:,:,:,set0],dim=3)
         ave1 = torch.mean(expanded[:,:,:,set1],dim=3)
-        delta_t = F.mse_loss(ave0,ave1,reduction='none').view(R,B,E,-1)
-        delta += torch.mean(delta_t,dim=3)
+        delta_pair = F.mse_loss(ave0,ave1,reduction='none').view(R,B,E,-1)
+        delta_t += delta_pair
+        delta += torch.mean(delta_pair,dim=3)
     delta /= len(grids)
-    return delta
+    delta_t /= len(grids)
+    return delta,delta_t
 
 def powerset_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -117,8 +132,8 @@ def powerset_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 def extrema_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -134,8 +149,8 @@ def extrema_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 def lgsubset_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -148,8 +163,8 @@ def lgsubset_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 
 def lgsubset_v_indices_score(cfg,expanded):
@@ -165,8 +180,8 @@ def lgsubset_v_indices_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 def lgsubset_v_ref_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -179,8 +194,8 @@ def lgsubset_v_ref_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 def powerset_v_indices_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -195,8 +210,8 @@ def powerset_v_indices_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 def powerset_v_ref_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
@@ -209,8 +224,8 @@ def powerset_v_ref_score(cfg,expanded):
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --
-    delta = delta_over_grids(cfg,expanded,grids)
-    return delta
+    delta,delta_t = delta_over_grids(cfg,expanded,grids)
+    return delta,delta_t
 
 #
 # Fast UNet Scores
@@ -219,10 +234,12 @@ def powerset_v_ref_score(cfg,expanded):
 def fast_unet_search(cfg,expanded,search_method):
     R,B,E,T,C,H,W = expanded.shape
     assert (R == 1) and (B == 1), "Must have one patch and one batch item."
+    scores_t = torch.zeros(R,B,E,T)
     scores = torch.zeros(R,B,E)
     for e in range(E):
         burst = expanded[0,0,e]
-        score = run_fast_unet(cfg,burst,search_method)
+        score,scores_t = run_fast_unet(cfg,burst,search_method)
+        scores_t[0,0,e] = scores_t
         scores[0,0,e] = score
     return scores
 
@@ -246,7 +263,7 @@ def fast_unet_lgsubset_v_ref(cfg,expanded):
 # Optimal Transport Based Losses
 # 
 
-def gaussian_ot_score(cfg,expanded):
+def gaussian_ot_score(cfg,expanded,return_frames=False):
     R,B,E,T,C,H,W = expanded.shape
     vectorize = rearrange(expanded,'r b e t c h w -> (r b e t) (c h w)')
     means = torch.mean(vectorize,dim=1)
@@ -256,8 +273,9 @@ def gaussian_ot_score(cfg,expanded):
     gt_std = cfg.noise_params['g']['stddev']/255.
     loss = means**2
     loss += (stds**2 - 2*gt_std**2)**2
+    losses_t = loss
     losses = torch.mean(rearrange(loss,'(r b e t) -> r b e t',r=R,b=B,e=E,t=T),dim=3)
-    return losses
+    return losses,losses_t
 
 def emd_score(cfg,expanded):
     pass

@@ -82,7 +82,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
     cfg.num_workers = 0
-    cfg.frame_size = 96
+    cfg.frame_size = 216
     cfg.zero_mean_images = True
 
     # -- abp search params --
