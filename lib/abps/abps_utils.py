@@ -20,7 +20,7 @@ import torchvision.transforms as tvT
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from pyutils.misc import images_to_psnrs
+from pyutils import images_to_psnrs
 
 def aligned_burst_from_indices_global_dynamics(patches,n_indices,nh_indices):
     # new: 4:02, added n_indices

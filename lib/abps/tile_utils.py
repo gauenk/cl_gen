@@ -14,7 +14,7 @@ import torchvision.transforms as tvT
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from pyutils.misc import images_to_psnrs
+from pyutils import images_to_psnrs
 
 def tile_burst_patches(burst,PS,NH):
     N,B,C,H,W = burst.shape

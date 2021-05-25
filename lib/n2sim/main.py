@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 
 # -- [this folder] project code --
 from .config import get_cfg,get_args
@@ -64,13 +64,13 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
-    cfg.n2n = False
-    cfg.abps = True
+    cfg.n2n = True
+    cfg.abps = False
     cfg.abps_inputs = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 3
+    cfg.N = 7
     cfg.nframes = cfg.N
     cfg.sim_only_middle = True
     cfg.use_kindex_lmdb = True
@@ -97,7 +97,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 
     # -- abp search parameters --
     cfg.patchsize = 15
-    cfg.nblocks = 3
+    cfg.nblocks = 9
     cfg.nh_size = cfg.nblocks
 
     # -- noise-2-similar parameters --
@@ -112,7 +112,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     
     # -- gaussian noise --
     cfg.noise_type = 'g'
-    noise_level = 25.
+    noise_level = 75.0
     cfg.noise_params.ntype = cfg.noise_type
     cfg.noise_params['g']['stddev'] = noise_level
     #noise_level = Ggrid[G_grid_idx] # don't worry about
@@ -139,9 +139,14 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 1
     cfg.dynamic.random_eraser = False
-    cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.N-1)
     cfg.dataset.load_residual = True
+
+    # -- frame size --
+    if cfg.abps: M = (1+cfg.dynamic.ppf)*cfg.nframes
+    else: M = 0
+    cfg.frame_size = 128
+    cfg.dynamic.frame_size = cfg.frame_size + M
     
     # -- asdf --
     cfg.solver = edict()
@@ -153,6 +158,10 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.load_epoch = 0
     cfg.load = cfg.load_epoch > 0
     cfg.restart_after_load = False
+
+    # -- spoof optical flow test --
+    cfg.optical_flow_acc = 1.0
+    print("Optical Flow Acc: %2.2f" % (100. * cfg.optical_flow_acc))
     return cfg
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=0):

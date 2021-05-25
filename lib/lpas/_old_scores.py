@@ -10,8 +10,10 @@ import torch
 import torch.nn.functional as F
 
 # -- project imports --
-from .fast_unet import run_fast_unet
-from .utils import get_ref_block_index
+from layers.unet import UNet_n2n,UNet_small
+from patch_search.fast_unet import run_fast_unet
+from patch_search.cog import score_cog
+from patch_search.utils import get_ref_block_index
 
 def get_score_functions(names):
     scores = edict()
@@ -52,6 +54,8 @@ def get_score_function(name):
         return fast_unet_lgsubset_v_indices
     elif name == "fast_unet_lgsubset_v_ref":
         return fast_unet_lgsubset_v_ref
+    elif name == "cog_frame_v1":
+        return cog_frame_v1
     else:
         raise ValueError(f"Uknown score function [{name}]")
 
@@ -63,13 +67,18 @@ def ave_score(cfg,expanded):
     E = differnet block regions around centered patch
     T = burst of frames along a batch dimension
     """
-
     ref = repeat(expanded[:,:,:,T//2],'r b e c h w -> r b e tile c h w',tile=T-1)
     neighbors = torch.cat([expanded[:,:,:,:T//2],expanded[:,:,:,T//2+1:]],dim=3)
     delta = F.mse_loss(ref,neighbors,reduction='none')
-    delta = delta.view(R,B,E,T,-1)
+    delta = delta.view(R,B,E,T-1,-1)
     delta_t = torch.mean(delta,dim=4)
     delta = torch.mean(delta_t,dim=3)
+
+    # -- append dim for T --
+    Tm1 = T-1
+    zeros = torch.zeros_like(delta_t[:,:,:,[0]])
+    delta_t = torch.cat([delta_t[:,:,:,:Tm1//2],zeros,delta_t[:,:,:,Tm1//2:]],dim=3)
+
     return delta,delta_t
 
 def refcmp_score(cfg,expanded):
@@ -108,14 +117,29 @@ def pairwise_delta_score(cfg,expanded):
 # -- run over the grids for below --
 def delta_over_grids(cfg,expanded,grids):
     R,B,E,T,C,H,W = expanded.shape
+    unrolled = rearrange(expanded,'r b e t c h w -> r b e t (c h w)')
     delta_t = torch.zeros(R,B,E,T,device=expanded.device)
     delta = torch.zeros(R,B,E,device=expanded.device)
     for set0,set1 in grids:
         set0,set1 = np.atleast_1d(set0),np.atleast_1d(set1)
+
+        # -- compute ave --
         ave0 = torch.mean(expanded[:,:,:,set0],dim=3)
         ave1 = torch.mean(expanded[:,:,:,set1],dim=3)
+
+        # -- rearrange --
+        ave0 = rearrange(ave0,'r b e c h w -> r b e (c h w)')
+        ave1 = rearrange(ave1,'r b e c h w -> r b e (c h w)')
+
+        # -- rep across time --
+        ave0_repT = repeat(ave0,'r b e f -> r b e t f',t=T)
+        ave1_repT = repeat(ave1,'r b e f -> r b e t f',t=T)
+
+        # -- compute deltas --
         delta_pair = F.mse_loss(ave0,ave1,reduction='none').view(R,B,E,-1)
-        delta_t += delta_pair
+        delta_0 = F.mse_loss(ave0_repT,unrolled,reduction='none').view(R,B,E,T,-1)
+        delta_1 = F.mse_loss(ave1_repT,unrolled,reduction='none').view(R,B,E,T,-1)
+        delta_t += torch.mean( (delta_0 + delta_1)/2., dim = 4)
         delta += torch.mean(delta_pair,dim=3)
     delta /= len(grids)
     delta_t /= len(grids)
@@ -260,6 +284,30 @@ def fast_unet_lgsubset_v_ref(cfg,expanded):
     return fast_unet_search(cfg,expanded,search_method)
 
 #
+# Consistency of denoiser Graphs Based Losses
+# 
+
+def cog_search(cfg,expanded,search_method):
+    R,B,E,T,C,H,W = expanded.shape
+    assert (R == 1) and (B == 1), "Must have one patch and one batch item."
+    scores_t = torch.zeros(R,B,E,T)
+    scores = torch.zeros(R,B,E)
+
+    # -- cog params --
+    backbone = UNet_small
+    nn_params = edict({'lr':1e-3,'init_params':None})
+    train_steps = 1000
+    for e in range(E):
+        burst = expanded[0,0,e]
+        score,scores_t = score_cog(cfg,burst,backbone,nn_params,train_steps)
+        scores_t[0,0,e] = scores_t
+        scores[0,0,e] = score
+    return scores
+
+def cog_frame_v1(cfg,expanded):
+    return cog_search(cfg,expanded,"v1")
+
+#
 # Optimal Transport Based Losses
 # 
 
@@ -273,8 +321,8 @@ def gaussian_ot_score(cfg,expanded,return_frames=False):
     gt_std = cfg.noise_params['g']['stddev']/255.
     loss = means**2
     loss += (stds**2 - 2*gt_std**2)**2
-    losses_t = loss
-    losses = torch.mean(rearrange(loss,'(r b e t) -> r b e t',r=R,b=B,e=E,t=T),dim=3)
+    losses_t = rearrange(loss,'(r b e t) -> r b e t',r=R,b=B,e=E,t=T)
+    losses = torch.mean(losses_t,dim=3)
     return losses,losses_t
 
 def emd_score(cfg,expanded):

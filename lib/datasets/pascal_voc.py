@@ -25,7 +25,6 @@ from torch.utils.data.distributed import DistributedSampler
 
 # project imports
 from settings import ROOT_PATH
-from pyutils.misc import add_noise
 from pyutils.timer import Timer
 from datasets.transforms import get_dynamic_transform,get_noise_transform
 from .common import get_loader
@@ -107,6 +106,7 @@ class DynamicVOC(VOCDetection):
 
         # -- create transforms --
         noise_trans = get_noise_transform(noise_info,noise_only=True)
+        self.noise_trans = get_noise_transform(noise_info,use_to_tensor=False)
         self.dynamic_trans = get_dynamic_transform(dynamic_info,noise_trans,load_res)
 
     def __getitem__(self, index):
@@ -121,11 +121,12 @@ class DynamicVOC(VOCDetection):
         img = Image.open(self.images[index]).convert("RGB")
         if self.bw: img = img.convert('1')
         img_set,res_set,clean_target,directions = self.dynamic_trans(img)
+        iid = self.noise_trans(clean_target)
 
         if self._return_type == "list":
             return img_set, res_set, clean_target, directions
         elif self._return_type == "dict":
-            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'directions':directions}
+            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'directions':directions, 'iid':iid}
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 class DynamicVOC_LMDB_All():

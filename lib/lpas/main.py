@@ -25,7 +25,7 @@ from torch.utils.tensorboard import SummaryWriter
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 
 # -- [this folder] project code --
 from .utils import get_ref_block_index,get_block_arangements
@@ -126,7 +126,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.byol_backbone_name = "attn"
     cfg.byol_backbone_name = "unet"
     byol_str = f"[BYOL]: {cfg.byol_backbone_name} {cfg.byol_patchsize} {cfg.byol_nh_size} {cfg.byol_in_ftr_size} {cfg.byol_out_ftr_size}"
-    print(byol_str)
+    # print(byol_str)
 
 
     # -- dataset params --

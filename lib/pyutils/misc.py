@@ -9,43 +9,8 @@ import torch.nn.functional as F
 # this is the only allowed project import in this file.
 import settings
 
-def adc_forward(cfg,image):
-    params = cfg.noise_params['qis']
-    pix_max = 2**params['nbits'] - 1
-    image = torch.round(image)
-    image = torch.clamp(image, 0, pix_max)
-    return image
-
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-def rescale_noisy_image(img):
-    img = img + 0.5
-    return img
-
-def normalize_image_to_zero_one(img):
-    img = img.clone()
-    img -= img.min()
-    img /= img.max()
-    return img
-
-def add_noise(noise,pic):
-    noisy_pic = pic + noise
-    return noisy_pic
-
-def images_to_psnrs(img1,img2):
-    B = img1.shape[0]
-    mse = F.mse_loss(img1.detach().cpu(),img2.detach().cpu(),reduction='none').reshape(B,-1)
-    mse = torch.mean(mse,1).detach().numpy() + 1e-16
-    psnrs = mse_to_psnr(mse)
-    return psnrs
-
-def mse_to_psnr(mse):
-    if isinstance(mse,float):
-        psrn = 10 * np_log(1./mse)[0]/np_log(10)[0]
-    else:
-        psrn = 10 * np_log(1./mse)/np_log(10)
-    return psrn
 
 def np_divide(np_array_a,np_array_b):
     not_np = False
@@ -85,7 +50,6 @@ def get_model_epoch_info(cfg):
     if cfg.load:
         return 0,cfg.epoch_num+1
     else: return 0,0
-
 
 def write_cfg(cfg,fpath):
     with io.open(fpath,'w',encoding='utf8') as f:

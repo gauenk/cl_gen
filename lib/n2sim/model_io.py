@@ -206,26 +206,26 @@ def load_model_kpn_1f_cls_cascade(cfg):
         return cascade,loss_fxn
 
 def load_model_kpn_1f_cls(cfg):
-    if cfg.dynamic.frame_size in [64,128]:
-        return KPN_1f_cls(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_1f_cascade_output,frame_size=cfg.dynamic.frame_size),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
-    elif cfg.dynamic.frame_size == 32:
+    if cfg.frame_size in [64,128]:
+        return KPN_1f_cls(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_1f_cascade_output,frame_size=cfg.frame_size),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
+    elif cfg.frame_size == 32:
         return KPN_1f_cls_fs32(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True,filter_thresh=cfg.kpn_filter_onehot,cascade=cfg.kpn_1f_cascade_output),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     else:
-        raise KeyError(f"Uknown frame size [{cfg.dynamic.frame_size}]")
+        raise KeyError(f"Uknown frame size [{cfg.frame_size}]")
 
 def load_model_kpn_1f(cfg):
-    if cfg.dynamic.frame_size == 128:
+    if cfg.frame_size == 128:
         return KPN_1f(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
-    elif cfg.dynamic.frame_size == 64:
+    elif cfg.frame_size == 64:
         return KPN_1f_fs64(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
-    elif cfg.dynamic.frame_size == 32:
+    elif cfg.frame_size == 32:
         return KPN_1f_fs32(color=True,kernel_size=[cfg.kpn_1f_frame_size],burst_length=cfg.input_N,blind_est=True),LossFunc(tensor_grad=~cfg.blind,alpha=1.0)
     else:
-        raise KeyError("Uknown frame size [{cfg.dynamic.frame_size}]")
+        raise KeyError("Uknown frame size [{cfg.frame_size}]")
 
 
 def load_model_stn(cfg):
-    fs = cfg.dynamic.frame_size
+    fs = cfg.frame_size
     img_size = (3,fs,fs)
     return STNBurst(img_size)
 
@@ -254,7 +254,7 @@ def load_attn_model(cfg,unet):
     # d_model = 2048 // (patch_height * patch_width)
     # d_model = 398336 // (patch_height * patch_width)
     d_model = cfg.d_model_attn    
-    xformer_args = [simclr, d_model, cfg.dynamic.frame_size, input_patch,
+    xformer_args = [simclr, d_model, cfg.frame_size, input_patch,
                     output_patch, cfg.input_N, cfg.dataset.bw, unet]
     model = TransformerNetwork32_v5(*xformer_args)
     model = model.to(cfg.device)

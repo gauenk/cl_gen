@@ -30,13 +30,14 @@ import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
 from datasets.transforms import get_noise_transform,get_dynamic_transform
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters,images_to_psnrs
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,count_parameters,images_to_psnrs
 from pyutils.plot import add_legend
 from layers.unet import UNet_n2n,UNet_small
+from patch_search.cog import COG
+from patch_search import get_score_function
 from .trace import activation_trace
-from .scores import get_score_function
-from .utils import get_block_arangements,get_ref_block_index,save_image,get_block_arangements_subset,pixel_shuffle_uniform,rand_sample_two
-from .cog import COG
+from .utils import get_block_arangements,get_ref_block_index,save_image,get_block_arangements_subset,pixel_shuffle_uniform,rand_sample_two,print_tensor_stats
+
 
 FAST_UNET_DIR = Path(f"{settings.ROOT_PATH}/output/lpas/fast_unet/")
 if not FAST_UNET_DIR.exists(): FAST_UNET_DIR.mkdir()
@@ -93,6 +94,15 @@ def test(cfg,image,clean,burst,model,idx):
     params_norm_mean = float(torch.norm(params).item())
     results['params_norm_mean'] = params_norm_mean
 
+    # -- parameters --
+    # named_params = dict(model.named_parameters())
+    # print(named_params.keys())
+    # filters = named_params['conv1.single_conv.0.weight']
+    # print(filters.shape)
+    # # params = torch.cat([param.view(-1) for param in model.parameters()])
+    # # params_norm_mean = float(torch.norm(params).item())
+    # results['params_filter_diff'] = params_filter_diff
+
     # -- size of params for each sample's activations path --
     trace_norm = activation_trace(model,burst,'norm')
     results['trace_norm'] = trace_norm
@@ -106,7 +116,6 @@ def test(cfg,image,clean,burst,model,idx):
     psnr = float(np.mean(images_to_psnrs(image,rec[T//2])))
     results['mse'] = loss.item()
     results['psnr_rec'] = psnr
-
 
     psnr = float(np.mean(images_to_psnrs(rec,rep)))
     results['psnr_burst'] = psnr
@@ -137,22 +146,22 @@ def test(cfg,image,clean,burst,model,idx):
         score_fxn = get_score_function(name)
         wrapped_score = score_function_wrapper(score_fxn)
         if name == "gaussian_ot":
-            score,scores_t = wrapped_score(cfg,rec-rep).item()
+            score,scores_t = wrapped_score(cfg,rec-rep)
         else:
-            score,scores_t = wrapped_score(cfg,rec).item()
-        results[f"fu_{name}"] = score
+            score,scores_t = wrapped_score(cfg,rec)
+        results[f"fnet_{name}"] = score.item()
         for t in range(T):
-            results[f"fu_{name}_{t}"] = scores_t[t].item()
+            results[f"fnet_{name}_{t}f"] = scores_t[t].item()
 
     # -- on raw pixels too --
     for name in score_fxn_names:
         if name == "gaussian_ot": continue
         score_fxn = get_score_function(name)
         wrapped_score = score_function_wrapper(score_fxn)
-        score,scores_t = wrapped_score(cfg,burst).item()
-        results[name] = score
+        score,scores_t = wrapped_score(cfg,burst)
+        results[name] = score.item()
         for t in range(T):
-            results[f"{name}_{t}"] = scores_t[t].item()
+            results[f"{name}_{t}f"] = scores_t[t].item()
         
     # print("Test Loss",loss.item())
     # print("Test PSNR: %2.3e" % np.mean(images_to_psnrs(rec+0.5,rep)))
@@ -179,7 +188,7 @@ def fill_results(cfg,image,clean,burst,model,idx):
     results['psnr_bc_v1'] = -1
     results['psnr_noisy'] = -1
     score_fxn_names = ['lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices','gaussian_ot']
-    for name in score_fxn_names: results[f"fu_{name}"] = 0.
+    for name in score_fxn_names: results[f"fnet_{name}"] = 0.
     for name in score_fxn_names: results[name] = 0.
     return results
 
@@ -208,13 +217,13 @@ def explore_fast_unet_record(cfg,record,block_search_space_fn=None):
     psnrs_rec = record['psnr_rec'].to_numpy()
     psnrs_burst = record['psnr_burst'].to_numpy()
     psnrs_noisy = record['psnr_noisy'].to_numpy()
-    fu_ave = record['fu_ave'].to_numpy()
+    fnet_ave = record['fnet_ave'].to_numpy()
     ave = record['ave'].to_numpy()
-    fu_lvi = record['fu_lgsubset_v_indices'].to_numpy()
+    fnet_lvi = record['fnet_lgsubset_v_indices'].to_numpy()
     lvi = record['lgsubset_v_indices'].to_numpy()
     # pii = None
     pii = record['psnr_intra_input'].to_numpy()
-    got = record['fu_gaussian_ot'].to_numpy()
+    got = record['fnet_gaussian_ot'].to_numpy()
     params_nm = record['params_norm_mean'].to_numpy()    
     # trace_norm = None
     trace_norm = record['params_norm_mean'].to_numpy()
@@ -252,12 +261,12 @@ def explore_fast_unet_record(cfg,record,block_search_space_fn=None):
         labels_2.append('trace_norm')
     ax[2].plot(np.arange(P),ave,'+',label='ave')
     labels_2.append('ave')
-    ax[2].plot(np.arange(P),fu_ave,'+',label='fu_ave')
-    labels_2.append('fu_ave')
+    ax[2].plot(np.arange(P),fnet_ave,'+',label='fnet_ave')
+    labels_2.append('fnet_ave')
     ax[2].plot(np.arange(P),lvi,'^',label='lvi')
     labels_2.append('lvi')
-    ax[2].plot(np.arange(P),fu_lvi,'^',label='fu_lvi')
-    labels_2.append('fu_lvi')
+    ax[2].plot(np.arange(P),fnet_lvi,'^',label='fnet_lvi')
+    labels_2.append('fnet_lvi')
     ax[2].plot(np.arange(P),got,'x',label='got')
     labels_2.append('got')
     if not (pii is None):

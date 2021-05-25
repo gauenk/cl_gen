@@ -16,13 +16,13 @@ import torchvision.transforms as tvT
 
 # -- project imports --
 from settings import ROOT_PATH
-from pyutils.misc import images_to_psnrs
-from datasets.transforms import get_noise_transform,get_dynamic_transform
+from pyutils import images_to_psnrs
+from datasets.transforms import get_noise_transform,get_dynamic_transform,get_noise_config
+from explore.mesh import create_eval_mesh
+from patch_search import get_score_function
 from .vis import explore_record,plot_ave_nframes_scoreacc_noisetype
 from .tile_utils import tile_burst_patches,aligned_burst_image_from_indices_global_dynamics
-from .scores import get_score_function,refcmp_score
-from .noise import get_noise_config
-from .utils import create_meshgrid,get_ref_block_index,get_block_arangements
+from .utils import get_ref_block_index,get_block_arangements
 
 EVAL_DIR = Path(f"{ROOT_PATH}/output/lpas/eval_score")
 if not EVAL_DIR.exists(): EVAL_DIR.mkdir(parents=True)
@@ -45,7 +45,7 @@ def run_eval_score(cfg,data,eval_fn):
 
     exp_mesh,exp_fields = create_eval_mesh(cfg)
     record = init_record(exp_fields)
-    align_clean_score = refcmp_score
+    align_clean_score = get_score_function("refcmp")
 
     # -- sample images --
     noise_xform,dynamic_xform,score_function = init_exp(cfg,exp_mesh[0])
@@ -78,7 +78,6 @@ def run_eval_score(cfg,data,eval_fn):
                 # -- create blocks from patches and block index --
                 clean_blocks = get_pixel_blocks(clean,block_id)
                 noisy_blocks = get_pixel_blocks(noisy,block_id)
-
 
                 # -- create filename to save loss landscape --
                 score_paths = score_path_from_exp(eval_fn,exp,image_id,block_id)
@@ -281,58 +280,4 @@ def dynamic_wrapper(dynamic_raw_xform):
         burst = results[0].unsqueeze(1)
         return burst
     return wrapped
-
-"""
-
-Create mesh to evaluate all search parameters
-
-"""
-
-def create_eval_mesh(cfg):
-
-    # -- create score function grid --
-    # scores = ['ave','got','emd','powerset']
-    # scores = ['ave','pairwise','refcmp']#,'powerset']
-    # scores = ['powerset','ave','extrema','lgsubset','lgsubset_v_indices',
-    #           'lgsubset_v_ref','powerset_v_indices']
-    # scores = ['lgsubset_v_ref','extrema','lgsubset','ave','lgsubset_v_indices']
-    # scores = ['lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices',
-    #           'fast_unet_lgsubset','fast_unet_lgsubset_v_indices','fast_unet_ave',
-    #           'fast_unet_lgsubset_v_ref']
-    scores = ['fast_unet_lgsubset','fast_unet_lgsubset_v_indices','fast_unet_ave',
-              'fast_unet_lgsubset_v_ref',
-              'lgsubset_v_ref','lgsubset','ave','lgsubset_v_indices',]
-
-    # -- create patchsize grid --
-    # psgrid = [13,5]
-    psgrid = [16]
-
-    # -- create noise level grid --
-    # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
-    noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
-
-    # -- create frame number grid --
-    #frames = np.arange(3,9+1,2)
-    frames = [3,5,7]
-
-    # -- create number of local regions grid --
-    blocks = [3,5,7] #np.arange(3,9+1,2)
-    
-    # -- dynamics grid --
-    ppf = [1] #np.arange(3,9+1,2)
-
-    # -- create a list of arrays to mesh --
-    lists = [scores,psgrid,noise_types,frames,blocks,ppf]
-    order = ['score_function','patchsize','noise_type','nframes','nblocks','ppf']
-
-    # -- create mesh --
-    mesh = create_meshgrid(lists)
-    
-    # -- name each element --
-    named_mesh = []
-    for elem in mesh:
-        named_elem = edict(dict(zip(order,elem)))
-        named_mesh.append(named_elem)
-
-    return named_mesh,order
 

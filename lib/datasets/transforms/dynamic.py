@@ -141,9 +141,20 @@ class GlobalCameraMotionTransform():
         res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
         if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
-        directions = delta_list
-        return pics,res,clean_target,directions
+        flow = self._motion_dinit_to_flow(delta_list)
+        return pics,res,clean_target,flow
 
+    def _motion_dinit_to_flow(self,delta):
+        nd_delta = delta.numpy()
+        T,D = nd_delta.shape
+        flow = np.zeros((T-1,D))
+        flow[:,1] = np.ediff1d(nd_delta[:,0])
+        flow[:,0] = np.ediff1d(nd_delta[:,1])
+        # -- we want flow[i,:] = [dx, dy] --
+        flow = torch.IntTensor(flow)
+        return flow
+
+        
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
         tl = tl_list[i]
         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))

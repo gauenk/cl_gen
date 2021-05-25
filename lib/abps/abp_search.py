@@ -25,7 +25,7 @@ import torchvision.transforms as tvT
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from pyutils.misc import images_to_psnrs
+from pyutils import images_to_psnrs
 from .tile_utils import *
 from .abps_utils import *
 from .abi_global_search import abi_global_search

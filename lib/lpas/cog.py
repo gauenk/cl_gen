@@ -28,7 +28,7 @@ import torch.nn.functional as F
 import torch.multiprocessing as mp
 
 # -- project imports --
-from pyutils.misc import images_to_psnrs
+from pyutils import images_to_psnrs
 from .utils import save_image
 from layers.unet import SingleConv
 
@@ -42,6 +42,7 @@ def score_cog(cfg,image_volume,backbone,nn_params,train_steps):
     train_steps = 1000
     score_cog(cfg,image_volume,backbone,nn_params,train_steps)
 
+    T,B,C,H,W = image_volume.shape ???
     """
 
     cog = COG(backbone,cfg.nframes,cfg.device,nn_params=nn_params,train_steps=train_steps)

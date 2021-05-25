@@ -28,7 +28,7 @@ from .optim_io import load_optimizer_kpn as load_optimizer
 from .sched_io import load_scheduler
 from .learn_kpn import train_loop,test_loop
 from .utils import init_record
-from .test_ot_loss import run_test_xbatch,run_ot_v_displacement
+from .ot_loss import run_test_xbatch,run_ot_v_displacement
 
 def run_me(rank=0,Sgrid=[50000],Ngrid=[3],nNgrid=1,Ggrid=[1.],nGgrid=1,ngpus=3,idx=0):
 # def run_me(rank=1,Ngrid=1,Ggrid=1,nNgrid=1,ngpus=3,idx=1):

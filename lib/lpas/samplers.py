@@ -10,6 +10,9 @@ import torch
 from .utils import get_ref_block_index,get_block_arangements_freeze
 
 class FrameIndexSampler():
+    """
+    Select the groups of frames to use for optimization
+    """
 
     def __init__(self,nframes,nblocks,mtype,motion=None):
         self.nframes = nframes
@@ -92,14 +95,25 @@ class BlockIndexSampler():
     def create_full_grid(self):
         pass
 
+    def init_sample(self):
+        nblocks,nframes = self.nblocks,self.nframes
+        block_grids = torch.LongTensor([[nblocks**2//2 for t in range(nframes)]])        
+        return block_grids
+
     def terminated(self):
         return self._terminated
 
     def __getitem__(self,index):
         pass
 
-    def sample(self,fixed_frames,motion):
-        grid = get_block_arangements_freeze(self.nframes,self.nblocks,fixed_frames)
+    def sample(self,current_frames,fixed_frames,motion,gtype):
+        if gtype == "mesh":
+            grid = get_block_arangements_freeze(self.nframes,self.nblocks,fixed_frames)
+        elif gtype == "split":
+            grid = get_block_arangements_split(current_frames,self.nframes,
+                                               self.nblocks,fixed_frames)
+        else:
+            raise ValueError(f"Unknown grid type [{gtype}]")
         return grid
 
     def reset(self):

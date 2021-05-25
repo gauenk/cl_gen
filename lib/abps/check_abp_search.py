@@ -16,9 +16,9 @@ import torchvision.transforms as tvT
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from pyutils.misc import images_to_psnrs
-from .tile_utils import *
-from .abps_utils import *
+from pyutils import images_to_psnrs
+from abps.tile_utils import *
+from abps.abps_utils import *
 
 def test_abp_global_search(cfg,clean,noisy_img=None):
 

@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torchvision
 import torch.nn.functional as F
-from pyutils.misc import add_noise
+from pyutils import add_noise
 
 from .identity import Identity
 

@@ -1,1 +1,1 @@
-from .lpas import lpas_search
+from .lpas import lpas_search,lpas_spoof

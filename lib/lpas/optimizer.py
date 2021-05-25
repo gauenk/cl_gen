@@ -9,10 +9,10 @@ import torch
 
 # -- project imports --
 from layers.unet import UNet_n2n,UNet_small
+from patch_search import get_score_function
+from patch_search.cog import COG
 
 # -- [local] project imports --
-from .cog import COG
-from .scores import get_score_function
 from .samplers import FrameIndexSampler,BlockIndexSampler,MotionSampler
 
 class AlignmentOptimizer():

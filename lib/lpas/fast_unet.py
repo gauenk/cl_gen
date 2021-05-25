@@ -60,6 +60,6 @@ def run_fast_unet(cfg,burst,score_fxn):
     model = UNet_small(3)
     model = model.to(burst.device)
     optim = torch.optim.Adam(model.parameters(),lr=1e-4,betas=(0.9,0.99))
-    train(cfg,burst,model,optim,300)
+    train(cfg,burst,model,optim,1000)
     score,scores_t = test(cfg,burst,model,score_fxn)    
     return score,scores_t

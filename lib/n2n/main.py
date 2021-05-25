@@ -28,7 +28,7 @@ from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
-from .test_ot_loss import *
+from .ot_loss import *
 
 def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=0):
     

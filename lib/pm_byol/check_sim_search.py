@@ -13,9 +13,9 @@ from torchvision.transforms import functional as tvF
 from torchvision import utils as tv_utils
 
 # -- project imports --
+from pyutils import images_to_psnrs
 from datasets.transforms import get_noise_transform
 from n2sim.sim_search import compute_similar_bursts_analysis
-from pyutils.misc import images_to_psnrs
 
 # -- [local] project imports --
 from n2sim.debug import print_tensor_stats

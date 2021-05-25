@@ -25,7 +25,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 # project imports
 from settings import ROOT_PATH
-from pyutils.misc import add_noise
+from pyutils import add_noise
 from datasets.transforms import TransformsSimCLR,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoiseRandStd
 
 class ClCIFAR10(CIFAR10):

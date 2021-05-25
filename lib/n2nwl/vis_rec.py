@@ -19,7 +19,7 @@ import torch.multiprocessing as mp
 # project imports
 import settings
 from datasets import load_dataset
-from pyutils.misc import mse_to_psnr
+from pyutils.images import mse_to_psnr
 
 # [this folder] project code
 from .config import get_cfg,get_args

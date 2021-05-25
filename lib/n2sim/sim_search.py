@@ -369,7 +369,29 @@ def create_k_grid_v2(K,shuffle=False,L=None):
 
     return k_ins,k_outs
 
+def create_k_grid_v3(agg):
+    """
+    :params agg: shape: [B,N,G,C,H,W]
 
+    we know the original burst is the 0 index
+    we know other sims are 1: index
+    we want the original burst in each pair of training samples
+    """
+
+    # -- method v0 --
+    burst = agg[:,:,0]
+    sims =  agg[:,:,1:]
+    G = sims.shape[2]
+    indices = np.arange(G)+1
+    pairs = []
+    k_ins,k_outs = [],[]
+    for index in indices:
+        pair = np.array([0,index])
+        order = npr.permutation(2)
+        pair = pair[order]
+        k_ins.append(pair[0])
+        k_outs.append(pair[1])
+    return k_ins,k_outs
 
 class kIndexPermLMDB():
 

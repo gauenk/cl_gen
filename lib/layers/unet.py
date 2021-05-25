@@ -380,6 +380,19 @@ class SingleUpConv(nn.Module):
     def forward(self,x):
         return self.up(x)
 
+class UpsampleDeterministic(nn.Module):
+    def __init__(self,upscale=2):
+        super(UpsampleDeterministic, self).__init__()
+        self.upscale = upscale
+
+    def forward(self, x):
+        '''
+        x: 4-dim tensor. shape is (batch,channel,h,w)
+        output: 4-dim tensor. shape is (batch,channel,self.upscale*h,self.upscale*w)
+        '''
+        return x[:, :, :, None, :, None].expand(-1, -1, -1, self.upscale, -1, self.upscale).reshape(x.size(0), x.size(1), x.size(2)*self.upscale, x.size(3)*self.upscale)
+    
+
 class Up(nn.Module):
     """Upscaling then double conv"""
 
@@ -390,7 +403,8 @@ class Up(nn.Module):
         if bilinear:
             # self.up = nn.ConvTranspose2d(out_channels // 2 , out_channels,
             #                              kernel_size=kernel_size, stride=stride)
-            self.up = nn.Upsample(scale_factor=2, mode='nearest')#, align_corners=True)
+            # self.up = nn.Upsample(scale_factor=2, mode='nearest')#, align_corners=True)
+            self.up = UpsampleDeterministic(upscale=2)
             # self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
             self.conv = DoubleConv(in_channels, out_channels,mid_channels,use_pool=False)
         else:

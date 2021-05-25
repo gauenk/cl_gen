@@ -16,7 +16,7 @@ from torchvision import utils as tv_utils
 # -- project imports --
 from datasets.transforms import get_noise_transform
 from n2sim.sim_search import compute_similar_bursts_analysis
-from pyutils.misc import images_to_psnrs
+from pyutils import images_to_psnrs
 
 
 def print_tensor_stats(name,tensor):

@@ -17,6 +17,10 @@ def get_loader(cfg,data,batch_size,mode):
 
 
 def get_loader_serial(cfg,data,batch_size,mode):
+    # -- default for non-compat configs --
+    if 'drop_last' in cfg.keys(): drop_last = edict(cfg.drop_last)
+    else: drop_last = edict({'tr':True,'val':True,'te':True})
+
     loader_kwargs = {'batch_size': batch_size,
                      'shuffle':True,
                      'drop_last':True,
@@ -34,9 +38,10 @@ def get_loader_serial(cfg,data,batch_size,mode):
 
     loader = edict()
     loader.tr = DataLoader(data.tr,**loader_kwargs)
-    loader_kwargs['drop_last'] = True
+    loader_kwargs['drop_last'] = drop_last.val
     loader.val = DataLoader(data.val,**loader_kwargs)
     loader_kwargs['shuffle'] = True
+    loader_kwargs['drop_last'] = drop_last.te
     loader.te = DataLoader(data.te,**loader_kwargs)
     return loader
 
@@ -105,6 +110,6 @@ def collate_triplet_fn(batch):
     return noisy,res,clean,directions
 
 def set_torch_seed(worker_id):
-    torch.manual_seed(worker_id)
+    torch.manual_seed(torch.initial_seed() + worker_id)
 
 

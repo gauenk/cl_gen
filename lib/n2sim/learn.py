@@ -28,7 +28,7 @@ import torchvision.transforms.functional as tvF
 # -- project code --
 import settings
 from pyutils.timer import Timer
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,save_image,tile_across_blocks
 from pyutils.vst import anscombe
 from datasets.transforms import ScaleZeroMean,RandomChoice
 from layers.ot_pytorch import sink_stabilized,sink,pairwise_distances
@@ -37,20 +37,21 @@ from datasets.transforms import get_noise_transform
 
 # -- [local] project code --
 from abps.abp_search import abp_search
-from abps.test_abp_search import test_abp_global_search
+from abps.check_abp_search import test_abp_global_search
 
-from lpas import lpas_search
+from lpas import lpas_search,lpas_spoof
 
 from n2nwl.dist_loss import ot_pairwise_bp,ot_gaussian_bp,ot_pairwise2gaussian_bp,kl_gaussian_bp,w_gaussian_bp,kl_gaussian_bp_patches
 from n2nwl.misc import AlignmentFilterHooks
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms
-from .sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB
+from .sim_search import compute_similar_bursts,compute_similar_bursts_async,compute_similar_bursts_n2sim,create_k_grid,compare_sim_patches_methods,compare_sim_images_methods,compute_kindex_rands_async,kIndexPermLMDB,create_k_grid_v3
 from .debug import print_tensor_stats
+from .utils import crop_center_patch
 
-def print_tensor_stats(prefix,tensor):
-    stats_fmt = (tensor.min().item(),tensor.max().item(),tensor.mean().item())
-    stats_str = "%2.2e,%2.2e,%2.2e" % stats_fmt
-    print(prefix,stats_str)
+# def print_tensor_stats(prefix,tensor):
+#     stats_fmt = (tensor.min().item(),tensor.max().item(),tensor.mean().item())
+#     stats_str = "%2.2e,%2.2e,%2.2e" % stats_fmt
+#     print(prefix,stats_str)
 
 async def say_after(delay, what):
     await asyncio.sleep(delay)
@@ -70,16 +71,44 @@ def sample_not_mid(N):
     idx = ones.multinomial(num_samples=1,replacement=False)[0]
     return not_mid[idx]
     
-def shuffle_aligned_pixels(aligned):
-    N,B,C,H,W = aligned.shape
+def shuffle_aligned_pixels_noncenter(aligned,R):
+    T = aligned.shape[0]
+    left_aligned,right_aligned = aligned[:T//2],aligned[T//2+1:]
+    nc_aligned = torch.cat([left_aligned,right_aligned],dim=0)
+    shuf = shuffle_aligned_pixels(nc_aligned,R)
+    return shuf
+
+def create_sim_from_aligned(burst,aligned,R):
+    T = aligned.shape[0]
+    shuffled = shuffle_aligned_pixels_noncenter(aligned,R)
+    left,right = burst[:T//2],burst[T//2+1:]
+    sim_aligned = []
+    for r in range(R):
+        sim = torch.cat([left,shuffled[[r]],right],dim=0)
+        sim_aligned.append(sim)
+    sim_aligned = torch.stack(sim_aligned,dim=0)
+    sim_aligned = rearrange(sim_aligned,'r t b c h w -> t b r c h w')
+    return sim_aligned
+
+def shuffle_aligned_pixels(aligned,R):
+    T,B,C,H,W = aligned.shape
     aligned = rearrange(aligned,'n b c h w -> n b c (h w)')
+    shuffled = repeat(aligned[0].clone(),'b c hw -> r b c hw',r=R)
+    hw_grid = torch.arange(H*W)
     for b in range(B):
-        indices = torch.randint(N,(H*W,)).long().to(aligned.device)
-        for n in range(N):
+        for r in range(R):
+            indices = torch.randint(T,(H*W,)).long().to(aligned.device)
             for c in range(C):
-                aligned[n,b,c,:] = aligned[n,b,c,indices[n]]
-    aligned = rearrange(aligned,'n b c (h w) -> n b c h w',h=H)
-    return aligned
+                shuffled[r,b,c,:] = aligned[indices[r],b,c,hw_grid]
+    shuffled = rearrange(shuffled,'r b c (h w) -> r b c h w',h=H)
+    # aligned = rearrange(aligned,'n b c (h w) -> n b c h w',h=H)
+    # images = [shuffled,aligned]
+    # cropped = crop_center_patch(images,3,128)
+    # shuffled,aligned = images[0],images[1]
+    # print_tensor_stats("shuffled - aligned",shuffled - aligned)
+    # print_tensor_stats("aligned0 - aligned1",aligned[0] - aligned[1])
+    # exit()
+    return shuffled
 
 def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
 
@@ -247,7 +276,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         # -- grab data batch --
         if small_ds and batch_idx >= ds_size: train_iter = iter(train_loader) # reset if too big
         sample = next(train_iter)
-        burst,raw_img,directions = sample['burst'],sample['clean'],sample['directions']
+        burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
         burst = burst.cuda(non_blocking=True)
 
         # -- handle possibly cached simulated bursts --
@@ -269,8 +298,47 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             
         if (sim_burst is None) and cfg.abps:
             # scores,aligned = abp_search(cfg,burst)
-            scores,aligned = lpas_search(cfg,burst,directions)
-            sim_burst = torch.stack([burst,aligned],dim=2)
+            # scores,aligned = lpas_search(cfg,burst,motion)
+            mtype = "global"
+            acc = cfg.optical_flow_acc
+            scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
+            # scores,aligned = lpas_spoof(motion,accuracy=cfg.optical_flow_acc)
+            # shuffled = shuffle_aligned_pixels_noncenter(aligned,cfg.nframes)
+            sim_aligned = create_sim_from_aligned(burst,aligned,cfg.nframes)
+            burst_s = rearrange(burst,'t b c h w -> t b 1 c h w')
+            sim_burst = torch.cat([burst_s,sim_aligned],dim=2)
+            # print("sim_burst.shape",sim_burst.shape)
+
+        # raw_img = raw_img.cuda(non_blocking=True)-0.5
+        # # print(np.sqrt(cfg.noise_params['g']['stddev']))
+        # print(motion)
+        # tiled = tile_across_blocks(burst[[cfg.nframes//2]],cfg.nblocks)
+        # rep_burst = repeat(burst,'t b c h w -> t b g c h w',g=tiled.shape[2])
+        # for t in range(cfg.nframes):
+        #     save_image(tiled[0] - rep_burst[t],f"tiled_sub_burst_{t}.png")
+        # save_image(aligned,"aligned.png")
+        # print(aligned.shape)
+        # # save_image(aligned[0] - aligned[cfg.nframes//2],"aligned_0.png")
+        # # save_image(aligned[2] - aligned[cfg.nframes//2],"aligned_2.png")
+        # M = (1+cfg.dynamic.ppf)*cfg.nframes
+        # fs = cfg.dynamic.frame_size - M
+        # fs = cfg.frame_size
+        # cropped = crop_center_patch([burst,aligned,raw_img],cfg.nframes,cfg.frame_size)
+        # burst,aligned,raw_img = cropped[0],cropped[1],cropped[2]
+        # for t in range(cfg.nframes):
+        #     diff_t = aligned[t] - raw_img
+        #     print_tensor_stats(f"diff_aligned_{t}",diff_t)
+        #     save_image(diff_t,f"diff_aligned_{t}.png")
+        #     save_image(aligned[t],f"aligned_{t}.png")
+
+        #     diff_t = tvF.crop(aligned[t] - raw_img,cfg.nframes,cfg.nframes,fs,fs)
+        #     print_tensor_stats(f"diff_aligned_{t}",diff_t)
+
+        # save_image(burst,"burst.png")
+        # save_image(burst[0] - burst[cfg.nframes//2],"burst_0.png")
+        # save_image(burst[2] - burst[cfg.nframes//2],"burst_2.png")
+        # exit()
+
 
         # print(sample['burst'].shape,sample['res'].shape)
         # b_clean = sample['burst'] - sample['res']
@@ -298,12 +366,19 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         burst = burst.cuda(non_blocking=True)
         raw_zm_img = szm(raw_img.cuda(non_blocking=True))
         burst_og = burst.clone()
-        mid_img_og = burst[N//2]
         # anscombe.test(cfg,burst_og)
 
         # -- shuffle over Simulated Samples --
         k_ins,k_outs = create_k_grid(sim_burst,shuffle=True)
         # k_ins,k_outs = [k_ins[0]],[k_outs[0]]
+        # k_ins,k_outs = create_k_grid_v3(sim_burst)
+
+        # -- crop images --
+        if cfg.abps or cfg.abps_inputs:
+            images = [burst,burst_og,aligned,raw_img,sim_burst]
+            cropped = crop_center_patch(images,cfg.nframes,cfg.frame_size)
+            burst,burst_og,aligned = cropped[0],cropped[1],cropped[2]
+            raw_img,sim_burst = cropped[3],cropped[4]
 
         for k_in,k_out in zip(k_ins,k_outs):
             if k_in == k_out: continue
@@ -317,7 +392,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             model.unet_info.optim.zero_grad()
 
             # -- compute input/output data --
-            if cfg.sim_only_middle and (not cfg.abps):
+            if cfg.sim_only_middle:# and (not cfg.abps):
+                # sim_burst.shape == T,B,K,C,H,W
                 midi = 0 if sim_burst.shape[0] == 1 else N//2
                 left_burst,right_burst = burst[:N//2],burst[N//2+1:]
                 burst = torch.cat([left_burst,sim_burst[[midi],:,k_in],right_burst],dim=0)
@@ -325,11 +401,30 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             elif cfg.abps and (not cfg.abps_inputs):
 
                 # -- v2 --
-                shuf = shuffle_aligned_pixels(aligned)
-                midi = 0 if sim_burst.shape[0] == 1 else N//2
-                left_burst,right_burst = burst[:N//2],burst[N//2+1:]
-                burst = torch.cat([left_burst,shuf[[0]],right_burst],dim=0)
-                mid_img =  shuf[1]
+                left_aligned,right_aligned = aligned[:N//2],aligned[N//2+1:]
+                nc_aligned = torch.cat([left_aligned,right_aligned],dim=0)
+                shuf = shuffle_aligned_pixels(nc_aligned,cfg.nframes)
+                # shuf = shuffle_aligned_pixels(aligned)
+                # shuf = aligned[[N//2,0]]
+                # midi = 0 if sim_burst.shape[0] == 1 else N//2
+                # left_burst,right_burst = burst[:N//2],burst[N//2+1:]
+                # burst = torch.cat([left_burst,shuf[[0]],right_burst],dim=0)
+                # nc_burst = torch.cat([left_burst,right_burst],dim=0)
+                # shuf = shuffle_aligned_pixels(aligned)
+
+                # nc_shuf = shuffle_aligned_pixels(nc_aligned)
+                # mid_img = nc_shuf[0]
+                # pick = npr.randint(0,2,size=(1,))[0]
+                # mid_img = nc_aligned[pick]
+                mid_img = shuf[1]
+
+                # save_image(shuf,"shuf.png")
+                # print(shuf.shape)
+                
+                # diff = raw_img.cuda(non_blocking=True) - aligned[0]
+                # mean = torch.mean(diff).item()
+                # std = torch.std(diff).item()
+                # print(mean,std)
 
                 # -- v1 --
                 # burst = burst
@@ -339,7 +434,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             elif cfg.abps_inputs:
                 burst = aligned.clone()
                 burst_og = aligned.clone()
-                mid_img = shuffle_aligned_pixels(aligned)[0]
+                mid_img = shuffle_aligned_pixels(burst,cfg.nframes)[0]
+
             else:
                 burst = sim_burst[:,:,k_in]
                 mid_img = sim_burst[N//2,:,k_out]
@@ -349,8 +445,30 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             if cfg.supervised: gt_img = get_nmlz_tgt_img(cfg,raw_img).cuda(non_blocking=True)
             elif cfg.n2n: gt_img = noise_xform(raw_img).cuda(non_blocking=True)
             else: gt_img = mid_img
-            # gt_img = torch.normal(raw_zm_img,noise_level/255.)
             
+
+            # for bt in range(cfg.nframes):
+            #     tiled = tile_across_blocks(burst[[bt]],cfg.nblocks)
+            #     rep_burst = repeat(burst,'t b c h w -> t b g c h w',g=tiled.shape[2])
+            #     for t in range(cfg.nframes):
+            #         save_image(tiled[0] - rep_burst[t],f"tiled_{bt}_sub_burst_{t}.png")
+            #         print_tensor_stats(f"delta_{bt}_{t}",tiled[0,:,4] - burst[t])
+
+            # raw_img = raw_img.cuda(non_blocking=True) - 0.5
+            # print_tensor_stats("gt_img - raw",gt_img - raw_img)
+            # # save_image(gt_img,"gt.png")
+            # # save_image(raw,"raw.png")
+            # save_image(gt_img - raw_img,"gt_sub_raw.png")
+            # print_tensor_stats("burst[N//2] - raw",burst[N//2] - raw_img)
+            # save_image(burst[N//2] - raw_img,"burst_sub_raw.png")
+            # print_tensor_stats("burst[N//2] - gt_img",burst[N//2] - gt_img)
+            # save_image(burst[N//2] - gt_img,"burst_sub_gt.png")
+            # print_tensor_stats("aligned[N//2] - raw",aligned[N//2] - raw_img)
+            # save_image(aligned[N//2] - raw_img,"aligned_sub_raw.png")
+            # print_tensor_stats("aligned[N//2] - burst[N//2]",
+            # aligned[N//2] - burst[N//2])
+            # save_image(aligned[N//2] - burst[N//2],"aligned_sub_burst.png")
+            # gt_img = torch.normal(raw_zm_img,noise_level/255.)
     
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #
@@ -508,6 +626,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             # tv_utils.save_image(mis_ave,"mis.png",nrow=1,normalize=True,range=(-0.5,1.25))
 
             # -- psnr for [bm3d] --
+            mid_img_og = burst[N//2]
             bm3d_nb_psnrs = []
             M = 4 if B > 4 else B
             for b in range(M):
@@ -534,6 +653,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             R = denoised.shape[1]
             raw_img_repN = raw_img.unsqueeze(1).repeat(1,R,1,1,1)
             # if noise_type == "qis": denoised = quantize_img(cfg,denoised)
+            # save_image(denoised_ave,"denoised_ave.png")
+            # save_image(denoised,"denoised.png")
             mse_loss = F.mse_loss(raw_img_repN,denoised,reduction='none').reshape(B,-1)
             mse_loss = torch.mean(mse_loss,1).detach().cpu().numpy()
             psnr_denoised_ave = np.mean(mse_to_psnr(mse_loss))
@@ -580,7 +701,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
 
         # -- write examples --
         if write_examples and (batch_idx % write_examples_iter) == 0 and (batch_idx > 0 or cfg.global_step == 0):
-            write_input_output(cfg,model,stacked_burst,aligned,denoised,all_filters,directions)
+            write_input_output(cfg,model,stacked_burst,aligned,denoised,all_filters,motion)
 
         if use_timer: clock.toc()
 
@@ -658,7 +779,7 @@ def test_loop(cfg,model,test_loader,epoch):
         for batch_idx in range(num_batches):
 
             sample = next(test_iter)
-            burst,raw_img,directions = sample['burst'],sample['clean'],sample['directions']
+            burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
             B = raw_img.shape[0]
             
             # -- selecting input frames --
@@ -685,8 +806,23 @@ def test_loop(cfg,model,test_loader,epoch):
 
             # -- align images if necessary --
             if cfg.abps_inputs:
-                scores,aligned = abp_search(cfg,burst)
+                # scores,aligned = abp_search(cfg,burst)
+                # scores,aligned = lpas_search(cfg,burst,motion)
+                mtype = "global"
+                acc = cfg.optical_flow_acc
+                scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
                 burst = aligned.clone()
+
+            if cfg.abps or cfg.abps_inputs:
+                if cfg.abps_inputs:
+                    images = [burst,aligned,raw_img]
+                    cropped = crop_center_patch(images,cfg.nframes,cfg.frame_size)
+                    burst,aligned,raw_img = cropped[0],cropped[1],cropped[2]
+                else:
+                    images = [burst,raw_img]
+                    cropped = crop_center_patch(images,cfg.nframes,cfg.frame_size)
+                    burst,raw_img = cropped[0],cropped[1]
+
 
             # -- denoising --
             aligned,aligned_ave,denoised,denoised_ave,a_filters,d_filters = model(burst)
@@ -734,7 +870,7 @@ def test_loop(cfg,model,test_loader,epoch):
     return psnr_ave,record_test
 
 
-def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
+def write_input_output(cfg,model,burst,aligned,denoised,filters,motion):
 
     """
     :params burst: input images to the model, :shape [B, N, C, H, W]
@@ -803,8 +939,8 @@ def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
 
         # -- save direction image --
         fn = path / Path(f"arrows_{cfg.global_step}_{b}.png")
-        if len(directions[b]) > 1 and len(directions[b].shape) > 1:
-            arrows = create_arrow_image(directions[b],pad=2)
+        if len(motion[b]) > 1 and len(motion[b].shape) > 1:
+            arrows = create_arrow_image(motion[b],pad=2)
             tv_utils.save_image([arrows],fn)
 
 
@@ -813,13 +949,13 @@ def write_input_output(cfg,model,burst,aligned,denoised,filters,directions):
 
 
 
-def create_arrow_image(directions,pad=2):
-    D = len(directions)
-    assert D == 1,f"Only one direction right now. Currently, [{len(directions)}]"
+def create_arrow_image(motion,pad=2):
+    D = len(motion)
+    assert D == 1,f"Only one direction right now. Currently, [{len(motion)}]"
     W = 100
     S = (W + pad) * D + pad
     arrows = np.zeros((S,W+2*pad,3))
-    direction = directions[0]
+    direction = motion[0]
     for i in range(D):
         col_i = (pad+W)*i+pad
         canvas = arrows[col_i:col_i+W,pad:pad+W,:]

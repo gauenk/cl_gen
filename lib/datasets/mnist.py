@@ -19,7 +19,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 # project imports
 from settings import ROOT_PATH
-from pyutils.misc import add_noise
+from pyutils import add_noise
 from datasets.transforms import BlockGaussian,AddGaussianNoiseSet,ScaleZeroMean,AddGaussianNoiseSetN2N
 
 def get_mnist_dataset(cfg,mode):

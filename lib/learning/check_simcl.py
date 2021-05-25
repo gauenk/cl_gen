@@ -20,9 +20,9 @@ from torch.nn.parallel import DistributedDataParallel as th_DDP
 import settings
 from datasets import load_dataset
 # from .train import thtrain_simcl_cls as train_loop
-from .train import thtrain_cls as train_loop
+from learning.train import thtrain_cls as train_loop
 # from .test import thtest_simcl_cls as test_loop
-from .test import thtest_cls as test_loop
+from learning.test import thtest_cls as test_loop
 
 # ------------------------------------------------------------------------
 #  Testing Contrastive Learning => training a classifier using embeddings

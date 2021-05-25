@@ -28,7 +28,7 @@ from layers.ot_pytorch import sink_stabilized
 from pyutils.plot import add_legend
 
 # -- [local] project code --
-from .utils import init_record
+from n2n.utils import init_record
 
 
 def run_test_aburst(cfg,criterion,train_loader):

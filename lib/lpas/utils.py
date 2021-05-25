@@ -96,7 +96,7 @@ def save_image(images,fn,normalize=True,vrange=None):
 
 def get_ref_block_index(nblocks): return nblocks**2//2 + (nblocks//2)*(nblocks%2==0)
 
-def get_small_test_block_arangements(bss_dir,nblocks,nframes,tcount,size):
+def get_small_test_block_arangements(bss_dir,nblocks,nframes,tcount,size,difficult=False):
     if not bss_dir.exists(): bss_dir.mkdir()
     bss_fn = bss_dir / f"block_arange_{nblocks}b_{nframes}f_{tcount}t_{size}s.npy"
     REF_H = get_ref_block_index(nblocks)
@@ -105,7 +105,7 @@ def get_small_test_block_arangements(bss_dir,nblocks,nframes,tcount,size):
         block_search_space = np.load(bss_fn,allow_pickle=True)
         bss = block_search_space
     else:
-        block_search_space = get_block_arangements_subset(nblocks,nframes,tcount)
+        block_search_space = get_block_arangements_subset(nblocks,nframes,tcount,difficult=difficult)
         bss = block_search_space
         print(f"Original block search space: [{len(bss)}]")
         if len(block_search_space) >= size:
@@ -134,20 +134,34 @@ def get_block_arangements_freeze(nframes,nblocks,fix_frames):
     grids = torch.LongTensor(grids)
     return grids
 
-def get_block_arangements_subset(nblocks,nframes,tcount=10):
+def get_block_arangements_split(nframes,nblocks,fix_frames):
+    pass
+
+def get_block_arangements_subset(nblocks,nframes,tcount=10,difficult=False):
     # -- create grid over neighboring blocks --
     nh_grid = np.arange(nblocks**2)
+    REF_N = get_ref_block_index(nblocks)    
 
     # -- rand for nframes-1 --
     nh_grid_rep = []
     for t in range(nframes-1):
-        rand = np.random.permutation(len(nh_grid))[:tcount]
+        diff_valid = tcount < nblocks**2
+        if difficult and diff_valid:
+            mid_point = tcount//2
+            rand = []
+            for t_index in range(tcount):
+                if t_index >= mid_point:
+                    rand.append(REF_N-mid_point+t_index+1)
+                else:
+                    rand.append(REF_N-mid_point+t_index)
+            rand = np.array(rand)
+        else:
+            rand = np.random.permutation(len(nh_grid))[:tcount]
         nh_grid_rep.append(rand)
     grids = np.meshgrid(*nh_grid_rep,copy=False)
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- fix index for reference patch --
-    REF_N = get_ref_block_index(nblocks)    
     ref_index = REF_N * torch.ones(grids.shape[0])
     M = ( grids.shape[1] ) // 2
     grids = np.c_[grids[:,:M],ref_index,grids[:,M:]]
@@ -173,35 +187,6 @@ def get_block_arangements(nblocks,nframes):
     # -- convert for torch --
     grids = torch.LongTensor(grids)
     return grids
-
-def create_meshgrid(lists):
-    # -- num lists --
-    L = len(lists)
-
-    # -- tokenize each list --
-    codes,uniques = [],[]
-    for l in lists:
-        l_codes,l_uniques = pd.factorize(l)
-        codes.append(l_codes)
-        uniques.append(l_uniques)
-
-    # -- meshgrid and flatten --
-    lmesh = np.meshgrid(*codes)
-    int_mesh = [grid.ravel() for grid in lmesh]
-
-    # -- convert back to tokens --
-    mesh = [uniques[i][int_mesh[i]] for i in range(L)]
-
-    # -- "transpose" the axis to iter goes across original lists --
-    mesh_T = []
-    L,M = len(mesh),len(mesh[0])
-    for m in range(M):
-        mesh_m = []
-        for l in range(L):
-            mesh_m.append(mesh[l][m])
-        mesh_T.append(mesh_m)
-
-    return mesh_T
 
 def rand_sample_two(R):
     if T == 2:
@@ -239,58 +224,4 @@ def pixel_shuffle_perm(burst):
     target = rearrange(target,'t c (h w) -> t c h w',h=H)
     return target
 
-def delta_to_block(deltas,nblocks):
-    B,T = deltas.shape[:2]
-    grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
-    indices = []
-    ref = nblocks//2
-    for b in range(B):
-        delta = deltas[b,T//2] - deltas[b]
-        for t in range(T):
-            x,y = delta[t][0].item(),delta[t][1].item()
-            index = grid.T[ref+y,ref+x]
-            indices.append(index)
-    indices = torch.LongTensor(indices)
-    indices = rearrange(indices,'(b t) -> b t',b=B)
-    return indices
 
-def align_burst_from_block(cfg,burst,block,mtype):
-    if mtype == "global":
-        return align_burst_from_block_global(cfg,burst,block)
-    elif mtype == "local":
-        return align_burst_from_block_local(cfg,burst,block)
-    else:
-        raise ValueError(f"Uknown motion type [{mtype}]")
-
-def tile_across_blocks(batches,nblocks):
-    B = batches.shape[1]
-    H = nblocks
-    FS = batches.shape[-1]
-    crops,tiles = [],[]
-    center = H//2
-    padded = reshape_and_pad(batches,nblocks)
-    for i in range(-H//2+1,H//2+1):
-        for j in range(-H//2+1,H//2+1):
-            crops.append(tvF.crop(padded,i+center,j+center,FS,FS))
-    crops = torch.stack(crops,dim=0)
-    crops = rearrange(crops,'g t b c h w -> t b g c h w')
-    return crops
-
-def reshape_and_pad(images,nblocks):
-    T,B,C,H,W = images.shape
-    images = rearrange(images,'t b c h w -> (t b) c h w')
-    padded = F.pad(images, [nblocks//2,]*4, mode="reflect")
-    padded = rearrange(padded,'(t b) c h w -> t b c h w',b=B)
-    return padded
-
-def align_burst_from_block_global(cfg,bursts,blocks):
-    T,B,FS = bursts.shape[0],bursts.shape[1],bursts.shape[-1]
-    tiles = tile_across_blocks(bursts,cfg.nblocks)
-    crops = []
-    for b in range(B):
-        block = blocks[b]
-        for t in range(T):
-            index = block[t]
-            crops.append(tiles[t,b,index])
-    crops = rearrange(crops,'(b t) c h w -> t b c h w',b=B)
-    return crops
