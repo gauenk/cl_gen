@@ -267,11 +267,12 @@ def split_search(optim,patches):
         """
 
         # -- search along each separate frame --
+        args = (optim,patches,fixed_frames,ref_grid,
+                motion,B,K,t,blocks_i)
         parallel = False
-        execute_split_frame_search(T,parallel,*args)
-    
+        blocks_i = execute_split_frame_search(T,parallel,*args)
+
         # -- complete procs and unpack results --
-        finish_procs(procs,proc_limit)
         blocks_i = [blocks_i[str(t)] for t in range(T)]
         block_grids = create_mesh_frame_grid(blocks_i,B,T)
 
@@ -286,7 +287,6 @@ def execute_split_frame_search(T,parallel,*args):
     procs,proc_limit = [],5
     if parallel: blocks_i = mp.Manager().dict()
     else: blocks_i = {}
-
     for t in range(T):
         if parallel:
             p = mp.Process(target=search_across_frame,
@@ -299,15 +299,11 @@ def execute_split_frame_search(T,parallel,*args):
                 procs = []
         else:
             search_across_frame(t,*args)
-    # optim,patches,fixed_frames,ref_grid,
-    # motion,B,K,t,blocks_i    
+    finish_procs(procs,proc_limit)
     return blocks_i
 
-
 def finish_procs(procs,proc_limit):
-    for p in procs:
-        p.join()
-
+    for p in procs: p.join()
     
 def search_across_frame(t,optim,patches,fixed_frames,ref_grid,motion,B,K,blocks_i):
     print("Search Across Frame",t,flush=True)
@@ -374,33 +370,8 @@ def simple_search(optim,patches):
         """
 
         # -- search along each separate frame --
-        blocks_i = []
-        for t in range(T):
-            print("T",t)
-            if t == optim.ref_frame:
-                mid = ref_grid[[t]].repeat(B,1)
-                blocks_i.append(mid)
-                continue
-
-            # -- select frames --
-            fixed_frames_t = copy.deepcopy(fixed_frames)
-            for b in range(B):
-                del fixed_frames_t[b].idx[t]
-                del fixed_frames_t[b].vals[t]
-            # print(fixed_frames_t)
-
-            # -- create grid --
-            block_grids = optim.block_sampler.sample(None,fixed_frames_t,motion)
-            print(block_grids.shape)
-            # block_grids = torch.sort(block_grids,0).values
-
-            # -- eval over grid --
-            scores,blocks = optim.sample(patches,block_grids,K=K)
-            # blocks.shape = B  K T
-            # print("B",blocks.shape)
-            topk_index_t = blocks[:,:,t]
-            blocks_i.append(topk_index_t)
-            # exit()
+        parallel = False
+        blocks_i = execute_split_frame_search(T,parallel,*args)
         
         # -- create grid from frame optima --
         # "blocks_i.shape" = [ T, B, K ]
