@@ -197,14 +197,15 @@ def lgsubset_v_indices_score(cfg,expanded):
     delta,delta_t = delta_over_grids(cfg,expanded,grids)
     return delta,delta_t
 
-def lgsubset_v_ref_score(cfg,expanded):
+def lgsubset_v_ref_score(cfg,expanded,ref_t=None):
     R,B,E,T,C,H,W = expanded.shape
+    if ref_t is None: ref_t = T//2
 
     # -- indices and large subset --
     indices = np.arange(T)
     subset_lg = chain.from_iterable(combinations(list(indices) , r+1 ) for r in range(T-2,T))
     subset_lg = np.array([np.array(elem) for elem in list(subset_lg)])
-    grids = np.array(np.meshgrid(*[subset_lg,[[T//2,]]]))
+    grids = np.array(np.meshgrid(*[subset_lg,[[ref_t,]]]))
     grids = np.array([grid.ravel() for grid in grids]).T
 
     # -- compute loss --

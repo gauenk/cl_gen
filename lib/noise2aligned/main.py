@@ -52,6 +52,10 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.gpuid = gpuid
     cfg.device = f"cuda:{gpuid}"
     cfg.seed = 123
+    cfg.use_seed = True
+    # cfg.lpas_method = "exhaustive"
+    # cfg.lpas_method = "simple"
+    cfg.lpas_method = "spoof"
         
     grid_idx = idx*(1*ngpus)+rank
     B_grid_idx = (grid_idx % 2)
@@ -74,8 +78,8 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"
     cfg.supervised = False
-    cfg.n2n = True
-    cfg.abps = False
+    cfg.n2n = False
+    cfg.abps = True
     cfg.abps_inputs = False
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = ~cfg.supervised
@@ -107,7 +111,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
 
     # -- abp search parameters --
     cfg.patchsize = 15
-    cfg.nblocks = 9
+    cfg.nblocks = 5
     cfg.nh_size = cfg.nblocks
 
     # -- noise-2-similar parameters --
@@ -122,7 +126,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     
     # -- gaussian noise --
     cfg.noise_type = 'g'
-    noise_level = 75.0
+    noise_level = 50.0
     cfg.noise_params.ntype = cfg.noise_type
     cfg.noise_params['g']['stddev'] = noise_level
     #noise_level = Ggrid[G_grid_idx] # don't worry about
@@ -139,7 +143,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # cfg.N = 30
     # if cfg.abps: cfg.dynamic.frames = cfg.N + 1
     # else: cfg.dynamic.frames = cfg.N
-    cfg.dynamic.frames = cfg.N
+    cfg.dynamic.frames = cfg.N + 1
     cfg.batch_size = 4
     cfg.init_lr = 1e-4 # used to be 5e-4, 03/27/2020
     cfg.unet_channels = 3
@@ -151,7 +155,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.dynamic.bool = True
     cfg.dynamic.ppf = 1
     cfg.dynamic.random_eraser = False
-    cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.N-1)
+    cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.dynamic.frames-1)
     cfg.dataset.load_residual = True
     cfg.dataset.reset_seed = False
 
@@ -160,7 +164,7 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     # else: M = 0
     M = (1+cfg.dynamic.ppf)*cfg.nframes
     cfg.frame_size = 128
-    cfg.dynamic.frame_size = cfg.frame_size + M
+    cfg.dynamic.frame_size = cfg.frame_size + 2*M
     
     # -- asdf --
     cfg.solver = edict()
@@ -271,7 +275,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,idx=
     # load model
     # model = load_unet_model(cfg)
     # model,criterion = load_burst_n2n_model(cfg)
-    set_seed(cfg)
+    if cfg.use_seed: set_seed(cfg)
     model,noise_critic,criterion = load_burst_kpn_model(cfg)
     # model,criterion = load_model_kpn(cfg)
     # optimizer = load_optimizer(cfg,model)

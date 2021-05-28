@@ -26,19 +26,52 @@ def align_burst_from_flow(burst,flow,nblocks,mtype):
 
 def align_burst_from_block_global(bursts,blocks,nblocks):
     T,B,FS = bursts.shape[0],bursts.shape[1],bursts.shape[-1]
+    ref_t = T//2
     tiles = tile_across_blocks(bursts,nblocks)
     crops = []
     for b in range(B):
-        block = blocks[b]
         for t in range(T):
-            index = block[t]
+            index = blocks[b,t].item()
             crops.append(tiles[t,b,index])
     crops = rearrange(crops,'(b t) c h w -> t b c h w',b=B)
     return crops
 
 def align_burst_from_flow_global(bursts,flow,nblocks):
-    blocks = global_flow_to_blocks(flow,nblocks)
+    ref_blocks = global_flow_to_blocks(flow,nblocks)
+    t_blocks = global_blocks_ref_to_frames(ref_blocks,nblocks)
     return align_burst_from_block_global(bursts,blocks,nblocks)
+
+def global_flow_frame_blocks(flow,nblocks):
+    ref_blocks = global_flow_to_blocks(flow,nblocks)
+    t_blocks = global_blocks_ref_to_frames(ref_blocks,nblocks)
+    return t_blocks
+
+def global_blocks_ref_to_frames(ref_blocks_i,nblocks):
+    ref_blocks = ref_blocks_i.clone()
+    nbatches,nframes = ref_blocks.shape[:2]
+    ref_t = nframes//2
+    grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
+    frame_blocks = []
+    ref_blocks = ref_blocks.cpu().numpy()
+    for b in range(nbatches):
+        frame_blocks_b = []
+        blocks = ref_blocks[b]
+        ref = blocks[ref_t]
+
+        # -- before ref --
+        left = blocks[:ref_t]
+        dleft = ref - left
+        left += 2*dleft
+
+        # -- after ref --
+        right = blocks[ref_t+1:]
+        dright = right - ref
+        right -= 2*dright
+
+        frame_blocks_b = np.r_[left,ref,right]
+        frame_blocks.append(frame_blocks_b)
+    frame_blocks = torch.LongTensor(frame_blocks)
+    return frame_blocks
 
 def global_flow_to_blocks(_flow,nblocks):
     """
@@ -57,7 +90,7 @@ def global_flow_to_blocks(_flow,nblocks):
     indices,coord_ref = [],torch.IntTensor([[ref_bl,ref_bl]])
     for b in range(B):
         flow_b = flow[b]
-        flow_b[:,1] *= -1 # -- spatial direction to matrix direction --
+        flow_b[:,0] *= -1 # -- spatial direction to matrix direction --
         left = ref_bl - rcumsum(flow_b[:ref_t]) # -- moving backward
         right = torch.cumsum(flow_b[ref_t:],0) + ref_bl # -- moving forward
         coords = torch.cat([left,coord_ref,right],dim=0)
@@ -114,18 +147,21 @@ def tile_across_blocks(batches,nblocks):
     H = nblocks
     FS = batches.shape[-1]
     crops,tiles = [],[]
-    grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
+    grid = np.arange(2*nblocks**2).reshape(nblocks,nblocks,2)
     blocks = []
     center = H//2
     padded = reshape_and_pad(batches,nblocks)
-    for i in range(-H//2+1,H//2+1):
-        for j in reversed(range(-H//2+1,H//2+1)):
-            # grid[i+H//2,j+H//2] = i*j + j + center
+    for dy in range(-H//2+1,H//2+1):
+        for dx in range(-H//2+1,H//2+1):
+            # grid[dy+H//2,dx+H//2,:] = (dy+center,dx+center)
             # print(grid[i+center,j+center],(i+center,j+center))
-            crops.append(tvF.crop(padded,i+center,j+center,FS,FS))
+            crop = tvF.crop(padded,dy+center,dx+center,FS,FS)
+            # endy,endx = dy+center+FS,dx+center+FS
+            # crop = padded[...,dy+center:endy,dx+center:endx]
+            crops.append(crop)
+    # print(grid)
     # print(blocks)
-    crops = torch.stack(crops,dim=0)
-    crops = rearrange(crops,'g t b c h w -> t b g c h w')
+    crops = torch.stack(crops,dim=2) # t b g c h w
     return crops
 
 #

@@ -146,6 +146,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
     rec_mse_losses,rec_mse_count = 0,0
     rec_ot_losses,rec_ot_count = 0,0
     running_loss,total_loss = 0,0
+    dynamics_acc,dynamics_count = 0,0
 
     write_examples = False
     write_examples_iter = 200
@@ -257,9 +258,10 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
     #     Start Epoch
     #
     # -=-=-=-=-=-=-=-=-=-=-
-
-    init = torch.initial_seed()
-    torch.manual_seed(cfg.seed+1+epoch+init)
+    dynamics_acc_i = -1.
+    if cfg.use_seed:
+        init = torch.initial_seed()
+        torch.manual_seed(cfg.seed+1+epoch+init)
     train_iter = iter(train_loader)
     for batch_idx in range(steps_per_epoch):
 
@@ -276,8 +278,9 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
 
         # -- grab data batch --
         if small_ds and batch_idx >= ds_size:
-            init = torch.initial_seed()
-            torch.manual_seed(cfg.seed+1+epoch+init)
+            if cfg.use_seed:
+                init = torch.initial_seed()
+                torch.manual_seed(cfg.seed+1+epoch+init)
             train_iter = iter(train_loader) # reset if too big
         sample = next(train_iter)
         burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
@@ -305,9 +308,16 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         if (sim_burst is None) and cfg.abps:
             # scores,aligned = abp_search(cfg,burst)
             # scores,aligned = lpas_search(cfg,burst,motion)
-            mtype = "global"
-            acc = cfg.optical_flow_acc
-            scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
+            if cfg.lpas_method == "spoof":
+                mtype = "global"
+                acc = cfg.optical_flow_acc
+                scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
+            else:
+                ref_frame = (cfg.nframes+1)//2
+                nblocks = cfg.nblocks
+                method = cfg.lpas_method
+                scores,aligned,dacc = lpas_search(burst,ref_frame,nblocks,motion,method)
+                dynamics_acc_i = dacc
             # scores,aligned = lpas_spoof(motion,accuracy=cfg.optical_flow_acc)
             # shuffled = shuffle_aligned_pixels_noncenter(aligned,cfg.nframes)
             nsims = cfg.nframes
@@ -386,9 +396,12 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             cropped = crop_center_patch(images,spacing,cfg.frame_size)
             burst,sim_burst = cropped[0],cropped[1]
             raw_img,raw_img_iid = cropped[2],cropped[3]
-            burst = burst[:cfg.nframes] # last frame is target
             if cfg.abps or cfg.abps_inputs:
                 aligned = crop_center_patch([aligned],spacing,cfg.frame_size)[0]
+            # print_tensor_stats("d-eq?",burst[-1] - aligned[-1])
+            burst = burst[:cfg.nframes] # last frame is target
+
+
 
         # -- getting shapes of data --
         N,B,C,H,W = burst.shape
@@ -415,7 +428,8 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
                 # sim_burst.shape == T,B,K,C,H,W
                 midi = 0 if sim_burst.shape[0] == 1 else N//2
                 left_burst,right_burst = burst[:N//2],burst[N//2+1:]
-                burst = torch.cat([left_burst,sim_burst[[midi],:,k_in],right_burst],dim=0)
+                cat_burst = [left_burst,sim_burst[[midi],:,k_in],right_burst]
+                burst = torch.cat(cat_burst,dim=0)
                 mid_img = sim_burst[midi,:,k_out]
             elif cfg.abps and (not cfg.abps_inputs):
                 # -- v1 --
@@ -472,6 +486,12 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             elif cfg.n2n: gt_img = raw_img_iid #noise_xform(raw_img).cuda(non_blocking=True)
             else: gt_img = mid_img
             
+            # another = noise_xform(raw_img).cuda(non_blocking=True)
+            # print_tensor_stats("a-iid?",raw_img_iid.cuda() - raw_img.cuda())
+            # print_tensor_stats("b-iid?",mid_img.cuda() - raw_img.cuda())
+            # print_tensor_stats("c-iid?",mid_img.cuda() - another)
+            # print_tensor_stats("d-iid?",raw_img_iid.cuda() - another)
+            # print_tensor_stats("e-iid?",mid_img.cuda() - raw_img_iid.cuda())
 
             # for bt in range(cfg.nframes):
             #     tiled = tile_across_blocks(burst[[bt]],cfg.nblocks)
@@ -595,10 +615,14 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             rec_ot_losses += rec_ot.item()
             rec_ot_count += 1
     
+            # -- dynamic acc - 
+            dynamics_acc += dynamics_acc_i
+            dynamics_count += 1
+
             # -- total loss --
             running_loss += final_loss.item()
             total_loss += final_loss.item()
-    
+
             # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
             #
             #        Gradients & Backpropogration
@@ -705,6 +729,10 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
             rec_ot_ave = rec_ot_losses / rec_ot_count 
             rec_ot_losses,rec_ot_count = 0,0
 
+            # -- ave dynamic acc --
+            ave_dyn_acc = dynamics_acc / dynamics_count * 100.
+            dynamics_acc,dynamics_count = 0,0
+
             # -- write record --
             if use_record:
                 info = {'burst':burst_loss,'ave':ave_loss,'ot':rec_ot_ave,
@@ -713,10 +741,14 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
                 
             # -- write to stdout --
             write_info = (epoch, cfg.epochs, batch_idx, steps_per_epoch,running_loss,
-                          psnr,psnr_std,psnr_denoised_ave,psnr_denoised_std,psnr_aligned_ave,
-                          psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,bm3d_nb_ave,
-                          bm3d_nb_std,rec_mse_ave,rec_ot_ave)
-            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
+                          psnr,psnr_std,psnr_denoised_ave,psnr_denoised_std,
+                          psnr_aligned_ave,
+                          psnr_aligned_std,psnr_misaligned_ave,psnr_misaligned_std,
+                          bm3d_nb_ave,
+                          bm3d_nb_std,rec_mse_ave,ave_dyn_acc)#rec_ot_ave)
+
+            #print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
+            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [dyn]: %.2e" % write_info)
             # -- write to summary writer --
             if writer:
                 writer.add_scalar('train/running-loss',running_loss,cfg.global_step)
@@ -797,8 +829,9 @@ def test_loop(cfg,model,test_loader,epoch):
     use_record = False
     record_test = pd.DataFrame({'psnr':[]})
 
-    init = torch.initial_seed()
-    torch.manual_seed(cfg.seed+1+epoch+init)
+    if cfg.use_seed:
+        init = torch.initial_seed()
+        torch.manual_seed(cfg.seed+1+epoch+init)
     test_iter = iter(test_loader)
     num_batches,D = 25,len(test_iter) 
     num_batches = D
@@ -837,10 +870,16 @@ def test_loop(cfg,model,test_loader,epoch):
             # -- align images if necessary --
             if cfg.abps_inputs:
                 # scores,aligned = abp_search(cfg,burst)
-                # scores,aligned = lpas_search(cfg,burst,motion)
-                mtype = "global"
-                acc = cfg.optical_flow_acc
-                scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
+                if cfg.lpas_method == "spoof":
+                    mtype = "global"
+                    acc = cfg.optical_flow_acc
+                    scores,aligned = lpas_spoof(burst,motion,cfg.nblocks,mtype,acc)
+                else:
+                    ref_frame = (cfg.nframes+1)//2
+                    nblocks = cfg.nblocks
+                    method = cfg.lpas_method
+                    results = lpas_search(burst,ref_frame,nblocks,motion,method)
+                    scores,aligned,dacc = results
                 burst = aligned.clone()
 
             if True:

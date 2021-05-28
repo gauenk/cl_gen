@@ -1,12 +1,13 @@
 
 # -- python imports --
 import numpy as np
+from PIL import Image
 
 # -- pytorch imports --
 import torch
 import torch.nn.functional as F
 import torchvision.utils as tv_utils
-
+import torchvision.transforms.functional as tvF
 
 def print_tensor_stats(prefix,tensor):
     stats_fmt = (tensor.min().item(),tensor.max().item(),
@@ -65,3 +66,7 @@ def save_image(images,fn,normalize=True,vrange=None):
     else:
         tv_utils.save_image(images,fn,normalize=normalize,range=vrange)
 
+def read_image(image_path):
+    image = Image.open(image_path)
+    x = tvF.to_tensor(image)
+    return x

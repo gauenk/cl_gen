@@ -157,7 +157,9 @@ class COG():
             p.start()
             # self.train_model_loop(burst,model,optim)
             procs.append(p)
-            if len(procs) == self.proc_limit: self.finish_procs(procs)
+            if len(procs) == self.proc_limit:
+                self.finish_procs(procs)
+                procs = []
         self.finish_procs(procs)
                 
     def finish_procs(self,procs):

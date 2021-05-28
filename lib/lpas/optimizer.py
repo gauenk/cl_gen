@@ -2,7 +2,7 @@
 # -- python imports --
 import numpy as np
 from easydict import EasyDict as edict
-from einops import rearrange
+from einops import rearrange,repeat
 
 # -- pytorch imports --
 import torch
@@ -17,68 +17,116 @@ from .samplers import FrameIndexSampler,BlockIndexSampler,MotionSampler
 
 class AlignmentOptimizer():
 
-    def __init__(self,T,H,isize,motion_type,nsteps,nparticles,motion,score_params):
+    def __init__(self,T,H,refT,isize,motion_type,nsteps,nparticles,motion,score_params):
         # -- init vars --
         self.nframes = T
         self.nblocks = H
+        self.ref_frame = refT
         self.isize = isize
         self.motion_type = motion_type
         self.nsteps = nsteps
         self.nparticles = nparticles
         self.motion = motion
         self.score_params = score_params
+        self.verbose = False
 
         # -- create samplers --
-        self.frame_sampler = FrameIndexSampler(T,H,motion_type,motion)
-        self.block_sampler = BlockIndexSampler(T,H,isize,motion_type,motion)
-        self.motion_sampler = MotionSampler(T,H,isize,motion_type,motion)
+        self.frame_sampler = FrameIndexSampler(T,H,refT,motion_type,motion)
+        self.block_sampler = BlockIndexSampler(T,H,refT,isize,motion_type,motion)
+        self.motion_sampler = MotionSampler(T,H,refT,isize,motion_type,motion)
 
         # -- samples of nh indices for each frame --
-        self.samples = edict({'scores':[],'blocks':[]})
+        self.init_samples()
+        self.igrid = edict()
         
     
-    def get_ref_h(self):
-        Hsqrt = int(np.sqrt(self.nblocks))
-        return Hsqrt**2//2 + Hsqrt//2*(Hsqrt%2==0)
+    def init_samples(self):
+        self.samples = edict({'scores':[],'blocks':[]})
 
-    def sample(self,patches,block_grids):
+    def get_ref_h(self):
+        # Hsqrt = int(np.sqrt(self.nblocks))
+        # return Hsqrt**2//2 + Hsqrt//2*(Hsqrt%2==0)
+        H = self.nblocks
+        return H**2//2 + H//2*(H%2==0)
+
+    def sample(self,patches,block_grids,K):
         self.parallel_limit = -1 #10000
         B,R,T,H,C,H,W = patches.shape        
         if B*R*(H**2) < self.parallel_limit:
-            return self.compute_vectorized_block_grid(patches,block_grids)
+            return self.compute_vectorized_block_grid(patches,block_grids,K)
         else:
-            return self.compute_serial_block_grid(patches,block_grids)
+            return self.compute_serial_block_grid(patches,block_grids,K)
 
-    def compute_vectorized_block_grid(self,patches,block_grids):
+    def compute_vectorized_block_grid(self,patches,block_grids,K):
         raise NotImplemented("")
 
-    def compute_serial_block_grid(self,patches,block_grids):
+    def _index_block_from_patch(self,patches,blocks,indexing):
+        i = indexing
+        ndims = len(blocks.shape)
+        if ndims >= 2: # -- image batch dim present --
+            bbs = blocks.shape[0]
+            #torch.index_select(patches,
+            block = patches[i.bmesh[:,:bbs],:,i.tmesh[:,:bbs],blocks,:,:,:] 
+            block = rearrange(block,'b e t r c ph pw -> b r e t c ph pw')
+        else: # -- no image batch dim --
+            block = patches[:,:,i.tmesh[0],blocks,:,:,:] 
+            block = block.unsqueeze(2)
+        return block
+
+    def block_grid_loader(self,block_grids,batchsize):
+        nbatches = len(block_grids) // batchsize
+        nbatches += len(block_grids) % batchsize > 0
+        for i in range(nbatches):
+            start = i * batchsize
+            end = start + batchsize
+            batch = rearrange(block_grids[start:end],'e b t -> b e t') # E, B, T 
+            yield batch
+
+    def compute_serial_block_grid(self,patches,block_grids,K):
         # -- move vars into scope --
-        B,R,T,H,C,H,W = patches.shape
-        tgrid = torch.arange(T)
+        B,R,T,H,C,Ph,Pw = patches.shape
+        BB = 100
+
+        # -- create indexing grids
+        tgrid = None
+        bmesh = repeat(torch.arange(B),'b -> b e t',t=T,e=BB)
+        tmesh = repeat(torch.arange(T),'t -> b e t',b=B,e=BB)
+        indexing = edict({'tgrid':tgrid,'bmesh':bmesh,'tmesh':tmesh})
 
         # -- compute along grid --
         scores = torch.zeros(self.nframes)
         self.block_sampler.reset()
-        for blocks in block_grids:
+        if len(block_grids.shape) == 2: block_grids = block_grids[:,None,:]
+        # print("P",patches.shape)
+        for blocks in self.block_grid_loader(block_grids,BB):
+            """
+            todo: modify "blocks" shape here once and for all. 
+                  no more switching elsewhere
+            """
+            if len(blocks.shape) <= 2: blocks = blocks[None,:]
+            # blocks = repeat(blocks,'1 b t -> b e t',e=3)
 
             # -- index the patch for the neighborhood --
-            block = patches[:,:,tgrid,blocks,:,:,:] 
-            block = block.unsqueeze(2)
+            block = self._index_block_from_patch(patches,blocks,indexing)
+            # B,R,E,T,C,H,W = blocks.shape, E = batches of block grids
 
             # -- compute the scores per search frame --
+            if self.verbose: print(blocks)
             scores = self.compute_frame_scores(block)
             # B,E,Tp1 = scores.shape
 
+            # print("bs.shape",blocks.shape)
+            # print("s.shape",scores.shape)
+            # print("b.shape",block.shape)
+
             # -- update block sampler --
-            blocks = blocks.cuda(non_blocking=True)[None,:]
-            # print(scores[:,:,0],blocks)
+            #blocks = blocks.cuda(non_blocking=True)
             self.block_sampler.update(scores,blocks)
             """
             if we include block sampler in this block
             we can adapt the search grid during the local search.
             """
-        scores,blocks = self.block_sampler.get_results()
+        scores,blocks = self.block_sampler.get_results(K=K)
         self.append_samples(scores,blocks)
         return scores,blocks
 
@@ -101,7 +149,8 @@ class AlignmentOptimizer():
         return scores
 
     def compute_raw_frame_scores(self,block):
-        # R,B,E,T,C,H,W = block.shape
+        # B,R,E,T,C,H,W = block.shape
+        block = rearrange(block,'b r e t c h w -> r b e t c h w')
         score_fxn = get_score_function(self.score_params.name)
         score,scores_t = score_fxn(None,block)
         score = torch.mean(score,dim=0)
@@ -131,7 +180,8 @@ class AlignmentOptimizer():
         blocks = rearrange(blocks,'n b g -> b n g')
 
         # -- pick top K --
-        B = scores.shape[0]
+        B,N = scores.shape
+        if N < K: K = N
         scores_topK,blocks_topK = [],[]
         for b in range(B):
             topK = torch.topk(scores[b],K,largest=False)
@@ -141,3 +191,21 @@ class AlignmentOptimizer():
         blocks_topK = torch.stack(blocks_topK,dim=0)
         return scores_topK,blocks_topK
 
+# class BlockGridLoader():
+#     def __init__(self,block_grids,batchsize):
+#         self.block_grids
+#         self.batchsize
+
+#         # -- compute num of batches --
+#         self.nbatches = len(self.block_grids) // self.batchsize
+#         self.nbatches += self.batchsize % len(self.block_grids) > 0
+        
+#     def __len__(self):
+#         return self.nbatches
+#     def __next__(self):
+#         return self.next()
+
+#     def next(self):
+#         for i in range(self.nbatches):
+#             start = i*self.batchsize
+#             yield

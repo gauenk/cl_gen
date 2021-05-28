@@ -151,6 +151,8 @@ class GlobalCameraMotionTransform():
         flow[:,1] = np.ediff1d(nd_delta[:,0])
         flow[:,0] = np.ediff1d(nd_delta[:,1])
         # -- we want flow[i,:] = [dx, dy] --
+        # -- convert to spatial and flip the dx --
+        flow[:,0] *= -1
         flow = torch.IntTensor(flow)
         return flow
 
@@ -159,8 +161,10 @@ class GlobalCameraMotionTransform():
         tl = tl_list[i]
         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
         t,l = tl[0].item(),tl[1].item()
-        # print(t,l,t+self.frame_size,l+self.frame_size,h,w)             
-        pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
+        # -- resizing clean image results in image blur across (t,l) dynamics --
+        # -- notably this blur is consistent so we only see disconnect w/ frame idx 0 --
+        # pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
+        pic_i = tvF.crop(pic,t,l,out_frame_size[0],out_frame_size[1])
         res_i = torch.empty(0)
         if (not self.noise_trans is None):
             noisy_pic_i = self.szm(self.noise_trans(self.to_tensor(pic_i)))

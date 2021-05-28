@@ -21,7 +21,7 @@ def print_tensor_stats(name,tensor):
     t_mean = tensor.mean().item()
     print(name,t_min,t_max,t_mean)
 
-def sample_good_init_tl(full_image,P,patchsize):
+def sample_good_init_tl(full_image,P,patchsize,nblocks):
     # -- shape to include batch --
     if len(full_image.shape) == 3:
         full_image = full_image.unsqueeze(0)
@@ -34,7 +34,7 @@ def sample_good_init_tl(full_image,P,patchsize):
 
     # -- sample based on edges and patchsize --
     buf,eps = 3,1e-13
-    fs = patchsize//2 + buf
+    fs = patchsize//2 + buf + nblocks//2
     inner = edges[:,fs:-fs,fs:-fs]
     topP = torch.topk(inner.reshape(B,-1),S,largest=True).values
     init_tl_list = []
@@ -55,14 +55,14 @@ def sample_good_init_tl(full_image,P,patchsize):
 def get_sobel_patches(burst,nblocks,R,patchsize):
     ps,(nframes,B) = patchsize,burst.shape[:2]
     image = torch.mean(burst,dim=0)
-    indices = sample_good_init_tl(image,R,ps)
+    indices = sample_good_init_tl(image,R,ps,nblocks)
     patches = []
     for b in range(B):
         indices_b = indices[b]
         patches_b = crop_burst_to_blocks(burst[:,b],nblocks,indices_b,ps)
         patches.append(patches_b)
     patches = torch.stack(patches,dim=0)
-    patches = rearrange(patches,'b t h r c p1 p2 -> r b t h c p1 p2')
+    patches = rearrange(patches,'b t h r c p1 p2 -> b r t h c p1 p2')
     return patches,indices
     
 def crop_burst_to_blocks(full_burst,nblocks,init_tl_list,patchsize):
@@ -71,10 +71,10 @@ def crop_burst_to_blocks(full_burst,nblocks,init_tl_list,patchsize):
     for p in range(P):
         t,l = init_tl_list[p]
         blocks_p = []
-        for i in range(-H//2+1,H//2+1):
-            for j in range(-H//2+1,H//2+1):
-                crop = tvF.crop(full_burst,t+i,l+j,ps,ps)
-                # if i == 0 and j == 0: save_image(crop,f"crop_{p}.png")
+        for dy in range(-H//2+1,H//2+1):
+            for dx in range(-H//2+1,H//2+1):
+                crop = tvF.crop(full_burst,t+dy,l+dx,ps,ps)
+                # if dy == 0 and dx == 0: save_image(crop,f"crop_{p}.png")
                 blocks_p.append(crop)
         blocks_p = torch.stack(blocks_p,dim=0)
         blocks.append(blocks_p)

@@ -8,7 +8,7 @@ from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoiss
 
 __all__ = ['get_noise_transform']
 
-def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True):
+def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True,zero_mean=True):
     """
     The exemplar function for noise getting info
     """
@@ -21,8 +21,9 @@ def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True):
     comp = []
     if noise_only: comp = [noise]
     else:
-        if use_to_tensor: comp = [to_tensor,noise,szm]
-        else: comp = [noise,szm]
+        if use_to_tensor: comp += [to_tensor]
+        comp += [noise]
+        if zero_mean: comp += [szm]
     transform = tvT.Compose(comp)
 
     return transform
