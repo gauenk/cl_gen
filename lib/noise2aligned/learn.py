@@ -748,7 +748,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
                           bm3d_nb_std,rec_mse_ave,ave_dyn_acc)#rec_ot_ave)
 
             #print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [r-ot]: %.2e" % write_info)
-            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [dyn]: %.2e" % write_info)
+            print("[%d/%d][%d/%d]: %2.3e [PSNR]: %2.2f +/- %2.2f [den]: %2.2f +/- %2.2f [al]: %2.2f +/- %2.2f [mis]: %2.2f +/- %2.2f [bm3d]: %2.2f +/- %2.2f [r-mse]: %.2e [dyn]: %.2e" % write_info,flush=True)
             # -- write to summary writer --
             if writer:
                 writer.add_scalar('train/running-loss',running_loss,cfg.global_step)
@@ -928,12 +928,12 @@ def test_loop(cfg,model,test_loader,epoch):
             #     plt.imshow(grid_imgs.permute(1,2,0))
             #     plt.savefig(fn)
             #     plt.close('all')
-            if batch_idx % 100 == 0: print("[%d/%d] Test PSNR: %2.2f" % (batch_idx,num_batches,total_psnr / (batch_idx+1)))
+            if batch_idx % 100 == 0: print("[%d/%d] Test PSNR: %2.2f" % (batch_idx,num_batches,total_psnr / (batch_idx+1)),flush=True)
 
     psnr_ave = np.mean(psnrs)
     psnr_std = np.std(psnrs)
     ave_loss = total_loss / num_batches
-    print("[N: %d] Testing: [psnr: %2.2f +/- %2.2f] [ave loss %2.3e]"%(cfg.N,psnr_ave,psnr_std,ave_loss))
+    print("[N: %d] Testing: [psnr: %2.2f +/- %2.2f] [ave loss %2.3e]"%(cfg.N,psnr_ave,psnr_std,ave_loss),flush=True)
     return psnr_ave,record_test
 
 

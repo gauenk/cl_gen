@@ -59,11 +59,11 @@ def sink(M, reg, numItermax=1000, stopThr=1e-9, cuda = True):
     return torch.sum(u.view((-1, 1)) * K * v.view((1, -1)) * M)
 
 
-def sink_stabilized(M, reg, numItermax=80, tau=1e2, stopThr=1e-9, warmstart=None, print_period=5, cuda=True, print_me=False):
+def sink_stabilized(M, reg, numItermax=20, tau=1e2, stopThr=1e-9, warmstart=None, print_period=5, device=None, print_me=False):
 
-    if cuda:
-        a = Variable(torch.ones((M.size()[0],)) / M.size()[0]).cuda()
-        b = Variable(torch.ones((M.size()[1],)) / M.size()[1]).cuda()
+    if device:
+        a = Variable(torch.ones((M.size()[0],)) / M.size()[0]).to(device)
+        b = Variable(torch.ones((M.size()[1],)) / M.size()[1]).to(device)
     else:
         a = Variable(torch.ones((M.size()[0],)) / M.size()[0])
         b = Variable(torch.ones((M.size()[1],)) / M.size()[1])
@@ -76,15 +76,15 @@ def sink_stabilized(M, reg, numItermax=80, tau=1e2, stopThr=1e-9, warmstart=None
     # we assume that no distances are null except those of the diagonal of
     # distances
     if warmstart is None:
-        if cuda:
-            alpha, beta = Variable(torch.zeros(na)).cuda(), Variable(torch.zeros(nb)).cuda()
+        if device:
+            alpha, beta = Variable(torch.zeros(na)).to(device), Variable(torch.zeros(nb)).to(device)
         else:
             alpha, beta = Variable(torch.zeros(na)), Variable(torch.zeros(nb))
     else:
         alpha, beta = warmstart
 
-    if cuda:
-        u, v = Variable(torch.ones(na) / na).cuda(), Variable(torch.ones(nb) / nb).cuda()
+    if device:
+        u, v = Variable(torch.ones(na) / na).to(device), Variable(torch.ones(nb) / nb).to(device)
     else:
         u, v = Variable(torch.ones(na) / na), Variable(torch.ones(nb) / nb)
 
@@ -114,8 +114,8 @@ def sink_stabilized(M, reg, numItermax=80, tau=1e2, stopThr=1e-9, warmstart=None
         if torch.max(torch.abs(u)).item() > tau or torch.max(torch.abs(v)).item() > tau:
             alpha, beta = alpha + reg * torch.log(u), beta + reg * torch.log(v)
 
-            if cuda:
-                u, v = Variable(torch.ones(na) / na).cuda(), Variable(torch.ones(nb) / nb).cuda()
+            if device:
+                u, v = Variable(torch.ones(na) / na).to(device), Variable(torch.ones(nb) / nb).to(device)
             else:
                 u, v = Variable(torch.ones(na) / na), Variable(torch.ones(nb) / nb)
 

@@ -17,7 +17,8 @@ from .samplers import FrameIndexSampler,BlockIndexSampler,MotionSampler
 
 class AlignmentOptimizer():
 
-    def __init__(self,T,H,refT,isize,motion_type,nsteps,nparticles,motion,score_params):
+    def __init__(self,T,H,refT,isize,motion_type,nsteps,
+                 nparticles,motion,score_params,noise_info):
         # -- init vars --
         self.nframes = T
         self.nblocks = H
@@ -29,6 +30,7 @@ class AlignmentOptimizer():
         self.motion = motion
         self.score_params = score_params
         self.verbose = False
+        self.noise_info = noise_info
 
         # -- create samplers --
         self.frame_sampler = FrameIndexSampler(T,H,refT,motion_type,motion)
@@ -64,7 +66,8 @@ class AlignmentOptimizer():
         i = indexing
         ndims = len(blocks.shape)
         if ndims >= 2: # -- image batch dim present --
-            bbs = blocks.shape[0]
+            bbs = blocks.shape[1]
+            #print(blocks.shape)
             #torch.index_select(patches,
             block = patches[i.bmesh[:,:bbs],:,i.tmesh[:,:bbs],blocks,:,:,:] 
             block = rearrange(block,'b e t r c ph pw -> b r e t c ph pw')
@@ -152,7 +155,7 @@ class AlignmentOptimizer():
         # B,R,E,T,C,H,W = block.shape
         block = rearrange(block,'b r e t c h w -> r b e t c h w')
         score_fxn = get_score_function(self.score_params.name)
-        score,scores_t = score_fxn(None,block)
+        score,scores_t = score_fxn(self.noise_info,block)
         score = torch.mean(score,dim=0)
         scores_t = torch.mean(scores_t,dim=0)
         scores = self.aggregate_scores(score,scores_t)

@@ -51,6 +51,24 @@ def create_noise_level_grid(cfg):
     noise_type = 'g'
     ns = copy.deepcopy(cfg.noise_params[noise_type])
     ns['ntype'] = noise_type
+    ns['stddev'] = 125.
+    ns['name'] = f"g-{ns['stddev']}".replace(".","p")
+    ns = edict(ns)
+    noise_configs.append(ns)
+
+    # -- gaussian noise --
+    noise_type = 'g'
+    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns['ntype'] = noise_type
+    ns['stddev'] = 100.
+    ns['name'] = f"g-{ns['stddev']}".replace(".","p")
+    ns = edict(ns)
+    noise_configs.append(ns)
+
+    # -- gaussian noise --
+    noise_type = 'g'
+    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns['ntype'] = noise_type
     ns['stddev'] = 75.
     ns['name'] = f"g-{ns['stddev']}".replace(".","p")
     ns = edict(ns)

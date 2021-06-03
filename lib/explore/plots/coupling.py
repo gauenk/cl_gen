@@ -38,9 +38,14 @@ def plot_per_image(records,xgrids,sgrids,scores,scores_t,
                    bss,field,batch_size,normalize=True):
     B = batch_size
     scores = rearrange(scores,'bss (rb b) t -> t rb b bss',b=batch_size)
-    rB = bss.shape[0]
+    numPatches,repImageBatches,imageBatches,bssSize = scores.shape
+    # repImageBatches = bss.shape[0]
+    # print(bss.shape,scores.shape,batch_size,repImageBatches)
+    # todo: remove extraneous input vars.
+    B = imageBatches
     ax_xgrid = []
-    for rb in range(rB):
+    cmaps = plt.cm.get_cmap('YlOrBr', B)
+    for rb in range(repImageBatches):
         fig,ax = plt.subplots()
         for xgrid,sgrid in zip(xgrids[rb],sgrids[rb]):
             scores_rb = scores[:,rb,:,sgrid]
@@ -53,13 +58,14 @@ def plot_per_image(records,xgrids,sgrids,scores,scores_t,
                 xgrid_i = xgrid[order]
                 scores_i = scores_i[order]
                 ax_xgrid = update_ax_xgrid(ax_xgrid,xgrid_i)
-                ax.plot(xgrid_i,scores_i,'x-')
+                ax.plot(xgrid_i,scores_i,'x-',c=cmaps(j))
         ax.set_xticks(ax_xgrid)
         ax.set_xticklabels([str(x) for x in ax_xgrid])
         # -- write to file --
         base = Path("./ave_frame_index_v_rest") / field / f"./{rb}b"
         if not base.exists(): base.mkdir(parents=True)
         fn = base / create_config_string(records)
+        print(f"Saving Image to [{fn}]")
         plt.savefig(fn,dpi=300,transparent=False,bbox_inches='tight')
 
         plt.clf()
@@ -148,6 +154,7 @@ def plot_ave_image(records,xgrids,sgrids,scores,scores_t,
     base = Path("./ave_frame_index_v_rest") / field
     if not base.exists(): base.mkdir(parents=True)
     fn = base / create_config_string(records)
+    print(f"Saving Image to [{fn}]")
     plt.savefig(fn,dpi=300,transparent=True,bbox_inches='tight')
     plt.clf()
     plt.cla()
@@ -210,7 +217,7 @@ def plot_score_v_frames(cfg,records,exp_fields):
     #     couplings = coup_df['couplings']
 
 
-def plot_frame_index_v_remaining_fixed(cfg,records,exp_fields,exp_int):
+def plot_frame_index_v_remaining_fixed(cfg,records,score_field,exp_fields,exp_int):
 
     # -- extract info --
     for exp_field in exp_fields:
@@ -218,13 +225,16 @@ def plot_frame_index_v_remaining_fixed(cfg,records,exp_fields,exp_int):
         print(exp_field,records[exp_int][exp_field])
     record = records[exp_int]
     bss = records[exp_int]['bss']
+    print(bss.shape)
+    print("BSS shape needs to be converted back to old shape.")
+    exit()
     bss_ibatch = records[exp_int]['bss_ibatch']
-    field = 'pixel_ave'
+    field = score_field#'pixel_ave'
     scores = rearrange(records[exp_int][field]['scores'],'p ib ss -> ss ib p')
     scores_t = rearrange(records[exp_int][field]['scores_t'],'p ib ss t -> ss t ib p')
     batch_size = records[exp_int]['batch_size']
     SS,IB,P = scores.shape
-    # npatches, image batch, search_space batch
+    # search_space batch, image batch, npatches
 
     # -- plot params --
     vectorized = False
@@ -235,7 +245,7 @@ def plot_frame_index_v_remaining_fixed(cfg,records,exp_fields,exp_int):
     xgrids,sgrids = bss_groups(bss,bss_ibatch,xindex)
     igrid = np.arange(bss.shape[0])
 
-    # -- plot per image --
+    # -- plot per image -- 
     plot_per_image(record,xgrids,sgrids,scores,scores_t,
                    bss,field,batch_size,normalize)
 
@@ -244,9 +254,14 @@ def plot_frame_index_v_remaining_fixed(cfg,records,exp_fields,exp_int):
                    batch_size,normalize,vectorized)
         
 def bss_groups(bss,bss_ibatch,xindex):
-    iB = bss.shape[0]
+    """
+    for each image batch, we 
+    compute the associated bss indices
+    """
+
+    imageBatches = bss.shape[0]
     xgrids,sgrids = [],[]
-    for b in range(iB):
+    for b in range(imageBatches):
         xgrids_b,sgrids_b = bss_batch_groups(bss[b],xindex)
         xgrids.append(xgrids_b)
         sgrids.append(sgrids_b)
@@ -265,7 +280,7 @@ def bss_batch_groups(bss,xindex):
         fmt.append({'xvalue':xvalue,'rest':rest_str})
     fmt = pd.DataFrame(fmt)
         
-    # -- group by rest --
+    # -- group frame index by rest of frames --
     xgrids,sgrids = [],[]
     for rest,group in fmt.groupby("rest"):
         xgrid = np.array([int(x) for x in group['xvalue']])

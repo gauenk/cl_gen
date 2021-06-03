@@ -61,7 +61,8 @@ def get_cached_block_search_space(bss_dir,nblocks,nframes,tcount,size,difficult=
         if verbose: print(f"Original block search space: [{len(bss)}]")
         if len(bss) >= size:
             # bss = bss_subsample(bss,size,REF_H,nframes,"random")
-            bss = bss_subsample(bss,size,REF_H,nframes,"along_frame")
+            # bss = bss_subsample(bss,size,REF_H,nframes,"along_frame")
+            bss = bss_subsample(bss,size,REF_H,nframes,"almost_nodynamics")
             block_search_space = bss
         bss = block_search_space
         if verbose: print(f"Writing block search space: [{bss_fn}]")
@@ -81,6 +82,14 @@ def bss_subsample(bss,size,REF_H,nframes,method="random"):
     elif method == "along_frame":
         bss = remove_nodynamics(bss,REF_H) 
         bss = bss[:size-1]
+        bss = ensure_single_nodynamics(bss,REF_H,nframes)
+        return bss
+    elif method == "almost_nodynamics":
+        bss = remove_nodynamics(bss,REF_H) 
+        deltas = torch.sum(torch.abs(bss - REF_H),1)        
+        args = torch.nonzero(deltas < (nframes//2-1) )[:,0]
+        if len(args) < size: raise ValueError("No enough 'no dynamics'")
+        bss = bss[args[:size-1]]
         bss = ensure_single_nodynamics(bss,REF_H,nframes)
         return bss
     else:
@@ -120,20 +129,30 @@ def generate_block_search_space(nblocks,nframes,tcount=10,difficult=False):
     # -- single dynamics middle block --
     # grids = remove_nodynamics(grids,REF_H)
     grids = ensure_single_nodynamics(grids,REF_H,nframes)
+
     return grids
 
 
-def ensure_single_nodynamics(grids,REF_H,nframes):
+def args_nodynamics_nblocks(grids,nblocks):
+    REF_H = get_ref_block_index(nblocks)
     deltas = torch.sum(torch.abs(grids - REF_H),1)
     args = torch.nonzero(deltas == 0)
+    return args
+
+def args_nodynamics(grids,REF_H):
+    deltas = torch.sum(torch.abs(grids - REF_H),1)
+    args = torch.nonzero(deltas == 0)
+    return args
+
+def ensure_single_nodynamics(grids,REF_H,nframes):
+    args = args_nodynamics(grids,REF_H)
     if len(args) == 0:
         nodynamics = torch.tensor(np.array([REF_H]*nframes)).long()[None,:]
-        grids = torch.cat([grids,nodynamics],dim=0)
+        grids = torch.cat([nodynamics,grids],dim=0)
     return grids
 
 def remove_nodynamics(grids,REF_H):
-    deltas = torch.sum(torch.abs(grids - REF_H),1)
-    args = torch.nonzero(deltas == 0)
+    args = args_nodynamics(grids,REF_H)
     if len(args) > 0:
         args = args[0].item()
         grids = torch.cat([grids[:args],grids[args+1:]],dim=0)

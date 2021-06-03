@@ -16,14 +16,15 @@ from settings import ROOT_PATH
 from lpas.main import get_main_config
 
 # -- [lpas] plotting functions --
-from .plots.coupling import plot_frame_index_v_remaining_fixed
-from .plots.filters import plot_unet_filters_v_image_content
+from explore.plots.coupling import plot_frame_index_v_remaining_fixed
+from explore.plots.filters import plot_unet_filters_v_image_content
+from explore.plots.global_optima_quality import experiment_global_optima_quality,compare_global_optima_quality
 
 # -- [explore] imports --
 from .mesh import create_mesh,get_setup_fxn
 from .io import save_exp,load_exp,clear_cache,get_uuid
 from .experiment import execute_experiment
-from .utils import append_to_record
+from .utils import append_to_record,load_records
 
 def main():
 
@@ -32,7 +33,7 @@ def main():
     cfg.explore_package = "lpas" # -- pick package to explore --
 
     # -- set explore and bss dir --
-    cfg.bss_batch_size = 30
+    cfg.bss_batch_size = 100
     cfg.explore_dir = Path(ROOT_PATH) / f"./output/explore/{cfg.explore_package}/"
     if not cfg.explore_dir.exists(): cfg.explore_dir.mkdir(parents=True)
     cfg.bss_dir = cfg.explore_dir / "./bss/"
@@ -42,14 +43,14 @@ def main():
     cfg.drop_last = {'tr':True,'val':True,'te':True}
 
     # -- Pick Experiment Version --
-    version = "v3"
+    version = "v4"
 
     # -- Load Experiment Mesh --
     experiments,order = create_mesh(version)
     config_setup = get_setup_fxn(version)
 
     # -- Clear Cache --
-    if False: clear_cache()
+    if True: clear_cache()
 
     # -- Run Experiment --
     for config in tqdm(experiments):
@@ -72,8 +73,11 @@ def main():
     - more coding. perhaps messy deps among packages
     """
     # -- Create Visualizations of Relevant Data --
-    plot_frame_index_v_remaining_fixed(cfg,records,order)
+    # plot_frame_index_v_remaining_fixed(cfg,records,'pixel_ave',order,0)
     # plot_unet_filters_v_image_content(cfg,records,order)
+    # experiment_global_optima_quality(cfg,records,order,0)
+    # experiment_global_optima_quality(cfg,records,order,1)
+    compare_global_optima_quality(cfg,records,order)
     
 
 if __name__ == "__main__":

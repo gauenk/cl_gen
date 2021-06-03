@@ -26,7 +26,7 @@ class Config():
         filename = self.root / Path(self._uuid_file_skel.format(self.uuid_version))
         return filename
 
-version = "1p1"
+version = "1p3"
 root_version = version
 uuid_version = version
 explore_root = Path(ROOT_PATH) / "./output/explore"

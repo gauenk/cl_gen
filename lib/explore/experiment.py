@@ -3,7 +3,7 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from einops import rearrange
+from einops import rearrange,repeat
 from easydict import EasyDict as edict
 
 # -- pytorch imports --
@@ -16,7 +16,8 @@ from pyutils import save_image
 from patch_search import get_score_function
 
 # -- local project imports --
-from .bss import get_block_search_space
+from .utils import get_ref_block_index
+from .bss import get_block_search_space,args_nodynamics_nblocks
 from .blocks import create_image_volumes
 from .wrap_image_data import load_image_dataset
 from .exps import run_fnet,run_pixel_scores,run_cog,run_pixel_diffs
@@ -39,10 +40,17 @@ def execute_experiment(cfg):
     bss_iter = iter(bss_loader)
     BSS_SIZE = len(bss_loader)
     
+    # REF_H = get_ref_block_index(cfg.nblocks)
+    # # print(bss_data.shape)
+    # deltas = torch.sum(torch.abs(bss_data - REF_H),1)
+    # print(torch.sum(deltas < (cfg.nframes//2-1) ))
+    # exit()
+
+
     # -- 1.) over BATCHES of IMAGES  --
     # results = {'image_bindex':[],'bss_bindex':[]}
     results = {'bss':[],'bss_ibatch':[]}
-    NUM_BATCHES = 5
+    NUM_BATCHES = 2
     for image_bindex in tqdm(range(NUM_BATCHES),leave=False):
 
         # -- restart bss loader --
@@ -57,6 +65,7 @@ def execute_experiment(cfg):
         T,B,C,H,W = clean_imgs.shape
         clean_vol,noisy_vol = create_image_volumes(cfg,clean_imgs,noisy_imgs)
         T,H2,B,P,C,PS,PS = clean_vol.shape
+        image_batch_size = B
 
         # -- 2.) over BATCHES of BLOCK_ORDERs  --
         results_i = {}
@@ -65,11 +74,19 @@ def execute_experiment(cfg):
 
             # -- sample block order --
             blocks = next(bss_iter)['order']
+            # print("blocks",blocks[:10])
+            # print(blocks[70])
+            args = args_nodynamics_nblocks(blocks,cfg.nblocks)
+            print(args)
 
             # -- pick block order (aka arangement) --
             clean = rearrange(clean_vol[tgrid,blocks],'e t b p c h w -> p b e t c h w')
             noisy = rearrange(noisy_vol[tgrid,blocks],'e t b p c h w -> p b e t c h w')
             P,B,E,T,C,PS,PS = clean.shape # explicit shape
+
+            # -- cuda -- 
+            clean = clean.to(cfg.device)
+            noisy = noisy.to(cfg.device)
 
             # -- run experiment suit --
             exp_results = execute_batch_experiments(cfg,clean,noisy,directions)
@@ -77,17 +94,22 @@ def execute_experiment(cfg):
             # -- store results --
             format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
             # -- block search space is constant --
-            format_tensor_results(cfg,{'bss':[blocks[None,:]],'bss_ibatch':[th([B])]},
+            blocks = repeat(blocks,'bss_bs t -> img_bs bss_bs t',img_bs=image_batch_size)
+            format_tensor_results(cfg,{'bss':[blocks],'bss_ibatch':[th([B])]},
                                   results_i,{'default':-1},True)
+            # print(results_i)
 
         # -- list of vectors to torch tensor --
         dims = {'bss':1,'bss_ibatch':0,'default':2}
         format_tensor_results(cfg,results_i,results,dims,append=True)
+        # print(results['pixel_jackknife'].shape)
+        # print(list(results.keys()))
+        
 
     # -- convert ndarrays into files --
     dims = {'bss':0,'bss_ibatch':0,'default':1}
     format_tensor_results(cfg,results,results,dims,append=False)
-    # print_tensor_fields(results)
+    print_tensor_fields(results)
 
     return results
 
@@ -97,6 +119,9 @@ def th(int_number):
 def print_tensor_fields(results):
     for fieldname,results_f in results.items():
         print(fieldname,type(results_f))
+        if not isinstance(results_f,dict):
+            print(results_f.shape)
+            continue
         for sname,results_s in results_f.items():
             print(sname,results_s.shape)
 

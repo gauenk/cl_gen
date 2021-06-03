@@ -5,6 +5,8 @@ from .v2 import create_mesh as create_mesh_v2
 from .v2 import config_setup as config_setup_v2
 from .v3 import create_mesh as create_mesh_v3
 from .v3 import config_setup as config_setup_v3
+from .v4 import create_mesh as create_mesh_v4
+from .v4 import config_setup as config_setup_v4
 
 def create_mesh(name):
     if name == "eval":
@@ -17,6 +19,8 @@ def create_mesh(name):
         return create_mesh_v2()
     elif name == "v3":
         return create_mesh_v3()
+    elif name == "v4":
+        return create_mesh_v4()
     else:
         raise ValueError(f"Uknown mesh name {name}.")
     
@@ -32,6 +36,8 @@ def get_setup_fxn(name):
         return config_setup_v2
     elif name == "v3":
         return config_setup_v3
+    elif name == "v4":
+        return config_setup_v4
     else:
         raise ValueError(f"Uknown mesh name {name}.")
 

@@ -45,7 +45,8 @@ def lpas_spoof(burst,motion,nblocks,mtype,acc):
     # print_tensor_stats("[lpas]: aligned[T/2] - burst[T/2]",aligned[T//2] - burst[T//2])
     return scores,aligned
 
-def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=None):
+def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",
+                to_align=None,noise_info=None):
     """
     cfg: edict with parameters
     burst: shape: T,B,C,H,W (T = number of frames, B = batch)
@@ -58,7 +59,7 @@ def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=Non
     # gt_motion = global_blocks_ref_to_frames(gt_motion,nblocks)
     # gt_motion = global_blocks_ref_to_frames(gt_motion,nblocks)
     # # flow = global_blocks_to_flow(gt_motion,nblocks)
-    print(gt_motion)
+    # print(gt_motion)
 
     # -- test --
     # T = burst.shape[0]
@@ -120,7 +121,7 @@ def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=Non
     # -- def vars + create patches --
     nframes = burst.shape[0]
     T,B,C,H,W = burst.shape 
-    num_patches,patchsize = 3,96
+    num_patches,patchsize = 2,96
     patches,locations = get_sobel_patches(burst,nblocks,num_patches,patchsize)
     B,R,T,H,C,PS,PS = patches.shape
 
@@ -129,12 +130,13 @@ def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=Non
     nsteps = 5
     nparticles = 100
     isize = burst.shape[-1]**2
-    score_params = edict({'stype':'raw','name':'lgsubset'})
+    # score_params = edict({'stype':'raw','name':'smsubset'})
+    # score_params = edict({'stype':'raw','name':'lgsubset'})
     # score_params = edict({'stype':'raw','name':'lgsubset_v_indices'})
     # score_params = edict({'stype':'raw','name':'extrema'})
-    # score_params = edict({'stype':'raw','name':'ave'})
+    score_params = edict({'stype':'raw','name':'ave'})
     optim = AlignmentOptimizer(nframes,nblocks,ref_frame,isize,'global_const',
-                               nsteps,nparticles,motion,score_params)
+                               nsteps,nparticles,motion,score_params,noise_info)
     
 
     # -- compare with testing score --
@@ -172,7 +174,8 @@ def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=Non
 
     
     # -- execute a simple search (one with many issues and few features) --
-    print(f"Method: [{method}]")
+    verbose = False
+    if verbose: print(f"Method: [{method}]")
     if method == "simple":
         simple_search(optim,patches)
     elif method == "exhaustive":
@@ -191,7 +194,7 @@ def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",to_align=Non
     # print(score)
     # print(block)
     # print("-"*30)
-    print(block)
+    if verbose: print(block)
 
     # -- dynamic error --
     dynamic_acc = 0
@@ -267,13 +270,11 @@ def split_search(optim,patches):
         """
 
         # -- search along each separate frame --
-        args = (optim,patches,fixed_frames,ref_grid,
-                motion,B,K,t,blocks_i)
         parallel = False
-        blocks_i = execute_split_frame_search(T,parallel,*args)
+        args = (optim,patches,ref_grid,motion,B,K)
+        blocks_i = execute_split_frame_search(T,fixed_frames,parallel,*args)
 
         # -- complete procs and unpack results --
-        blocks_i = [blocks_i[str(t)] for t in range(T)]
         block_grids = create_mesh_frame_grid(blocks_i,B,T)
 
         # -- eval over grid --
@@ -283,14 +284,15 @@ def split_search(optim,patches):
         # -- pick best optima --
         scores,blocks = optim.get_best_samples(K=1)
 
-def execute_split_frame_search(T,parallel,*args):
-    procs,proc_limit = [],5
+def execute_split_frame_search(T,fixed_frames,parallel,*args):
+    procs,proc_limit = [],10
     if parallel: blocks_i = mp.Manager().dict()
     else: blocks_i = {}
     for t in range(T):
+        fixed_frames_t = copy.deepcopy(fixed_frames)
         if parallel:
             p = mp.Process(target=search_across_frame,
-                           args=(t,*args))
+                           args=(t,blocks_i,fixed_frames_t,*args))
             p.start()
             procs.append(p)
             # -- wait and reset proc queue --
@@ -298,15 +300,17 @@ def execute_split_frame_search(T,parallel,*args):
                 finish_procs(procs,proc_limit)
                 procs = []
         else:
-            search_across_frame(t,*args)
+            search_across_frame(t,blocks_i,fixed_frames_t,*args)
     finish_procs(procs,proc_limit)
+    blocks_i = [blocks_i[str(t)] for t in range(T)]
+    # if parallel: blocks_i = copy.deepcopy(blocks_i)
     return blocks_i
 
 def finish_procs(procs,proc_limit):
     for p in procs: p.join()
     
-def search_across_frame(t,optim,patches,fixed_frames,ref_grid,motion,B,K,blocks_i):
-    print("Search Across Frame",t,flush=True)
+def search_across_frame(t,blocks_i,fixed_frames,optim,patches,ref_grid,motion,B,K):
+    # print("Search Across Frame",t,flush=True)
     if t == optim.ref_frame:
         mid = ref_grid[[t]].repeat(B,1)
         blocks_i[str(t)] = mid#.append(mid)
@@ -353,10 +357,11 @@ def simple_search(optim,patches):
     # -- random --
     # fixed_frames.vals = list(torch.randint(0,optim.nblocks**2,(T,)).numpy())
     # fixed_frames.vals[T//2] = REF_H
-    optim.nsteps = 2
-    K_sched = [3,1,1]
+    optim.nsteps = 4
+    K_sched = [1,]*optim.nsteps
+    K_sched[1] = 3
+    K_sched[2] = 2
 
-    print("TOP")
     # -- search --
     for i in range(optim.nsteps):
         K = K_sched[i]
@@ -371,7 +376,8 @@ def simple_search(optim,patches):
 
         # -- search along each separate frame --
         parallel = False
-        blocks_i = execute_split_frame_search(T,parallel,*args)
+        args = (optim,patches,ref_grid,motion,B,K)
+        blocks_i = execute_split_frame_search(T,fixed_frames,parallel,*args)
         
         # -- create grid from frame optima --
         # "blocks_i.shape" = [ T, B, K ]
@@ -383,8 +389,8 @@ def simple_search(optim,patches):
         # print(blocks_i[0].shape)
         # print(blocks_i)
         block_grids = create_mesh_frame_grid(blocks_i,B,T)
-        print(len(block_grids))
-        print(block_grids[0].shape)
+        # print(len(block_grids))
+        # print(block_grids[0].shape)
         # block_grids = rearrange(block_grids,'b r t -> (b r) t')
         # print(block_grids)
         # print(block_grids[0])
@@ -405,8 +411,8 @@ def simple_search(optim,patches):
         for b in range(B):
             fixed_frames[b].idx = [t for t in range(T)]
             fixed_frames[b].vals = list(blocks[b,0,:].cpu().numpy())
-        print(K,fixed_frames)
-        print("-"*30)
+        # print(K,fixed_frames)
+        # print("-"*30)
         # search_frames = optim.frame_sampler.sample(scores,motion)
 
 

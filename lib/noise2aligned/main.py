@@ -55,7 +55,8 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.use_seed = True
     # cfg.lpas_method = "exhaustive"
     # cfg.lpas_method = "simple"
-    cfg.lpas_method = "spoof"
+    # cfg.lpas_method = "spoof"
+    cfg.lpas_method = "split"
         
     grid_idx = idx*(1*ngpus)+rank
     B_grid_idx = (grid_idx % 2)
@@ -125,20 +126,20 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.dataset.dict_loader = True
     
     # -- gaussian noise --
-    cfg.noise_type = 'g'
-    noise_level = 50.0
-    cfg.noise_params.ntype = cfg.noise_type
-    cfg.noise_params['g']['stddev'] = noise_level
-    #noise_level = Ggrid[G_grid_idx] # don't worry about
-    noise_level_str = f"{int(noise_level)}"
+    # cfg.noise_type = 'g'
+    # noise_level = 50.0
+    # cfg.noise_params.ntype = cfg.noise_type
+    # cfg.noise_params['g']['stddev'] = noise_level
+    # #noise_level = Ggrid[G_grid_idx] # don't worry about
+    # noise_level_str = f"{int(noise_level)}"
 
     # -- low-light noise --
-    # noise_type = "qis"
-    # cfg.noise_type = noise_type
-    # cfg.noise_params['qis']['alpha'] = 4.0
-    # cfg.noise_params['qis']['readout'] = 0.0
-    # cfg.noise_params['qis']['nbits'] = 3
-    # cfg.noise_params.ntype = cfg.noise_type
+    noise_type = "qis"
+    cfg.noise_type = noise_type
+    cfg.noise_params['qis']['alpha'] = 4.0
+    cfg.noise_params['qis']['readout'] = 0.0
+    cfg.noise_params['qis']['nbits'] = 3
+    cfg.noise_params.ntype = cfg.noise_type
 
     # cfg.N = 30
     # if cfg.abps: cfg.dynamic.frames = cfg.N + 1

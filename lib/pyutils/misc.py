@@ -5,6 +5,7 @@ import pickle,sys,os,yaml,io
 from easydict import EasyDict as edict
 import torch
 import torch.nn.functional as F
+from itertools import chain, combinations
 
 # this is the only allowed project import in this file.
 import settings
@@ -59,4 +60,11 @@ def read_cfg(fpath):
     with open(fpath,'r') as f:
         cfg = yaml.load(f,Loader=yaml.Loader)
     return cfg
+
+
+def create_combination(indices,start,end):
+    cfi = chain.from_iterable
+    subset = cfi(combinations(list(indices) , r+1 ) for r in range(start,end))
+    subset = np.array([np.array(elem) for elem in list(subset)])
+    return subset
 
