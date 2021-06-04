@@ -19,6 +19,8 @@ from lpas.main import get_main_config
 from explore.plots.coupling import plot_frame_index_v_remaining_fixed
 from explore.plots.filters import plot_unet_filters_v_image_content
 from explore.plots.global_optima_quality import experiment_global_optima_quality,compare_global_optima_quality
+from explore.plots.baseline_v_proposed import compare_baseline_v_proposed
+
 
 # -- [explore] imports --
 from .mesh import create_mesh,get_setup_fxn
@@ -77,7 +79,9 @@ def main():
     # plot_unet_filters_v_image_content(cfg,records,order)
     # experiment_global_optima_quality(cfg,records,order,0)
     # experiment_global_optima_quality(cfg,records,order,1)
+
     compare_global_optima_quality(cfg,records,order)
+    # compare_baseline_v_proposed(cfg,config_setup,records,order)
     
 
 if __name__ == "__main__":

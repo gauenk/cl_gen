@@ -21,8 +21,8 @@ def run_pixel_scores(cfg,clean,noisy,directions,results):
     # score_fxn_names = ["ave","lgsubset_v_ref","jackknife"]
     # score_fxn_names = ["ave","jackknife"]
     # score_fxn_names = ["ave","sim_trm"]
-    # score_fxn_names = ["ave","ransac"]
-    score_fxn_names = ["ransac"]
+    score_fxn_names = ["ave","ransac"]
+    # score_fxn_names = ["ransac"]
     for score_fxn_name in score_fxn_names:
         score_fxn = get_score_function(score_fxn_name)
         scores,scores_t = score_fxn(cfg,noisy)

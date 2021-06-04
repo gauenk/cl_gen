@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 # -- project imports --
-from pyutils import torch_xcorr,create_combination,print_tensor_stats
+from pyutils import torch_xcorr,create_combination,print_tensor_stats,save_image
 from layers.unet import UNet_n2n,UNet_small
 from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
@@ -79,9 +79,14 @@ def ransac(cfg,expanded):
         std = np.sqrt(gt_std**2/n_tr + gt_std**2/n_te)
         return std
 
-    def compute_pair_mom(x,y):
+    def compute_pair_ave(x,y):
+        mom_1 = torch.mean(torch.abs(x - y),dim=0)
+        # mom_1 = torch.mean(x - y,dim=0)**2
+        return mom_1
+
+    def compute_pair_mom(x,y,nx,ny):
         mom_1 = (torch.mean(x,dim=0) - torch.mean(y,dim=0))**2
-        mom_2 = (torch.std(x,dim=0)**2 - torch.std(y,dim=0)**2)**2
+        mom_2 = (ny*torch.std(x,dim=0)**2 - nx*torch.std(y,dim=0)**2)**2
         return mom_1 + mom_2
 
     def compute_gaussian_ot(dist,gt_std):
@@ -113,23 +118,31 @@ def ransac(cfg,expanded):
 
         # -- create subsets to improve signal --
         T = samples.shape[0]
+        ave = torch.mean(samples,dim=0)
 
         # -- compute ave diff between model and subsets --
-        subN = subsets_idx.shape[1]
         scores_t = torch.zeros(T,BE,device=device)
         counts_t = torch.zeros(T,1,device=device)
         for subset_idx in subsets_idx:
+            nsub = T-len(subset_idx)+1
             counts_t[subset_idx] += 1
             subset = samples[subset_idx]
             vprint("subset.shape",subset.shape)
             subset_ave = torch.mean(subset,dim=0)
             vprint("subset_ave.shape",subset_ave.shape)
-            # loss = compute_pair_mom(tr_ave, subset_ave)
-            dist = tr_ave - subset_ave
+            n_sub = len(subset_idx)
+            # loss = compute_pair_ave(tr_ave, subset_ave)
+            # loss += compute_pair_ave(tr_ave, ave)
+            # loss += compute_pair_ave(subset_ave, ave)
+            # loss /= 3
+            loss = compute_pair_ave(subset_ave, ave)
+            loss /= (3 * nsub)
+            # loss = compute_pair_mom(tr_ave, subset_ave, n_tr, n_sub)
+            # dist = tr_ave - subset_ave
             # print_tensor_stats("tr_ave",tr_ave)
             # print_tensor_stats("subset_ave",subset_ave)
             # print_tensor_stats("dist",dist)
-            loss = compute_gaussian_ot(dist,ot_std)
+            # loss = compute_gaussian_ot(dist,ot_std)
             vprint("loss.shape",loss.shape)
             scores_t[subset_idx] += loss
         # n_evals = len(subsets_idx)
@@ -144,9 +157,11 @@ def ransac(cfg,expanded):
     def compute_train_est(tr_points):
         est = repeat(torch.mean(tr_points,dim=0),'be d -> n be d',n=te_N)
 
-    def create_subset_grids(subN,indices,max_subset_size):
-        subsets_idx = torch.LongTensor(create_combination(indices,subN-1,subN))
-        subsets_idx = subsets_idx.to(device)
+    def create_subset_grids_fixed(subN,indices,max_subset_size):
+        return create_subset_grids(subN-1,subN,indices,max_subset_size)
+
+    def create_subset_grids(nmin,nmax,indices,max_subset_size):
+        subsets_idx = create_combination(indices,nmin,nmax)
         if subsets_idx.shape[0] > max_subset_size: 
             indices = torch.randperm(subsets_idx.shape[0])[:max_subset_size]
             subsets_idx = subsets_idx[indices]
@@ -158,20 +173,27 @@ def ransac(cfg,expanded):
     #
     # -=-=-=-=-=-=-=-=-=-=-=-
 
+    # -- create subset grids --
+    minSN,maxSN = 3,14
+    indices = np.arange(T)
+    max_subset_size = 600
+    # subsets_idx = create_subset_grids_fixed(maxSN,indices,max_subset_size)
+    subsets_idx = create_subset_grids(minSN,maxSN,indices,max_subset_size)
+
     # -- basic ransac hyperparams --
     desired_prob = .90
-    error_thresh = 1e-5
-    size = 2
-
-    # -- create subset grids --
-    subN = 2
-    indices = np.arange(T)
-    max_subset_size = 500
-    subsets_idx = create_subset_grids(subN,indices,max_subset_size)
+    # error_thresh = 1e-5
+    size = 15 # 12 got (a) win and (b) match
 
     # -- set noise --
     gt_std = cfg.noise_params['g']['stddev']/255.
-    ot_std = compute_std(gt_std,size,subN)
+    ot_std = compute_std(gt_std,size,maxSN)
+    ps_scale = (C*H*W*R)**(1/4.)
+    # error_thresh = np.sqrt(gt_std**2/size + gt_std**2/maxSN) * 1.4 / ps_scale
+    error_thresh = 1.
+    # print(error_thresh)
+    # error_thresh = np.sqrt(gt_std**2/size + gt_std**2/maxSN) * 1.96 / ps_scale
+    # error_thresh = np.sqrt(gt_std**2/size + gt_std**2/maxSN) * 2.35 / ps_scale
     # print(gt_std)
     # print(ot_std)
 
@@ -184,7 +206,9 @@ def ransac(cfg,expanded):
     # -- loop params --
     best_model = torch.zeros(B*E,T).int()
     best_model[:,t_ref] = 1
-    iters,num_iters,max_iters = 0,600,600
+    # iters,num_iters,max_iters = 0,1000,1000
+    # iters,num_iters,max_iters = 0,500,1000
+    iters,num_iters,max_iters = 0,1,1000
     while iters < num_iters and iters < max_iters:
 
         # -- randomly select points with t_ref in train --
@@ -204,7 +228,16 @@ def ransac(cfg,expanded):
         # scores,scores_t = compute_loss_oos_combo(tr_points,te_points,ot_std,subsets_idx)
         losses,losses_t = compute_loss_oos_combo(tr_points,samples,ot_std,subsets_idx)
         # print(losses_t[:3,:])
-        # print(losses_t[70,:])
+        # print(losses_t[98,:])
+
+        # -- adaptive threshold --
+        # losses_std = torch.std(losses_t,dim=1)
+        # losses_ave = torch.mean(losses_t,dim=1)
+        # error_thresh = losses_ave + 1.96 * losses_std
+        # print(error_thresh.shape,losses_t.shape)
+        # print(losses_t)
+        # print(losses_t[98])
+        # exit()
 
         # -- check if best model --
         outliers = losses_t > error_thresh
@@ -215,13 +248,16 @@ def ransac(cfg,expanded):
         scores_t = losses_t.clone()
         scores_t[args[0],args[1]] += 1./T
 
-        inliers = losses_t < error_thresh
+        # inliers = losses_t < error_thresh
         # print(inliers.shape)
-        n_inliers = torch.sum(inliers,dim=1)
-        args = torch.where(inliers)
+        # n_inliers = torch.sum(inliers,dim=1)
+        # args = torch.where(inliers)
         # scores_t[args[0],args[1]] = losses_t[args[0],args[1]]
         # print(args[0].shape,args[1].shape,losses_t[args[0],args[1]].shape)
+        # scores = torch.mean(scores_t,dim=1) * (10*torch.std(losses_t,dim=1))
         scores = torch.mean(scores_t,dim=1)
+        # scores = torch.max(losses_t,dim=1).values - torch.min(losses_t,dim=1).values
+        # print(scores[98],torch.mean(losses_t[98,:]))
         # print(scores[:3])
         # exit()
         
@@ -241,6 +277,10 @@ def ransac(cfg,expanded):
         """
         # -- save best model for each batch --
         args = torch.where(scores < best_scores)[0]
+        # if torch.any((args - 98) == 0):
+        #     print("HI\n\n\n\n\n")
+        #     print(scores[98])
+        #     print("HI\n\n\n\n\n")
         nargs = len(args)
         args_rep = repeat(args,'nargs -> nargs n',n=len(tr_index))
         tr_index_rep = repeat(tr_index,'n -> nargs n',nargs=nargs)
@@ -259,21 +299,24 @@ def ransac(cfg,expanded):
     # -- no cuda --
     scores = rearrange(best_scores.cpu(),'(b e) -> b e',b=B)
     scores_t = rearrange(best_scores_t.cpu(),'(b e) t -> b e t',b=B)
+    best_model = rearrange(best_model.cpu(),'(b e) t -> b e t',b=B)
 
     bgrid = torch.arange(B)
     args = torch.argmin(scores,dim=1)
 
+    # print(error_thresh)
     # print(args.shape)
     # print("argmin",args)
-    # print(best_model[0])
-    # print(scores[:,0])
+    # tgt_index = 98
+    # print(best_model[:,tgt_index])
+    # print(scores[:,tgt_index])
     # print(scores[bgrid,args])
-    # print(scores[:,0] <= scores[bgrid,args])
+    # print(scores[:,tgt_index] <= scores[bgrid,args])
     # exit()
 
     # -- add back patchsize for compat --
-    scores = repeat(scores,'b e -> r b e',r=T)
-    scores_t = repeat(scores_t,'b e t -> r b e t',r=T)
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
 
     return scores,scores_t
 
@@ -537,6 +580,36 @@ def jackknife(cfg,expanded):
     return scores,scores_t
     
 def ave_score(cfg,expanded):
+    R,B,E,T,C,H,W = expanded.shape
+    """
+    R = different patches from same image
+    B = different images
+    E = differnet block regions around centered patch
+    T = burst of frames along a batch dimension
+    """
+    # -- R goes to CHW --
+    expanded = rearrange(expanded,'r b e t c h w -> t b e (r c h w)')
+    
+    ref = repeat(expanded[T//2],'b e d -> tile b e d',tile=T-1)
+    neighbors = torch.cat([expanded[:T//2],expanded[T//2+1:]],dim=0)
+    delta = F.mse_loss(ref,neighbors,reduction='none')
+    delta_t = torch.mean(delta,dim=3)
+    delta = torch.mean(delta_t,dim=0)
+
+    # -- append dim for T --
+    Tm1 = T-1
+    delta_t = rearrange(delta_t,'t b e -> b e t')
+    zeros = torch.zeros_like(delta_t[:,:,[0]])
+    delta_t = torch.cat([delta_t[:,:,:Tm1//2],zeros,delta_t[:,:,Tm1//2:]],dim=2)
+
+    # -- repeat to include R --
+    delta_t = repeat(delta_t,'b e t -> r b e t',r=R)
+    delta = repeat(delta,'b e -> r b e',r=R)
+
+    return delta,delta_t
+
+
+def ave_score_original(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
     """
     R = different patches from same image

@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as f
 
 # -- explore imports --
-from explore.utils import get_ref_block_index
+from explore.plots.utils import move_column_to_last,get_pixel_fields,find_optima_index
 
 
 def compare_global_optima_quality(cfg,records,exp_fields):
@@ -50,6 +50,9 @@ def compare_global_optima_quality(cfg,records,exp_fields):
         quality.append(quality_df)
 
     quality = pd.concat(quality)
+    quality = move_column_to_last(quality,"random_seed")
+    quality = move_column_to_last(quality,"correct_v")
+
     print(quality)
     fields = get_pixel_fields(records[0])
     for field in fields:
@@ -57,42 +60,6 @@ def compare_global_optima_quality(cfg,records,exp_fields):
         print(field,quality_metric['acc'].mean())
     return quality
 
-
-def get_pixel_fields(exp_records):
-    fields = []
-    keys = list(exp_records.keys())
-    for key in keys:
-        if "pixel_" in key: fields.append(key)
-    return fields
-
-def find_optima_index(bss,bss_ibatch,nblocks):
-    numImageBatches,bssGrid,nframes = bss.shape
-    REF_H = get_ref_block_index(nblocks)
-    nodynamics = torch.tensor(np.array([REF_H]*nframes)).long()[None,:]
-    deltas = torch.sum(torch.abs(torch.tensor(bss) - REF_H),2)
-    args = torch.nonzero(deltas == 0)
-    args = args[:,1]
-    return args
-
-def find_nodynamic_optima_idx(bss,bss_ibatch,nblocks):
-    
-    numImageBatches,bssGrid,nframes = bss.shape
-    REF_H = get_ref_block_index(nblocks)
-    nodynamics = torch.tensor(np.array([REF_H]*nframes)).long()[None,:]
-    deltas = torch.sum(torch.abs(torch.tensor(bss) - REF_H),2)
-    print(bss.shape)
-    print(torch.sum(deltas < (nframes//2-1) ))
-    args = torch.nonzero(deltas < (nframes//2-1) )
-    print(args)
-    nodynamic_index = args
-    print(nodynamic_index)
-    print(bss.shape)
-
-    filtered_bss = bss[nodynamic_index[:,0],nodynamic_index[:,1]]
-    print(filtered_bss.shape)
-    optima_nd_index = find_optima_index(filtered_bss,bss_ibatch,nblocks)
-
-    return nodynamic_index,optima_nd_index
 
 def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
 
@@ -125,7 +92,7 @@ def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
         quality[field].correct = torch.sum(optima_index == argmins).item()
         quality[field].total = len(optima_index)
         quality[field].acc = 100*quality[field].correct/quality[field].total
-
+        quality[field].correct_v = '.'.join([str(x) for x in list((optima_index == argmins).numpy().astype(int))])
 
         # # -- filter bss to only almost no dynamics --
         # scores = scores[nodynamic_index]

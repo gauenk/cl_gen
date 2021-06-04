@@ -86,10 +86,20 @@ def bss_subsample(bss,size,REF_H,nframes,method="random"):
         return bss
     elif method == "almost_nodynamics":
         bss = remove_nodynamics(bss,REF_H) 
+        BSS = bss.shape[0]
         deltas = torch.sum(torch.abs(bss - REF_H),1)        
         args = torch.nonzero(deltas < (nframes//2-1) )[:,0]
-        if len(args) < size: raise ValueError("No enough 'no dynamics'")
-        bss = bss[args[:size-1]]
+        if len(args) < size:
+            n = size - len(args) - 1
+            set_all = set(list(np.arange(BSS)))
+            set_args = set(list(args.numpy()))
+            remaining = set_all - set_args
+            remaining = torch.LongTensor(list(remaining))
+            remaining = remaining[:n]
+            index = torch.cat([args,remaining],dim=0)
+            bss = bss[index]
+        else:
+            bss = bss[args[:size-1]]
         bss = ensure_single_nodynamics(bss,REF_H,nframes)
         return bss
     else:
