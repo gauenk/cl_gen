@@ -27,6 +27,15 @@ def set_noise(cfg,ns):
     return ns.name
 
 def get_noise_config(cfg,name):
+    # -- 1.) create default config from name --
+    if name.split("-")[0] == "g": # gaussian
+        wrapper = edict()
+        config = get_gaussian_config_from_name(cfg,name)
+        wrapper[config.ntype] = config
+        wrapper.ntype = config.ntype
+        return wrapper
+
+    # -- 2.) search for noise in fixed params --
     nconfigs = create_noise_level_grid(cfg)
     for config in nconfigs:
         if name == config.name:
@@ -34,6 +43,7 @@ def get_noise_config(cfg,name):
             wrapper[config.ntype] = config
             wrapper.ntype = config.ntype
             return wrapper
+    
     raise ValueError(f"Uknown noise type [{name}]")
 
 def create_noise_level_grid(cfg):
@@ -104,3 +114,13 @@ def create_noise_level_grid(cfg):
     noise_configs.append(ns)
 
     return noise_configs
+
+def get_gaussian_config_from_name(cfg,name):
+    noise_type,noise_str = name.split("-")
+    noise_level = float(noise_str.replace('p','.'))
+    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns['ntype'] = noise_type
+    ns['stddev'] = noise_level
+    ns['name'] = f"g-{ns['stddev']}".replace(".","p")
+    ns = edict(ns)
+    return ns

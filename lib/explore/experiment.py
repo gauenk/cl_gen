@@ -17,10 +17,11 @@ from patch_search import get_score_function
 
 # -- local project imports --
 from .utils import get_ref_block_index
-from .bss import get_block_search_space,args_nodynamics_nblocks
-from .blocks import create_image_volumes
+from .bss import get_block_search_space,args_nodynamics_nblocks,args_flow_from_grid
+from .blocks import create_image_volumes,create_image_tiles
 from .wrap_image_data import load_image_dataset
-from .exps import run_fnet,run_pixel_scores,run_cog,run_pixel_diffs
+# from .exps import run_fnet,run_pixel_scores,run_cog,run_pixel_diffs,run_flownet
+from .exps import PixelExperiment,FlownetExperiment
 
 def execute_experiment(cfg):
 
@@ -46,6 +47,12 @@ def execute_experiment(cfg):
     # print(torch.sum(deltas < (cfg.nframes//2-1) ))
     # exit()
 
+    # -- setup experiments --
+    image_exps = []
+    # image_exps = [FlownetExperiment]
+    block_exps = [PixelExperiment]
+    exp_dict = edict({'image':image_exps,'block':block_exps})
+    exps = setup_experiments(cfg,exp_dict)
 
     # -- 1.) over BATCHES of IMAGES  --
     # results = {'image_bindex':[],'bss_bindex':[]}
@@ -53,13 +60,14 @@ def execute_experiment(cfg):
     NUM_BATCHES = 2
     for image_bindex in tqdm(range(NUM_BATCHES),leave=False):
 
-        # -- restart bss loader --
-        bss_iter = iter(bss_loader)
+        # -- init results --
+        results_i = {}
 
         # -- sample batch --
         loaded = next(image_batch_iter)
         clean_imgs,noisy_imgs = loaded['burst'],loaded['noisy']
-        directions = loaded['directions']
+        flow = loaded['directions']
+        clean_imgs,noisy_imgs = clean_imgs.to(cfg.gpuid),noisy_imgs.to(cfg.gpuid)
 
         # -- create image volumes --
         T,B,C,H,W = clean_imgs.shape
@@ -67,17 +75,26 @@ def execute_experiment(cfg):
         T,H2,B,P,C,PS,PS = clean_vol.shape
         image_batch_size = B
 
+        # -- run experiments over just image batch
+        clean_tile,noisy_tile = create_image_tiles(clean_vol,noisy_vol,flow,H)
+        image_batch = edict({'clean':clean_tile,'noisy':noisy_tile})
+        exp_results = execute_experiments(cfg,exps.image,image_batch,flow)
+        format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
+
+        # -- restart bss loader --
+        bss_iter = iter(bss_loader)
+
         # -- 2.) over BATCHES of BLOCK_ORDERs  --
-        results_i = {}
         tgrid = torch.arange(T)
         for block_bindex in tqdm(range(BSS_SIZE),leave=False):
 
             # -- sample block order --
             blocks = next(bss_iter)['order']
-            # print("blocks",blocks[:10])
-            # print(blocks[70])
-            args = args_nodynamics_nblocks(blocks,cfg.nblocks)
+
+            # -- get image regions with no dynamics --
+            args = args_nodynamics_nblocks(blocks,flow,cfg.nblocks)
             print(args)
+            exit()
 
             # -- pick block order (aka arangement) --
             clean = rearrange(clean_vol[tgrid,blocks],'e t b p c h w -> p b e t c h w')
@@ -89,7 +106,8 @@ def execute_experiment(cfg):
             noisy = noisy.to(cfg.device)
 
             # -- run experiment suit --
-            exp_results = execute_batch_experiments(cfg,clean,noisy,directions)
+            block_batch = edict({'clean':clean,'noisy':noisy})
+            exp_results = execute_experiments(cfg,exps.block,block_batch,flow)
 
             # -- store results --
             format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
@@ -178,12 +196,28 @@ def format_tensor_dict(cfg,metric_group,results_i,results_o,dim,append=True):
         if append: results_o[metric_group][metric_name].append(metric)
         else: results_o[metric_group][metric_name] = metric
 
-def execute_batch_experiments(cfg,clean,noisy,directions):
+def setup_experiments(cfg,exp_dict):
+    init_exps = {}
+    for type_name,exp_list in exp_dict.items():
+        init_exps[type_name] = []
+        for exp in exp_list:
+            init_exps[type_name].append(exp(cfg))
+    init_exps = edict(init_exps)
+    return init_exps
+        
+def execute_experiments(cfg,exps,batch,flow):
     results = {}
-    # run_fnet(cfg,clean,noisy,directions,results)
-    run_pixel_scores(cfg,clean,noisy,directions,results)
-    # run_cog(cfg,clean,noisy,directions,results)
-    # run_pixel_diffs(cfg,clean,noisy,directions,results)
+    for exp in exps:
+        exp.run(cfg,batch.clean,batch.noisy,flow,results)
+    print(list(results.keys()))
     return results
+
+# def execute_block_batch_experiments(cfg,exps,block_batch,flow):
+#     results = {}
+#     # run_fnet(cfg,clean,noisy,directions,results)
+#     run_pixel_scores(cfg,block_batch.clean,block_batch.noisy,flow,results)
+#     # run_cog(cfg,clean,noisy,directions,results)
+#     # run_pixel_diffs(cfg,clean,noisy,directions,results)
+#     return results
 
 

@@ -6,6 +6,8 @@ from easydict import EasyDict as edict
 import torch
 import torch.nn.functional as F
 from itertools import chain, combinations
+import operator as op
+from functools import reduce
 
 # this is the only allowed project import in this file.
 import settings
@@ -61,6 +63,9 @@ def read_cfg(fpath):
         cfg = yaml.load(f,Loader=yaml.Loader)
     return cfg
 
+#
+# Combinations
+#
 
 def create_combination(indices,start,end):
     cfi = chain.from_iterable
@@ -68,3 +73,18 @@ def create_combination(indices,start,end):
     subset = np.array([np.array(elem) for elem in list(subset)])
     return subset
 
+def create_subset_grids_fixed(subN,indices,max_subset_size):
+    return create_subset_grids(subN-1,subN,indices,max_subset_size)
+
+def create_subset_grids(nmin,nmax,indices,max_subset_size):
+    subsets_idx = create_combination(indices,nmin,nmax)
+    if subsets_idx.shape[0] > max_subset_size: 
+        indices = torch.randperm(subsets_idx.shape[0])[:max_subset_size]
+        subsets_idx = subsets_idx[indices]
+    return subsets_idx
+
+def ncr(n, r):
+    r = min(r, n-r)
+    numer = reduce(op.mul, range(n, n-r, -1), 1)
+    denom = reduce(op.mul, range(1, r+1), 1)
+    return numer // denom  # or / in Python 2

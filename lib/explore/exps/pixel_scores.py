@@ -7,6 +7,14 @@ from einops import rearrange
 # -- project --
 from patch_search import get_score_function
 
+class PixelExperiment():
+
+    def __init__(self,cfg):
+        pass
+
+    def run(self,cfg,clean,noisy,directions,results):
+        run_pixel_scores(cfg,clean,noisy,directions,results)
+
 def run_pixel_scores(cfg,clean,noisy,directions,results):
     P,B,E,T,C,PS,PS = clean.shape # input shape
     # clean = rearrange(clean,'t e b p c h w -> p b e t c h w')
@@ -21,8 +29,8 @@ def run_pixel_scores(cfg,clean,noisy,directions,results):
     # score_fxn_names = ["ave","lgsubset_v_ref","jackknife"]
     # score_fxn_names = ["ave","jackknife"]
     # score_fxn_names = ["ave","sim_trm"]
-    score_fxn_names = ["ave","ransac"]
     # score_fxn_names = ["ransac"]
+    score_fxn_names = ["ave","ransac"]
     for score_fxn_name in score_fxn_names:
         score_fxn = get_score_function(score_fxn_name)
         scores,scores_t = score_fxn(cfg,noisy)

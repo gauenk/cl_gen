@@ -75,8 +75,14 @@ def global_blocks_ref_to_frames(ref_blocks_i,nblocks):
 
 def global_flow_to_blocks(_flow,nblocks):
     """
+    flow.shape = (Num Images in Batch, Num of Frames - 1, 2)
+
     "flow" is a integer direction of motion between two frames
        flow[b,t] is a vector of direction [dx, dy] wrt previous frame
+    b = image batch
+    t = \delta frame index
+    t_reference = T // 2
+
     "nblocks" is the maximum number of pixels changed between adj. frames
     "indices" are the 
        indices[b,t] is the integer index representing the specific

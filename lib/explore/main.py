@@ -11,6 +11,9 @@ import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 
+# -- pytorch imports --
+import torch
+
 # -- project imports --
 from settings import ROOT_PATH
 from lpas.main import get_main_config
@@ -20,7 +23,6 @@ from explore.plots.coupling import plot_frame_index_v_remaining_fixed
 from explore.plots.filters import plot_unet_filters_v_image_content
 from explore.plots.global_optima_quality import experiment_global_optima_quality,compare_global_optima_quality
 from explore.plots.baseline_v_proposed import compare_baseline_v_proposed
-
 
 # -- [explore] imports --
 from .mesh import create_mesh,get_setup_fxn
@@ -32,7 +34,12 @@ def main():
 
     # -- Load Default Config --
     cfg = get_main_config()
+    cfg.gpuid = 0
     cfg.explore_package = "lpas" # -- pick package to explore --
+    # torch.cuda(device=cfg.gpuid)
+
+    # -- setup flownet --
+    cfg.flownet_name = "flownet-v2-default"
 
     # -- set explore and bss dir --
     cfg.bss_batch_size = 100

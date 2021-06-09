@@ -1,4 +1,4 @@
-
+from .nn_flow import get_score_function_flownet
 from .pixel import get_score_function_pixel
 from .fnet import get_score_function_fnet
 from .cog import get_score_function_cog
@@ -16,4 +16,6 @@ def get_score_function(name):
     if not(fxn_fnet is None): return fxn_fnet
     fxn_cog = get_score_function_cog(name)    
     if not(fxn_cog is None): return fxn_cog
+    fxn_flownet = get_score_function_flownet(name)    
+    if not(fxn_flownet is None): return fxn_flownet
     raise ValueError(f"Uknown score function [{name}]")

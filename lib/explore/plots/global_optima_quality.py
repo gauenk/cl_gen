@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as f
 
 # -- explore imports --
-from explore.plots.utils import move_column_to_last,get_pixel_fields,find_optima_index
+from explore.plots.utils import move_column_to_last,find_optima_index,get_pixel_fields,get_flownet_fields
 
 
 def compare_global_optima_quality(cfg,records,exp_fields):
@@ -55,11 +55,23 @@ def compare_global_optima_quality(cfg,records,exp_fields):
 
     print(quality)
     fields = get_pixel_fields(records[0])
+    fields += get_flownet_fields(records[0])
     for field in fields:
         quality_metric = quality[quality['metric'] == field]
         print(field,quality_metric['acc'].mean())
+
+    # -- stratify by noise level --
+    optima_quality_by_noise_level(quality,fields)
+            
     return quality
 
+
+def optima_quality_by_noise_level(quality,fields):
+    for noise,noise_df in quality.groupby("noise_type"):
+        print(f"Noise: [{noise}]")
+        for field in fields:
+            quality_metric = noise_df[noise_df['metric'] == field]
+            print(field,quality_metric['acc'].mean())
 
 def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
 
@@ -75,12 +87,45 @@ def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
     # nodynamic_index,optima_nd_index = find_nodynamic_optima_idx(bss,bss_ibatch,nblocks)
 
     # -- compute optima quality for each pixel function --
-    fields = get_pixel_fields(record)
-    quality = edict({field: edict({'correct':0,'total':0,'acc':0}) for field in fields})
+    record = records[exp_int]
+    quality = edict()
+    assess_pixel_fields(quality,record,optima_index,nblocks,bss,bss_ibatch)
+    assess_flownet_fields(quality,record,optima_index,nblocks,bss,bss_ibatch)
+    return quality
+
+def assess_flownet_fields(quality,record,optima_index,nblocks,bss,bss_ibatch):
+    fields = get_flownet_fields(record)
     for field in fields:
-        scores = rearrange(records[exp_int][field]['scores'],'p ib ss -> ss ib p')
-        scores_t = rearrange(records[exp_int][field]['scores_t'],'p ib ss t -> ss t ib p')
-        batch_size = records[exp_int]['batch_size']
+        quality[field] = edict({'correct':0,'total':0,'acc':0})
+
+        # -- flow fields --
+        flow = rearrange(record[field]['flows'],'tm1 b p h w -> b tm1 p (h w)')
+        print(flow)
+        flow = torch.mean(flow,dim=3)
+        flow = flow.long() # round to ints
+        print(flow)
+        
+        # -- accuracy across time --
+        # flow_error = torch.sum(torch.abs(flow),dim=2)
+        correct = torch.all(torch.all(flow == 0,dim=2),dim=1).long()
+        correct_list = list(correct.numpy())
+
+        # -- compute quality scores --
+        quality[field].correct = np.sum(correct_list)
+        quality[field].total = len(correct_list)
+        quality[field].acc = 100*quality[field].correct/quality[field].total
+        quality[field].correct_v = '.'.join([str(x) for x in correct_list])
+
+        print(flow.shape)
+    return quality
+        
+def assess_pixel_fields(quality,record,optima_index,nblocks,bss,bss_ibatch):
+    fields = get_pixel_fields(record)
+    for field in fields:
+        quality[field] = edict({'correct':0,'total':0,'acc':0})
+        scores = rearrange(record[field]['scores'],'p ib ss -> ss ib p')
+        scores_t = rearrange(record[field]['scores_t'],'p ib ss t -> ss t ib p')
+        batch_size = record['batch_size']
         SS,IB,P = scores.shape
         # search_space batch, image batch, npatches
         scores = torch.mean(scores,dim=2) # ave over image patches
@@ -89,10 +134,11 @@ def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
         argmins = torch.argmin(scores,0)
 
         # -- compute quality --
-        quality[field].correct = torch.sum(optima_index == argmins).item()
+        correct_list = list((optima_index == argmins).numpy().astype(int))
+        quality[field].correct = np.sum(correct_list)
         quality[field].total = len(optima_index)
         quality[field].acc = 100*quality[field].correct/quality[field].total
-        quality[field].correct_v = '.'.join([str(x) for x in list((optima_index == argmins).numpy().astype(int))])
+        quality[field].correct_v = '.'.join([str(x) for x in correct_list])
 
         # # -- filter bss to only almost no dynamics --
         # scores = scores[nodynamic_index]

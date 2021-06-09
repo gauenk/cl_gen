@@ -1,5 +1,6 @@
 
 # -- python --
+import copy
 import numpy as np
 from easydict import EasyDict as edict
 
@@ -20,7 +21,7 @@ def load_image_dataset(cfg):
         wdata[key] = WrapperDataset(value,noise_fxn,dynamic_fxn)
     wloader = get_loader(cfg,wdata,cfg.batch_size,None)
     return wdata,wloader
-
+    
 def transforms_from_cfg(cfg):
 
     # -- noise transform --

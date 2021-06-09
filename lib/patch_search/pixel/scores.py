@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 # -- project imports --
-from pyutils import torch_xcorr,create_combination,print_tensor_stats,save_image
+from pyutils import torch_xcorr,create_combination,print_tensor_stats,save_image,create_subset_grids,create_subset_grids,create_subset_grids_fixed,ncr
 from layers.unet import UNet_n2n,UNet_small
 from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
@@ -57,8 +57,83 @@ def get_score_function(name):
         return sim_trm
     elif name == "ransac":
         return ransac
+    elif name == "shapley":
+        return shapley
     else:
         raise ValueError(f"Uknown score function [{name}]")
+
+def shapley(cfg,expanded):
+    """
+    R = different patches from same image
+    B = different images
+    E = differnet block regions around centered patch
+    T = burst of frames along a batch dimension
+    """
+    # -- setup --
+    R,B,E,T,C,H,W = expanded.shape
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
+    samples = samples.contiguous() # speed up?
+    t_ref = T//2
+
+    def compute_pair_ave(x,y):
+        mom_1 = torch.mean((x - y)**2,dim=0)
+        return mom_1
+
+    def convert_subsets(subsets,t):
+        filtered_subsets = []
+        for subset in subsets:
+            if t in subset:
+                filtered_subsets.append(subset)
+        return filtered_subsets
+
+    def join_subset(subset,t):
+        return np.r_[subset,[t]]
+
+    # -- create subset grids --
+    minSN,maxSN,max_num = 1,15,100000
+    indices = np.arange(T)
+    subsets = create_subset_grids(minSN,maxSN,indices,max_num)
+    size = 15 # 12 got (a) win and (b) match
+
+    # -- init loop --
+    ave = torch.mean(samples,dim=0)
+    scores_t = torch.zeros(B*E,T,device=device)
+    for t in range(T):
+        subsets_rm_t = convert_subsets(subsets,t)
+        for subset_rm_t in subsets_rm_t:
+
+            # -- create new subset --
+            subset_with_t = join_subset(subset_rm_t,t)
+            
+            # -- grab images --
+            ave_with_t = torch.mean(samples[subset_with_t],dim=0)
+            ave_rm_t = torch.mean(samples[subset_rm_t],dim=0)
+
+            # -- compute differences --
+            v_with_t = compute_pair_ave(ave_with_t,ave)
+            v_rm_t = compute_pair_ave(ave_rm_t,ave)
+            v_diff = -(v_with_t - v_rm_t)
+
+            # -- compute normalization --
+            s = len(subsets_rm_t)
+            Z = ncr(s,T)**(-1)
+
+            # -- accumulate --
+            scores_t[:,t] += Z * v_diff
+
+    # -- compute mean over frames --
+    scores = torch.mean(scores_t,dim=1)
+
+    # -- no cuda --
+    scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t.cpu(),'(b e) t -> b e t',b=B)
+
+    # -- add back patchsize for compat --
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    return scores,scores_t
 
 def ransac(cfg,expanded):
     """
@@ -157,16 +232,6 @@ def ransac(cfg,expanded):
     def compute_train_est(tr_points):
         est = repeat(torch.mean(tr_points,dim=0),'be d -> n be d',n=te_N)
 
-    def create_subset_grids_fixed(subN,indices,max_subset_size):
-        return create_subset_grids(subN-1,subN,indices,max_subset_size)
-
-    def create_subset_grids(nmin,nmax,indices,max_subset_size):
-        subsets_idx = create_combination(indices,nmin,nmax)
-        if subsets_idx.shape[0] > max_subset_size: 
-            indices = torch.randperm(subsets_idx.shape[0])[:max_subset_size]
-            subsets_idx = subsets_idx[indices]
-        return subsets_idx
-
     # -=-=-=-=-=-=-=-=-=-=-=-
     #
     # -->      ransac     <--
@@ -174,7 +239,7 @@ def ransac(cfg,expanded):
     # -=-=-=-=-=-=-=-=-=-=-=-
 
     # -- create subset grids --
-    minSN,maxSN = 3,14
+    minSN,maxSN = 10,14
     indices = np.arange(T)
     max_subset_size = 600
     # subsets_idx = create_subset_grids_fixed(maxSN,indices,max_subset_size)

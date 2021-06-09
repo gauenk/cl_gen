@@ -3,7 +3,7 @@
 # --  python imports --
 import numpy as np
 import numpy.random as npr
-from einops import rearrange
+from einops import rearrange,repeat
 
 # --  pytorch imports --
 import torch
@@ -11,6 +11,38 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 from pyutils import apply_sobel_filter
+
+def divide_frame_size(fs,num):
+    return fs // num + 1
+
+def create_image_tiles(clean_vol,noisy_vol,flow,min_frame_size):
+    # flow is NOT USED.
+
+    # -- unpack --
+    T,H2,B,P,C,PS,PS = clean_vol.shape
+
+    # -- get correct tiles --
+    REF_H = H2//2 # assume no dynamics
+    clean_nd,noisy_nd = clean_vol[:,REF_H],noisy_vol[:,REF_H]
+
+    
+    # -- move patches across width --
+    clean_nd = rearrange(clean_nd,'t b p c h w -> t b c h (w p)')
+    noisy_nd = rearrange(noisy_nd,'t b p c h w -> t b c h (w p)')
+
+    # -- tile images --
+    rh = divide_frame_size(min_frame_size,clean_nd.shape[-2])
+    rw = divide_frame_size(min_frame_size,clean_nd.shape[-1])
+    shape_str = 't b c ph pw -> t b c (rh ph) (rw pw)'
+    clean_tile = repeat(clean_nd,shape_str,rh=rh,rw=rw)
+    noisy_tile = repeat(noisy_nd,shape_str,rh=rh,rw=rw)
+
+    # -- crop to frame size --
+    fs = min_frame_size
+    clean_tile = tvF.crop(clean_tile,0,0,fs,fs)
+    noisy_tile = tvF.crop(noisy_tile,0,0,fs,fs)
+
+    return clean_tile,noisy_tile
 
 def create_image_volumes(cfg,clean,noisy):
     npatches,nblocks,patchsize = cfg.npatches,cfg.nblocks,cfg.patchsize
