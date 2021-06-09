@@ -12,14 +12,14 @@ import torch.nn.functional as F
 import torchvision.transforms as tvT
 
 # -- project imports --
-from pyutils import save_image
+from pyutils import save_image,images_to_psnrs
 from patch_search import get_score_function
 
 # -- local project imports --
 from .utils import get_ref_block_index
-from .bss import get_block_search_space,args_nodynamics_nblocks,args_flow_from_grid
+from .bss import get_block_search_space,args_nodynamics_nblocks
 from .blocks import create_image_volumes,create_image_tiles
-from .wrap_image_data import load_image_dataset
+from .wrap_image_data import load_image_dataset,sample_to_cuda
 # from .exps import run_fnet,run_pixel_scores,run_cog,run_pixel_diffs,run_flownet
 from .exps import PixelExperiment,FlownetExperiment
 
@@ -48,8 +48,7 @@ def execute_experiment(cfg):
     # exit()
 
     # -- setup experiments --
-    image_exps = []
-    # image_exps = [FlownetExperiment]
+    image_exps = [FlownetExperiment]
     block_exps = [PixelExperiment]
     exp_dict = edict({'image':image_exps,'block':block_exps})
     exps = setup_experiments(cfg,exp_dict)
@@ -63,22 +62,33 @@ def execute_experiment(cfg):
         # -- init results --
         results_i = {}
 
-        # -- sample batch --
-        loaded = next(image_batch_iter)
-        clean_imgs,noisy_imgs = loaded['burst'],loaded['noisy']
-        flow = loaded['directions']
-        clean_imgs,noisy_imgs = clean_imgs.to(cfg.gpuid),noisy_imgs.to(cfg.gpuid)
+        # -- sample & unpack batch --
+        sample = next(image_batch_iter)
+        sample_to_cuda(sample)
+        dyn_noisy = sample['noisy'] # dynamics and noise
+        dyn_clean = sample['burst'] # dynamics and no noise
+        static_noisy = sample['snoisy'] # no dynamics and noise
+        static_clean = sample['sburst'] # no dynamics and no noise
+        flow = sample['flow']
+        
+        # T = cfg.nframes
+        # for t in range(T):
+        #     psnrs = images_to_psnrs(dyn_clean[t],dyn_clean[T//2])
+        #     print(t,np.mean(psnrs))
 
         # -- create image volumes --
-        T,B,C,H,W = clean_imgs.shape
-        clean_vol,noisy_vol = create_image_volumes(cfg,clean_imgs,noisy_imgs)
-        T,H2,B,P,C,PS,PS = clean_vol.shape
+        T,B,C,H,W = static_clean.shape
+        static_vols = create_image_volumes(cfg,static_noisy,static_clean)
+        dyn_vols = create_image_volumes(cfg,dyn_noisy,dyn_clean)
+        T,H2,B,P,C,PS,PS = static_vols.clean.shape
         image_batch_size = B
 
         # -- run experiments over just image batch
-        clean_tile,noisy_tile = create_image_tiles(clean_vol,noisy_vol,flow,H)
-        image_batch = edict({'clean':clean_tile,'noisy':noisy_tile})
-        exp_results = execute_experiments(cfg,exps.image,image_batch,flow)
+        # tiles = create_image_tiles(static_vols.clean,static_vols.noisy,flow,H)
+        tiles = create_image_tiles(dyn_vols.clean,dyn_vols.noisy,flow,H)
+        exp_results = execute_experiments(cfg,exps.image,tiles,flow)
+        # full = edict({'clean':dyn_clean,'noisy':dyn_noisy})
+        # exp_results = execute_experiments(cfg,exps.image,full,flow)
         format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
 
         # -- restart bss loader --
@@ -92,13 +102,13 @@ def execute_experiment(cfg):
             blocks = next(bss_iter)['order']
 
             # -- get image regions with no dynamics --
-            args = args_nodynamics_nblocks(blocks,flow,cfg.nblocks)
+            args = args_nodynamics_nblocks(blocks,cfg.nblocks)
             print(args)
-            exit()
 
             # -- pick block order (aka arangement) --
-            clean = rearrange(clean_vol[tgrid,blocks],'e t b p c h w -> p b e t c h w')
-            noisy = rearrange(noisy_vol[tgrid,blocks],'e t b p c h w -> p b e t c h w')
+            shape_str = 'e t b p c h w -> p b e t c h w'
+            clean = rearrange(static_vols.clean[tgrid,blocks],shape_str)
+            noisy = rearrange(static_vols.noisy[tgrid,blocks],shape_str)
             P,B,E,T,C,PS,PS = clean.shape # explicit shape
 
             # -- cuda -- 

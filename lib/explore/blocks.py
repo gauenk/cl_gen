@@ -4,45 +4,66 @@
 import numpy as np
 import numpy.random as npr
 from einops import rearrange,repeat
+from easydict import EasyDict as edict
 
 # --  pytorch imports --
 import torch
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from pyutils import apply_sobel_filter
+from pyutils import apply_sobel_filter,global_flow_to_blocks,images_to_psnrs,align_burst_from_block
+
+# -- [local] project imports --
+from .utils import get_ref_block_index
 
 def divide_frame_size(fs,num):
     return fs // num + 1
 
 def create_image_tiles(clean_vol,noisy_vol,flow,min_frame_size):
-    # flow is NOT USED.
 
     # -- unpack --
     T,H2,B,P,C,PS,PS = clean_vol.shape
 
     # -- get correct tiles --
-    REF_H = H2//2 # assume no dynamics
-    clean_nd,noisy_nd = clean_vol[:,REF_H],noisy_vol[:,REF_H]
+    flow = flow.cpu()
+    nblocks = int(np.sqrt(H2))
+    ref_blocks = global_flow_to_blocks(flow,nblocks).T
 
-    
+    # -- reference blocks --
+    REF_H = get_ref_block_index(nblocks)
+    clean = clean_vol[:,REF_H]
+    noisy = noisy_vol[:,REF_H]
+
+    # # -- removes dynamics: index with for loops --
+    # device = clean_vol.device
+    # ref_blocks = ref_blocks.to(device)
+    # clean = torch.zeros((T,B,P,C,PS,PS),device=device)
+    # noisy = torch.zeros((T,B,P,C,PS,PS),device=device)
+    # for i in range(ref_blocks.shape[0]):
+    #     for j in range(ref_blocks.shape[1]):
+    #         clean[i,j] = clean_vol[i,ref_blocks[i,j],j]
+    #         noisy[i,j] = noisy_vol[i,ref_blocks[i,j],j]
+        
     # -- move patches across width --
-    clean_nd = rearrange(clean_nd,'t b p c h w -> t b c h (w p)')
-    noisy_nd = rearrange(noisy_nd,'t b p c h w -> t b c h (w p)')
+    clean = rearrange(clean,'t b p c h w -> t b c h (w p)')
+    noisy = rearrange(noisy,'t b p c h w -> t b c h (w p)')
 
     # -- tile images --
-    rh = divide_frame_size(min_frame_size,clean_nd.shape[-2])
-    rw = divide_frame_size(min_frame_size,clean_nd.shape[-1])
+    rh = divide_frame_size(min_frame_size,clean.shape[-2])
+    rw = divide_frame_size(min_frame_size,clean.shape[-1])
     shape_str = 't b c ph pw -> t b c (rh ph) (rw pw)'
-    clean_tile = repeat(clean_nd,shape_str,rh=rh,rw=rw)
-    noisy_tile = repeat(noisy_nd,shape_str,rh=rh,rw=rw)
+    clean_tile = repeat(clean,shape_str,rh=rh,rw=rw)
+    noisy_tile = repeat(noisy,shape_str,rh=rh,rw=rw)
 
     # -- crop to frame size --
     fs = min_frame_size
     clean_tile = tvF.crop(clean_tile,0,0,fs,fs)
     noisy_tile = tvF.crop(noisy_tile,0,0,fs,fs)
+    tiles = edict({'clean':clean_tile,'noisy':noisy_tile})
 
-    return clean_tile,noisy_tile
+    # align_burst_from_block(clean_tile,ref_block,nblocks,"global")
+
+    return tiles
 
 def create_image_volumes(cfg,clean,noisy):
     npatches,nblocks,patchsize = cfg.npatches,cfg.nblocks,cfg.patchsize
@@ -59,8 +80,8 @@ def create_image_volumes(cfg,clean,noisy):
     clean_vol = rearrange(clean_vol,'b t h2 p c ps1 ps2 -> t h2 b p c ps1 ps2')
     noisy_vol = rearrange(noisy_vol,'b t h2 p c ps1 ps2 -> t h2 b p c ps1 ps2')
 
-    return clean_vol,noisy_vol
-
+    vols = edict({'clean':clean_vol,'noisy':noisy_vol})
+    return vols
 
 def sample_patch_locations(full_image,P,patchsize,nblocks):
     # -- shape to include batch --
@@ -108,5 +129,14 @@ def crop_burst_to_blocks(full_burst,nblocks,init_tl_list,patchsize):
         blocks.append(blocks_p)
     blocks = torch.stack(blocks,dim=0)
     blocks = rearrange(blocks,'p h2 t c h w -> t h2 p c h w',p=P)
+
+    # T,H2,P,C,H,W = blocks.shape
+    # REF_T = T//2
+    # REF_H = get_ref_block_index(nblocks)
+    # for t in range(T):
+    #     for h2 in range(H2):
+    #         psnrs = images_to_psnrs(blocks[t,h2],blocks[REF_T,REF_H])
+    #         print(t,h2,np.mean(psnrs))
+
     return blocks
 

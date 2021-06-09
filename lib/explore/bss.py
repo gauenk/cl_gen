@@ -8,14 +8,12 @@ Manage Block Grid Search Space
 import random
 import numpy as np
 import numpy.random as npr
-from einops import rearrange,repeat
 from easydict import EasyDict as edict
 
 # -- pytorch imports --
 import torch
 
 # -- project imports --
-from pyutils import global_flow_to_blocks
 from datasets.common import get_loader
 
 # -- [local] project imports --
@@ -90,7 +88,6 @@ def bss_subsample(bss,size,REF_H,nframes,method="random"):
         bss = remove_nodynamics(bss,REF_H) 
         BSS = bss.shape[0]
         deltas = torch.sum(torch.abs(bss - REF_H),1)        
-        tol = (nframes//2-1)
         args = torch.nonzero(deltas < (nframes//2-1) )[:,0]
         if len(args) < size:
             n = size - len(args) - 1
@@ -105,8 +102,6 @@ def bss_subsample(bss,size,REF_H,nframes,method="random"):
             bss = bss[args[:size-1]]
         bss = ensure_single_nodynamics(bss,REF_H,nframes)
         return bss
-    elif method == "almost_flow":
-
     else:
         raise ValueError(f"Uknown bss_subsample method [{method}]")
 
@@ -150,7 +145,7 @@ def generate_block_search_space(nblocks,nframes,tcount=10,difficult=False):
 
 def args_nodynamics_nblocks(grids,nblocks):
     REF_H = get_ref_block_index(nblocks)
-    deltas = torch.sum(torch.abs(grids - REF_H),dim=1)
+    deltas = torch.sum(torch.abs(grids - REF_H),1)
     args = torch.nonzero(deltas == 0)
     return args
 
@@ -158,38 +153,6 @@ def args_nodynamics(grids,REF_H):
     deltas = torch.sum(torch.abs(grids - REF_H),1)
     args = torch.nonzero(deltas == 0)
     return args
-
-def args_flow_from_grid(grids,flow,nblocks):
-    
-    # -- blocks from flow --
-    blocks = global_flow_to_blocks(flow,nblocks)
-
-    # -- shape to take difference --
-    G,BL = grids.shape
-    B,BL = blocks.shape
-    blocks = repeat(blocks,'b bl -> b g bl',g=G)
-    grids = repeat(grids,'g bl -> b g bl',b=B)
-
-    # -- compute deltas --
-    deltas = torch.sum(torch.abs(grids - blocks),dim=2)
-    args = torch.nonzero(deltas == 0)
-
-    return args
-
-def ensure_single_flow(grids,flow,nblocks,nframes):
-    args = args_nodynamics(grids,REF_H)
-    if len(args) == 0:
-        nodynamics = torch.tensor(np.array([REF_H]*nframes)).long()[None,:]
-        grids = torch.cat([nodynamics,grids],dim=0)
-    return grids
-
-def remove_flow(grids,flow,nblocks):
-    args = args_flow_from_grid(grids,flow,nblocks)
-    if len(args) > 0:
-        args = args[:,1]
-        grids = torch.cat([grids[:args],grids[args+1:]],dim=0)
-    return grids
-
 
 def ensure_single_nodynamics(grids,REF_H,nframes):
     args = args_nodynamics(grids,REF_H)

@@ -16,14 +16,15 @@ def create_mesh():
     # patchsize = [64]
     # patchsize = [3,9,31]
     patchsize = [3]
+    # patchsize = [31]
 
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     # noise_types = ['g-125p0','g-100p0','g-75p0','g-25p0']
     # noise_types = ['g-125p0']
-    noise_types = ['g-1p0','g-25p0','g-75p0','g-125p0']
-    # noise_types = ['g-25p0']
+    # noise_types = ['g-1p0','g-25p0','g-75p0','g-125p0']
+    noise_types = ['g-1p0','g-75p0']
 
     # -- create frame number grid --
     #frames = np.arange(3,9+1,2)
@@ -40,7 +41,7 @@ def create_mesh():
     npatches = [6]
     
     # -- dynamics grid --
-    ppf = [0] #np.arange(3,9+1,2)
+    ppf = [1] #np.arange(3,9+1,2)
 
     # -- block search grid --
     bss_str = ['0m_3f_200t_d','0m_5f_200t_d'] # mode 0, # for each Frame, # Total, difficult
@@ -55,8 +56,8 @@ def create_mesh():
     batch_size = [10]
 
     # -- random seed --
-    random_seed = [123,234,345,456,567]
-    # random_seed = [123]
+    # random_seed = [123,234,345,456,567]
+    random_seed = [234]
 
     # -- create a list of arrays to mesh --
     lists = [patchsize,ppf,bss_str,idf,idp,batch_size,
@@ -74,7 +75,7 @@ def create_mesh():
         named_mesh.append(named_elem)
 
     # -- keep only pairs lists --
-    filters = [{'nframes-bss_str':[[3,'0m_5f_200t_d'],[5,'0m_5f_200t_d'],[7,'0m_3f_200t_d'],[9,'0m_3f_200t_d'],[11,'0m_3f_200t_d'],[15,'0m_3f_200t_d']]},{'nframes-nblocks':[[5,7],[7,7],[7,9],[9,9],[15,15]]}]
+    filters = [{'nframes-bss_str':[[3,'0m_5f_200t_d'],[5,'0m_5f_200t_d'],[7,'0m_3f_200t_d'],[9,'0m_3f_200t_d'],[11,'0m_3f_200t_d'],[15,'0m_3f_200t_d']]},{'nframes-nblocks':[[5,7],[7,7],[7,9],[9,9],[15,15],[15,13]]}]
     named_mesh = apply_mesh_filters(named_mesh,filters)
 
     return named_mesh,order    

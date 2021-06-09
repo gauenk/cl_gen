@@ -2,6 +2,7 @@
 # -- python --
 import copy
 import numpy as np
+from einops import rearrange,repeat
 from easydict import EasyDict as edict
 
 # -- pytorch --
@@ -33,8 +34,8 @@ def transforms_from_cfg(cfg):
             pil_image = tvT.ToPILImage()(image).convert("RGB")
             results = dynamic_raw_xform(pil_image)
             burst = results[0]
-            directions = results[3]
-            return burst,directions
+            flow = results[3]
+            return burst,flow
         return wrapped
     def nonoise(image): return image
 
@@ -52,12 +53,26 @@ class WrapperDataset():
         self.noise_fxn = noise_fxn
         self.dynamic_fxn = dynamic_fxn
         self.FULL_IMAGE_INDEX = 2
+        self.cuda = True
 
     def __len__(self):
         return len(self.data)
     
     def __getitem__(self,index):
         image = self.data[index][self.FULL_IMAGE_INDEX]
-        burst,directions = self.dynamic_fxn(image)
+        burst,flow = self.dynamic_fxn(image)
         noisy = self.noise_fxn(burst)
-        return {'burst':burst,'noisy':noisy,'directions':directions}
+
+        T = burst.shape[0]
+        sburst = repeat(burst[T//2],'c h w -> t c h w',t=T)
+        snoisy = self.noise_fxn(sburst)
+
+        sample = {'burst':burst,'noisy':noisy,'flow':flow,
+                  'sburst':sburst,'snoisy':snoisy}
+        return sample
+
+def sample_to_cuda(sample):
+    for key in sample.keys():
+        sample[key] = sample[key].cuda(non_blocking=True)
+
+

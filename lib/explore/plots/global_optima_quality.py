@@ -22,6 +22,7 @@ pd.set_option('display.max_rows',None)
 # -- pytorch imports --
 import torch
 import torch.nn.functional as f
+import torchvision.transforms.functional as tvF
 
 # -- explore imports --
 from explore.plots.utils import move_column_to_last,find_optima_index,get_pixel_fields,get_flownet_fields
@@ -95,19 +96,37 @@ def experiment_global_optima_quality(cfg,records,exp_fields,exp_int):
 
 def assess_flownet_fields(quality,record,optima_index,nblocks,bss,bss_ibatch):
     fields = get_flownet_fields(record)
+    gt_flow = torch.LongTensor(rearrange(record['gt_flow'],'tm1 b p -> b tm1 p'))
+    ps,P = record['patchsize'],record['npatches']
+    s,e = 0,ps*P
     for field in fields:
         quality[field] = edict({'correct':0,'total':0,'acc':0})
 
         # -- flow fields --
+        flow = record[field]['flows']
+        flow = tvF.crop(flow,s,s,e,e)
         flow = rearrange(record[field]['flows'],'tm1 b p h w -> b tm1 p (h w)')
-        print(flow)
         flow = torch.mean(flow,dim=3)
-        flow = flow.long() # round to ints
-        print(flow)
-        
+        flow_fp = flow.clone()
+        flow = torch.round(flow) # round to ints
+
+        eq = gt_flow == flow
+        perc_zero = torch.mean((flow == 0).float()).item() * 100
+        print("Precent 0: {:.2f}".format(perc_zero))
+        if record['patchsize'] == 3 and record['noise_type'] == "g-1p0":
+            # print(eq)
+            inspect = 7
+            # print(eq)
+            print(eq[inspect])
+            print(gt_flow[inspect])
+            print(flow[inspect])
+            print(flow_fp[inspect])
+            print(record['patchsize'],record['noise_type'])
+            # exit()
+            
         # -- accuracy across time --
         # flow_error = torch.sum(torch.abs(flow),dim=2)
-        correct = torch.all(torch.all(flow == 0,dim=2),dim=1).long()
+        correct = torch.all(torch.all(flow == gt_flow,dim=2).float(),dim=1)
         correct_list = list(correct.numpy())
 
         # -- compute quality scores --

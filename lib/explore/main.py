@@ -59,7 +59,7 @@ def main():
     config_setup = get_setup_fxn(version)
 
     # -- Clear Cache --
-    if True: clear_cache()
+    # if True: clear_cache()
 
     # -- Run Experiment --
     for config in tqdm(experiments):
