@@ -5,8 +5,8 @@ from collections import OrderedDict
 from easydict import EasyDict as edict
 
 # -- [local] project imports --
+from pyutils import create_meshgrid
 from datasets.transforms import get_noise_config
-from .utils import create_meshgrid
 
 def create_mesh():
 

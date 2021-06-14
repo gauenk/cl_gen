@@ -134,6 +134,23 @@ def global_blocks_to_flow(blocks,nblocks):
     flow = torch.LongTensor(flow)
     return flow
 
+def global_blocks_to_pixel(blocks,nblocks):
+    B,T = blocks.shape[:2]
+    grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
+    coords = []
+    ref_t,ref_bl = T//2,nblocks//2
+    for b in range(B):
+        block_b = blocks[b]
+        coords_b = []
+        for t in range(T):
+            coord = np.r_[np.where(grid == block_b[t].item())]
+            coords_b.append(coord)
+        coords_b = np.stack(coords_b)
+        coords.append(coords_b)
+    coords = np.stack(coords)
+    coords = torch.LongTensor(coords)
+    return coords
+
 #
 # Supporting
 #

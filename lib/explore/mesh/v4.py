@@ -5,8 +5,8 @@ from collections import OrderedDict
 from easydict import EasyDict as edict
 
 # -- [local] project imports --
+from pyutils import apply_mesh_filters,create_named_meshgrid
 from datasets.transforms import get_noise_config
-from .utils import create_meshgrid,apply_mesh_filters
 
 def create_mesh():
 
@@ -23,28 +23,28 @@ def create_mesh():
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     # noise_types = ['g-125p0','g-100p0','g-75p0','g-25p0']
     # noise_types = ['g-125p0']
-    # noise_types = ['g-1p0','g-25p0','g-75p0','g-125p0']
-    noise_types = ['g-1p0','g-75p0']
+    noise_types = ['g-1p0','g-25p0','g-75p0','g-125p0']
+    # noise_types = ['g-1p0','g-75p0']
 
     # -- create frame number grid --
     #frames = np.arange(3,9+1,2)
     # nframes = [3,5,7]
     # nframes = [5,9]
-    nframes = [15]
+    nframes = [15,25]
     # nframes = [9]
 
     # -- create number of local regions grid --
     # nblocks = [7,9] #np.arange(3,9+1,2)
-    nblocks = [15]
+    nblocks = [15,25]
     
     # -- number of patches from each image --
     npatches = [6]
     
     # -- dynamics grid --
-    ppf = [1] #np.arange(3,9+1,2)
+    ppf = [0] #np.arange(3,9+1,2)
 
     # -- block search grid --
-    bss_str = ['0m_3f_200t_d','0m_5f_200t_d'] # mode 0, # for each Frame, # Total, difficult
+    bss_str = ['0m_2f_200t_d','0m_3f_200t_d','0m_5f_200t_d'] # mode 0, # for each Frame, # Total, difficult
 
     # -- image content filter --
     image_decomp_full = ['000'] # emphasis on edges v texture v smooth
@@ -56,8 +56,8 @@ def create_mesh():
     batch_size = [10]
 
     # -- random seed --
-    # random_seed = [123,234,345,456,567]
-    random_seed = [234]
+    random_seed = [123,234,345,456,567]
+    # random_seed = [123,234]
 
     # -- create a list of arrays to mesh --
     lists = [patchsize,ppf,bss_str,idf,idp,batch_size,
@@ -66,16 +66,10 @@ def create_mesh():
              'random_seed','noise_type','nframes','nblocks','npatches']
 
     # -- create mesh --
-    mesh = create_meshgrid(lists)
-    
-    # -- name each element --
-    named_mesh = []
-    for elem in mesh:
-        named_elem = edict(OrderedDict(dict(zip(order,elem))))
-        named_mesh.append(named_elem)
+    named_mesh = create_named_meshgrid(lists,order)
 
     # -- keep only pairs lists --
-    filters = [{'nframes-bss_str':[[3,'0m_5f_200t_d'],[5,'0m_5f_200t_d'],[7,'0m_3f_200t_d'],[9,'0m_3f_200t_d'],[11,'0m_3f_200t_d'],[15,'0m_3f_200t_d']]},{'nframes-nblocks':[[5,7],[7,7],[7,9],[9,9],[15,15],[15,13]]}]
+    filters = [{'nframes-bss_str':[[3,'0m_5f_200t_d'],[5,'0m_5f_200t_d'],[7,'0m_3f_200t_d'],[9,'0m_3f_200t_d'],[11,'0m_3f_200t_d'],[15,'0m_3f_200t_d'],[25,'0m_2f_200t_d']]},{'nframes-nblocks':[[5,7],[7,7],[7,9],[9,9],[15,15],[15,13],[25,25]]}]
     named_mesh = apply_mesh_filters(named_mesh,filters)
 
     return named_mesh,order    

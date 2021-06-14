@@ -1,6 +1,7 @@
 
 # python imports
 import numpy as np
+import numpy.random as npr
 import pickle,sys,os,yaml,io
 from easydict import EasyDict as edict
 import torch
@@ -82,6 +83,10 @@ def create_subset_grids(nmin,nmax,indices,max_subset_size):
         indices = torch.randperm(subsets_idx.shape[0])[:max_subset_size]
         subsets_idx = subsets_idx[indices]
     return subsets_idx
+
+def sample_subset_grids(N,num_samples):
+    samples = npr.choice(N,size=(num_samples,N),replace=True)
+    return samples
 
 def ncr(n, r):
     r = min(r, n-r)

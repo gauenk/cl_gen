@@ -13,7 +13,7 @@ def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,font
     if shrink:
         ax.set_position([box.x0, box.y0, box.width * shrink_perc, box.height])
     if legend_handles is not None:
-        ax.legend(legend_handles,legend_str,
+        leg =ax.legend(legend_handles,legend_str,
                   title = legend_title,
                   title_fontsize=fontsize,
                   fontsize=fontsize,
@@ -22,7 +22,7 @@ def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,font
                   bbox_to_anchor=(1, 0.5),
                   framealpha=framealpha)
     else:
-        ax.legend(legend_str,
+        leg = ax.legend(legend_str,
                   title = legend_title,
                   title_fontsize=fontsize,
                   fontsize=fontsize,
@@ -30,7 +30,7 @@ def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,font
                   loc='center left',
                   bbox_to_anchor=(1, 0.5),
                   framealpha=framealpha)
-        
+
     return ax
 
 

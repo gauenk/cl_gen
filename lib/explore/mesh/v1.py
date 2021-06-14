@@ -1,8 +1,8 @@
 # -- python imports --
 from easydict import EasyDict as edict
 
-# -- [local] project imports --
-from .utils import create_meshgrid
+# -- project imports --
+from pyutils import create_meshgrid
 
 def create_mesh():
 

@@ -48,7 +48,8 @@ def execute_experiment(cfg):
     # exit()
 
     # -- setup experiments --
-    image_exps = [FlownetExperiment]
+    # image_exps = [FlownetExperiment]
+    image_exps = []
     block_exps = [PixelExperiment]
     exp_dict = edict({'image':image_exps,'block':block_exps})
     exps = setup_experiments(cfg,exp_dict)
@@ -78,24 +79,24 @@ def execute_experiment(cfg):
 
         # -- create image volumes --
         T,B,C,H,W = static_clean.shape
-        static_vols = create_image_volumes(cfg,static_noisy,static_clean)
-        dyn_vols = create_image_volumes(cfg,dyn_noisy,dyn_clean)
+        static_vols = create_image_volumes(cfg,static_clean,static_noisy)
+        dyn_vols = create_image_volumes(cfg,dyn_clean,dyn_noisy)
         T,H2,B,P,C,PS,PS = static_vols.clean.shape
         image_batch_size = B
 
         # -- run experiments over just image batch
         # tiles = create_image_tiles(static_vols.clean,static_vols.noisy,flow,H)
-        tiles = create_image_tiles(dyn_vols.clean,dyn_vols.noisy,flow,H)
-        exp_results = execute_experiments(cfg,exps.image,tiles,flow)
+        # tiles = create_image_tiles(dyn_vols.clean,dyn_vols.noisy,flow,H)
+        # exp_results = execute_experiments(cfg,exps.image,tiles,flow)
         # full = edict({'clean':dyn_clean,'noisy':dyn_noisy})
         # exp_results = execute_experiments(cfg,exps.image,full,flow)
-        format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
+        # format_tensor_results(cfg,exp_results,results_i,{'default':-1},True)
 
         # -- restart bss loader --
         bss_iter = iter(bss_loader)
 
         # -- 2.) over BATCHES of BLOCK_ORDERs  --
-        tgrid = torch.arange(T)
+        tgrid = torch.arange(cfg.nframes)
         for block_bindex in tqdm(range(BSS_SIZE),leave=False):
 
             # -- sample block order --

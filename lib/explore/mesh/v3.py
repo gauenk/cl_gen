@@ -4,9 +4,9 @@ import copy
 from collections import OrderedDict
 from easydict import EasyDict as edict
 
-# -- [local] project imports --
+# -- project imports --
+from pyutils import create_meshgrid,apply_mesh_filters
 from datasets.transforms import get_noise_config
-from .utils import create_meshgrid,apply_mesh_filters
 
 def create_mesh():
 

@@ -9,6 +9,7 @@ from easydict import EasyDict as edict
 import torchvision.transforms as tvT
 
 # -- project --
+from pyutils import print_tensor_stats
 from datasets import load_dataset
 from datasets.common import get_loader
 from datasets.transforms import get_noise_transform,get_dynamic_transform
@@ -33,7 +34,7 @@ def transforms_from_cfg(cfg):
         def wrapped(image):
             pil_image = tvT.ToPILImage()(image).convert("RGB")
             results = dynamic_raw_xform(pil_image)
-            burst = results[0]
+            burst = results[0]+0.5
             flow = results[3]
             return burst,flow
         return wrapped
@@ -61,7 +62,7 @@ class WrapperDataset():
     def __getitem__(self,index):
         image = self.data[index][self.FULL_IMAGE_INDEX]
         burst,flow = self.dynamic_fxn(image)
-        noisy = self.noise_fxn(burst)
+        noisy = self.noise_fxn(burst+0.5)
 
         T = burst.shape[0]
         sburst = repeat(burst[T//2],'c h w -> t c h w',t=T)

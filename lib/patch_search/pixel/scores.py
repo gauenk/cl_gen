@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 
 # -- project imports --
-from pyutils import torch_xcorr,create_combination,print_tensor_stats,save_image,create_subset_grids,create_subset_grids,create_subset_grids_fixed,ncr
+from pyutils import torch_xcorr,create_combination,print_tensor_stats,save_image,create_subset_grids,create_subset_grids,create_subset_grids_fixed,ncr,sample_subset_grids
 from layers.unet import UNet_n2n,UNet_small
 from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
@@ -53,6 +53,8 @@ def get_score_function(name):
         return refcmp_score
     elif name == "jackknife":
         return jackknife
+    elif name == "bootstrapping":
+        return bootstrapping
     elif name == "sim_trm":
         return sim_trm
     elif name == "ransac":
@@ -61,6 +63,46 @@ def get_score_function(name):
         return shapley
     else:
         raise ValueError(f"Uknown score function [{name}]")
+
+def bootstrapping(cfg,expanded):
+
+    # -- setup vars --
+    R,B,E,T,C,H,W = expanded.shape
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
+    samples = samples.contiguous() # speed up?
+    t_ref = T//2
+    ave = torch.mean(samples,dim=0)
+
+    # -- compute ave diff between model and subsets --
+    scores_t = torch.zeros(T,B*E,device=device)
+    counts_t = torch.zeros(T,1,device=device)
+    nbatches,batch_size = 100,100
+    for batch_idx in range(nbatches):
+        subsets = torch.LongTensor(sample_subset_grids(T,batch_size))
+        for subset in subsets:
+            counts_t[subset] += 1
+            subset_pix = samples[subset]
+            vprint("subset.shape",subset_pix.shape)
+            subset_ave = torch.mean(subset_pix,dim=0)
+            vprint("subset_ave.shape",subset_ave.shape)
+            loss = torch.mean( (subset_ave - ave)**2, dim=0)
+            vprint("loss.shape",loss.shape)
+            scores_t[subset] += loss
+    scores_t /= counts_t
+    scores = torch.mean(scores_t,dim=0)
+    scores_t = scores_t.T # (T,E) -> (E,T)
+    vprint("scores.shape",scores.shape)
+
+    # -- no cuda --
+    scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t.cpu(),'(b e) t -> b e t',b=B)
+
+    # -- add back patchsize for compat --
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    return scores,scores_t
 
 def shapley(cfg,expanded):
     """

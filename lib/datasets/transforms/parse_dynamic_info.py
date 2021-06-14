@@ -1,4 +1,4 @@
-from .dynamic import GlobalCameraMotionTransform
+from .dynamics import GlobalCameraMotionTransform,LocalCameraMotionTransform
 
 __all__ = ["get_dynamic_transform"]
 
@@ -8,10 +8,7 @@ def get_dynamic_transform(dynamic_info,noise_trans,load_res=False):
     if dynamic_info['mode'] == 'global':
         return GlobalCameraMotionTransform(dynamic_info,noise_trans,load_res)
     elif dynamic_info['mode'] == 'local':
-        raise NotImplemented("No local motion coded.")
+        return LocalCameraMotionTransform(dynamic_info,noise_trans,load_res)
     else:
         raise ValueError("Dynamic model [{dynamic_info['mode']}] not found.")
-
-
-
 
