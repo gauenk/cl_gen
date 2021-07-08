@@ -22,6 +22,8 @@ def set_noise(cfg,ns):
         cfg.noise_params[ns.ntype]['alpha'] = ns.alpha
         cfg.noise_params[ns.ntype]['readout'] = ns.readout
         cfg.noise_params[ns.ntype]['nbits'] = ns.nbits
+    elif ns.ntype == "none":
+        return ns.name
     else:
         raise ValueError(f"Uknown noise type [{ns.ntype}]")
     return ns.name
@@ -31,6 +33,12 @@ def get_noise_config(cfg,name):
     if name.split("-")[0] == "g": # gaussian
         wrapper = edict()
         config = get_gaussian_config_from_name(cfg,name)
+        wrapper[config.ntype] = config
+        wrapper.ntype = config.ntype
+        return wrapper
+    elif name.split("-")[0] == "pn":
+        wrapper = edict()
+        config = get_poisson_config_from_name(cfg,name)
         wrapper[config.ntype] = config
         wrapper.ntype = config.ntype
         return wrapper
@@ -124,3 +132,16 @@ def get_gaussian_config_from_name(cfg,name):
     ns['name'] = f"g-{ns['stddev']}".replace(".","p")
     ns = edict(ns)
     return ns
+
+def get_poisson_config_from_name(cfg,name):
+    noise_type,rate_str,std_str = name.split("-")
+    rate_level = float(rate_str.replace('p','.'))
+    std_level = float(std_str.replace('p','.'))
+    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns['ntype'] = noise_type
+    ns['alpha'] = rate_level
+    ns['std'] = std_level
+    ns['name'] = name
+    ns = edict(ns)
+    return ns
+

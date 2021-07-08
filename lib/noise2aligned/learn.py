@@ -283,7 +283,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
                 torch.manual_seed(cfg.seed+1+epoch+init)
             train_iter = iter(train_loader) # reset if too big
         sample = next(train_iter)
-        burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
+        burst,raw_img,motion = sample['burst'],sample['clean'],sample['flow']
         raw_img_iid = sample['iid']
         raw_img_iid = raw_img_iid.cuda(non_blocking=True)
         burst = burst.cuda(non_blocking=True)
@@ -842,7 +842,7 @@ def test_loop(cfg,model,test_loader,epoch):
         for batch_idx in range(num_batches):
 
             sample = next(test_iter)
-            burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
+            burst,raw_img,motion = sample['burst'],sample['clean'],sample['flow']
             B = raw_img.shape[0]
             
             # -- selecting input frames --

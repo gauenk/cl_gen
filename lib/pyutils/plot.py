@@ -33,6 +33,18 @@ def add_legend(ax,legend_title,legend_str,legend_handles=None,shrink = True,font
 
     return ax
 
+def add_colorbar(axes,label,ticks,scm=None,shrink = True,fontsize=15,
+                 framealpha=1.0,ncol=1,shrink_perc=.80):
+    # box = ax.get_position()
+    # if shrink:
+    #     ax.set_position([box.x0, box.y0, box.width * shrink_perc, box.height])
+    plt.colorbar(mappable=scm,
+                 ax=axes,
+                 label=label,
+                 ticks=ticks,
+                 boundaries=ticks,
+                 location='left',
+                 anchor=(1, 0.5))
 
 def proj2d(features,labels,ax=None,method='TSNE'):
     if method == 'TSNE':

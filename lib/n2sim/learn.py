@@ -276,7 +276,7 @@ def train_loop(cfg,model,scheduler,train_loader,epoch,record_losses,writer):
         # -- grab data batch --
         if small_ds and batch_idx >= ds_size: train_iter = iter(train_loader) # reset if too big
         sample = next(train_iter)
-        burst,raw_img,motion = sample['burst'],sample['clean'],sample['directions']
+        burst,raw_img,motion = sample['burst'],sample['clean'],sample['flow']
         burst = burst.cuda(non_blocking=True)
 
         # -- handle possibly cached simulated bursts --

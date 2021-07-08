@@ -63,23 +63,39 @@ def create_meshgrid(lists):
 
     return mesh_T
 
-def apply_mesh_filters(mesh,filters):
+def apply_mesh_filters(mesh,filters,ftype="keep"):
     filtered_mesh = mesh
     for mfilter in filters:
-        filtered_mesh = apply_mesh_filter(filtered_mesh,mfilter)
+        filtered_mesh = apply_mesh_filter(filtered_mesh,mfilter,ftype=ftype)
     return filtered_mesh
 
-def apply_mesh_filter(mesh,mfilter):
+def apply_mesh_filter(mesh,mfilter,ftype="keep"):
     filtered_mesh = []
     fields_str = list(mfilter.keys())[0]
     values = mfilter[fields_str]
     field1,field2 = fields_str.split("-")
     for elem in mesh:
         match_any = False
+        match_none = True
         for val in values:
             eq1 = (elem[field1] == val[0])
             eq2 = (elem[field2] == val[1])
-            if eq1 and eq2: match_any = True
-        if match_any: filtered_mesh.append(elem)
+            if eq1 and eq2:
+                match_any = True
+                match_none = False
+        if ftype == "keep":
+            if match_any: filtered_mesh.append(elem)
+        elif ftype == "remove":
+            if match_none: filtered_mesh.append(elem)
+        else: raise ValueError(f"[pyutils.mesh] Uknown ftype [{ftype}]")
     return filtered_mesh
+
+
+def create_list_pairs(fields):
+    pairs = []
+    for f1,field1 in enumerate(fields):
+        for f2,field2 in enumerate(fields):
+            if f1 >= f2: continue
+            pairs.append([field1,field2])
+    return pairs
 

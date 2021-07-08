@@ -120,13 +120,13 @@ class DynamicVOC(VOCDetection):
 
         img = Image.open(self.images[index]).convert("RGB")
         if self.bw: img = img.convert('1')
-        img_set,res_set,clean_target,directions = self.dynamic_trans(img)
+        img_set,res_set,clean_target,flow = self.dynamic_trans(img)
         iid = self.noise_trans(clean_target)
 
         if self._return_type == "list":
-            return img_set, res_set, clean_target, directions
+            return img_set, res_set, clean_target, flow
         elif self._return_type == "dict":
-            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'directions':directions, 'iid':iid}
+            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'flow':flow, 'iid':iid}
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 class DynamicVOC_LMDB_All():
@@ -139,8 +139,9 @@ class DynamicVOC_LMDB_All():
         # self.noise_info = noise_info
         self.dynamic_info = dynamic_info
         self.size = self.dynamic_info.frame_size
-        self.lmdb_fields = ['burst','sim_burst','raw','direction']
-        self.fields = ['burst','sim_burst','raw','directions']
+        self.lmdb_fields = ['burst','sim_burst','raw','flow']
+        #self.lmdb_fields = ['burst','sim_burst','raw','direction']
+        self.fields = ['burst','sim_burst','raw','flow']
 
         # -- load metadata --
         self.meta_info = pickle.load(open(metadata_fn,'rb'))
@@ -198,8 +199,8 @@ class DynamicVOC_LMDB_All():
         # -- torch tensor --
         # for field,sample in data.items(): data[field] = torch.tensor(sample.copy())
         for field,sample in data.items(): data[field] = torch.tensor(sample.copy())
-        data['directions'] = data['direction']
-        del data['direction']
+        # data['flow'] = data['direction']
+        # del data['direction']
         return data
 
     def __getitem__(self, index):
@@ -234,7 +235,8 @@ class DynamicVOC_LMDB_Burst():
         # self.noise_info = noise_info
         self.dynamic_info = dynamic_info
         self.size = self.dynamic_info.frame_size
-        self.lmdb_fields = ['burst','raw','direction']
+        #self.lmdb_fields = ['burst','raw','direction']
+        self.lmdb_fields = ['burst','raw','flow']
 
         # -- load metadata --
         self.meta_info = pickle.load(open(metadata_fn,'rb'))
@@ -291,8 +293,8 @@ class DynamicVOC_LMDB_Burst():
 
         # -- torch tensor --
         for field,sample in data.items(): data[field] = torch.tensor(sample)
-        data['directions'] = data['direction']
-        del data['direction']
+        # data['directions'] = data['direction']
+        # del data['direction']
         return data
 
     def __getitem__(self, index):

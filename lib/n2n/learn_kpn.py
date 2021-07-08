@@ -21,7 +21,7 @@ import torchvision.utils as tv_utils
 # -- project code --
 import settings
 from pyutils.timer import Timer
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr
 from datasets.transforms import ScaleZeroMean
 from layers.ot_pytorch import sink_stabilized
 from n2nwl.plot import plot_histogram_residuals_batch,plot_histogram_gradients,plot_histogram_gradient_norms

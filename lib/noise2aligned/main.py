@@ -74,7 +74,8 @@ def get_main_config(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[25.],nGgrid=1,ngp
     cfg.S = Sgrid[S_grid_idx]
     # cfg.dataset.name = "cifar10"
     # cfg.dataset.name = "cbsd68"
-    cfg.dataset.name = "voc"
+    cfg.dataset.name = "kitti"
+    # cfg.dataset.name = "voc"
     # cfg.dataset.name = "sun2009"
     # cfg.dataset.name = "eccv2020"
     # cfg.dataset.name = "rebel2021"

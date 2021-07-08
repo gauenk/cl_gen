@@ -14,7 +14,7 @@ import torchvision.utils as tv_utils
 
 # project code
 import settings
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr
 from n2sim.sim_search import compute_similar_bursts,kIndexPermLMDB
 from datasets.transforms import get_noise_transform
 from pyutils.vst import anscombe,anscombe_nmlz
@@ -63,11 +63,12 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
         burst = burst.cuda(non_blocking=True)
         
         # -- anscombe --
-        if cfg.use_anscombe:
-            burst = anscombe_nmlz.forward(cfg,burst+0.5)
+        # if cfg.use_anscombe:
+        #     burst = anscombe_nmlz.forward(cfg,burst+0.5)
             
         burst0 = burst[[0]]
         burst1 = burst[[1]]
+
         # img0 = burst[0]
         # img1 = burst[1]
         # kindex_ds = kIndexPermLMDB(cfg.batch_size,cfg.N)
@@ -145,11 +146,11 @@ def train_loop_n2n(cfg,model,optimizer,criterion,train_loader,epoch):
 
             # -- anscombe --
             print_tensor_stats("burst",burst)
-            if cfg.use_anscombe:
-                # rec_img = torch.clamp(rec_img+0.5,0)-0.5
-                print_tensor_stats("rec",rec_img)
-                rec_img = anscombe_nmlz.backward(cfg,rec_img)-0.5
-                print_tensor_stats("nmlz-rec",rec_img)
+            # if cfg.use_anscombe:
+            #     # rec_img = torch.clamp(rec_img+0.5,0)-0.5
+            #     print_tensor_stats("rec",rec_img)
+            #     rec_img = anscombe_nmlz.backward(cfg,rec_img)-0.5
+            #     print_tensor_stats("nmlz-rec",rec_img)
 
             # -- qis noise --
             # if noise_type == "qis":
@@ -256,15 +257,15 @@ def test_loop_n2n(cfg,model,criterion,test_loader,epoch):
             img0 = burst[0]
 
             # -- anscombe --
-            if cfg.use_anscombe:
-                img0 = anscombe_nmlz.forward(cfg,img0+0.5) - 0.5
+            # if cfg.use_anscombe:
+            #     img0 = anscombe_nmlz.forward(cfg,img0+0.5) - 0.5
 
             # denoising
             rec_img = model(img0)
 
             # -- anscombe --
-            if cfg.use_anscombe:
-                rec_img = anscombe_nmlz.backward(cfg,rec_img + 0.5) - 0.5
+            # if cfg.use_anscombe:
+            #     rec_img = anscombe_nmlz.backward(cfg,rec_img + 0.5) - 0.5
 
             # compare with stacked targets
             # rec_img = rescale_noisy_image(rec_img)

@@ -16,9 +16,9 @@ import torch.multiprocessing as mp
 
 # -- project code --
 import settings
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from pyutils.timer import Timer
 from datasets import load_dataset
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from learning.utils import save_model
 
 # -- [this folder] project code --
@@ -28,9 +28,10 @@ from .optim_io import load_optimizer
 from .sched_io import load_scheduler
 from .learn import train_loop,test_loop
 from .learn_n2n import train_loop_n2n,test_loop_n2n
+from .learn_mse import train_loop_mse,test_loop_mse
 from .ot_loss import *
 
-def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=0):
+def run_me(tr_method,rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=0):
     
     args = get_args()
     args.name = "default"
@@ -63,7 +64,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.blind = (B_grid_idx == 0)
     cfg.blind = False
     cfg.N = Ngrid[N_grid_idx]
-    cfg.N = 2
+    cfg.N = 5
     cfg.use_anscombe = True
 
     # -- noise 2 simulate parameters --
@@ -76,13 +77,13 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.frames = cfg.N
 
     # -- gaussian noise --
-    # noise_type = "g"
-    # cfg.noise_type = noise_type
-    # cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
-    # cfg.noise_params.ntype = cfg.noise_type
-    # noise_params = cfg.noise_params['g']
-    # noise_level = Ggrid[G_grid_idx]
-    # noise_level_str = f"{int(noise_level)}"
+    noise_type = "g"
+    cfg.noise_type = noise_type
+    cfg.noise_params['g']['stddev'] = Ggrid[G_grid_idx]
+    cfg.noise_params.ntype = cfg.noise_type
+    noise_params = cfg.noise_params['g']
+    noise_level = Ggrid[G_grid_idx]
+    noise_level_str = f"{int(noise_level)}"
 
     # -- heteroskedastic gaussian noise --
     # noise_type = "hg"
@@ -95,18 +96,18 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     # noise_level_str = f"{int(noise_params['read']),int(noise_params['shot'])}"
 
     # -- low-light noise --
-    noise_type = "qis"
-    cfg.noise_type = noise_type
-    cfg.noise_params['qis']['alpha'] = 4.0
-    cfg.noise_params['qis']['readout'] = 0.0
-    cfg.noise_params['qis']['nbits'] = 3
-    noise_params = cfg.noise_params['qis']
-    cfg.noise_params.ntype = cfg.noise_type
-    noise_level = noise_params['readout']
-    noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
+    # noise_type = "qis"
+    # cfg.noise_type = noise_type
+    # cfg.noise_params['qis']['alpha'] = 4.0
+    # cfg.noise_params['qis']['readout'] = 0.0
+    # cfg.noise_params['qis']['nbits'] = 3
+    # noise_params = cfg.noise_params['qis']
+    # cfg.noise_params.ntype = cfg.noise_type
+    # noise_level = noise_params['readout']
+    # noise_level_str = f"{int(noise_params['alpha']),int(noise_params['readout']),int(noise_params['nbits'])}"
 
     # -- batch info --
-    cfg.batch_size = 4
+    cfg.batch_size = 10
     cfg.init_lr = 1e-4
     cfg.unet_channels = 3
     cfg.input_N = cfg.N-1
@@ -118,6 +119,7 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     cfg.dynamic.random_eraser = False
     cfg.dynamic.frame_size = 128
     cfg.dynamic.total_pixels = cfg.dynamic.ppf * cfg.N
+    cfg.dynamic.nframe = cfg.N
     # cfg.dynamic.total_pixels = 6
     cfg.load = False
     print("This is to benchmark a new distribution class. We want to find the case when mL2 fails.")
@@ -190,8 +192,14 @@ def run_me(rank=0,Sgrid=[1],Ngrid=[3],nNgrid=1,Ggrid=[75.],nGgrid=1,ngpus=3,idx=
     # run_ot_v_displacement(cfg,criterion,loader.te)
     for epoch in range(cfg.current_epoch,cfg.epochs):
 
-        losses = train_loop_n2n(cfg,model,optimizer,criterion,loader.tr,epoch)
-        ave_psnr = test_loop_n2n(cfg,model,criterion,loader.te,epoch)
+        if tr_method == "mse":
+            losses = train_loop_mse(cfg,model,optimizer,criterion,loader.tr,epoch)
+            ave_psnr = test_loop_mse(cfg,model,criterion,loader.te,epoch)
+        elif tr_method == "n2n":
+            losses = train_loop_n2n(cfg,model,optimizer,criterion,loader.tr,epoch)
+            ave_psnr = test_loop_n2n(cfg,model,criterion,loader.te,epoch)
+        else: raise ValueError(f"Uknown training method [{tr_method}]")
+
         # losses = train_loop(cfg,model,optimizer,criterion,loader.tr,epoch)
         # ave_psnr = test_loop(cfg,model,criterion,loader.te,epoch)
         te_ave_psnr[epoch] = ave_psnr

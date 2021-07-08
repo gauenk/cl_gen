@@ -8,6 +8,7 @@ from .sun2009 import get_sun2009_dataset
 from .yiheng import get_eccv2020_dataset
 from .rebel2021 import get_rebel2021_dataset
 from .rots import get_rots_dataset
+from .kitti import get_kitti_dataset
 
 def load_dataset(cfg,cfg_type):
     return get_dataset(cfg,cfg_type)
@@ -16,7 +17,7 @@ def get_dataset(cfg,cfg_type):
 
     # added for backward compatibility 09-14-20
     ds_dict = cfg
-    exempt_types = ["denoising","simcl","simcl_cls","cls_3c","dynamic","single_denoising","dynamic-lmdb","default","rebel2021","dynamic-lmdb-burst","dynamic-lmdb-all"]
+    exempt_types = ["denoising","simcl","simcl_cls","cls_3c","dynamic","single_denoising","dynamic-lmdb","default","rebel2021","dynamic-lmdb-burst","dynamic-lmdb-all","kitti"]
     if not (cfg_type in exempt_types): ds_dict = cfg[cfg_type]
 
     if ds_dict.dataset.name.lower() == "mnist":
@@ -39,6 +40,8 @@ def get_dataset(cfg,cfg_type):
         return get_rebel2021_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "rots":
         return get_rots_dataset(cfg,cfg_type)
+    elif ds_dict.dataset.name.lower() == "kitti":
+        return get_kitti_dataset(cfg,cfg_type)
     else:
         raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 

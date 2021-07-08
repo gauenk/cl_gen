@@ -1,3 +1,36 @@
+"""
+UUID Cache
+
+Converts a database with many keys into
+a uuid string to be saved onto a file.
+
+UUID_DATABASE = 
+
+   key_1    |   key_1    | ... |    uuid
+  v_{1,1}   |   v_{1,2}  | ... |   uuid_{1}  
+  v_{2,1}   |   v_{2,2}  | ... |   uuid_{2}  
+  ...
+  v_{N,1}   |   v_{N,2}  | ... |   uuid_{N}  
+
+
+--- Functionality ---
+
+- dictionary <-> uuid
+  - write uuid specific filename
+  - read u
+- compare two dictionaries
+- 
+
+root_directory/
+    uuid_database_{version}.json
+    uuid_str_1
+    uuid_str_2
+    ...
+    uuid_str_N
+
+uuid_database_{version}.json stores the UUID_DATABASE (pic above)
+
+"""
 
 import json
 import uuid as uuid_gen
@@ -32,11 +65,6 @@ def get_config_from_uuid(exp_uuid):
         if uuid == exp_uuid: return config
     return -1 # no match
 
-def compare_config(existing_config,proposed_config):
-    for key,value in existing_config.items():
-        if proposed_config[key] != value: return False
-    return True
-
 def get_uuid(exp_config):
     uuid = get_uuid_from_config(exp_config)    
     if uuid == -1:
@@ -48,6 +76,11 @@ def get_uuid(exp_config):
     else:
         if verbose: print(f"Exp Config Already has a UUID {uuid}")
         return uuid
+
+def compare_config(existing_config,proposed_config):
+    for key,value in existing_config.items():
+        if proposed_config[key] != value: return False
+    return True
 
 def read_uuid_file(cfg):
     if verbose: print(f"Reading: [{cfg.uuid_file}]")
@@ -106,7 +139,6 @@ def append_new_pair(cfg,new_pair):
         if existing_config == -1 and verbose:
             print(f"Config already exists")
             print_formatted_exp_info(new_pair.config)
-
 
 def get_config_from_uuid_list(uuids):
     configs = []

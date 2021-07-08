@@ -20,7 +20,7 @@ from torch.utils.tensorboard import SummaryWriter
 import settings
 from pyutils.timer import Timer
 from datasets import load_dataset
-from pyutils.misc import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
+from pyutils import np_log,rescale_noisy_image,mse_to_psnr,count_parameters
 from learning.utils import save_model
 
 # -- [this folder] project code --
@@ -60,7 +60,7 @@ def run_me(rank=0,Sgrid=[50000],Ngrid=[5],nNgrid=1,Ggrid=[25.],nGgrid=1,ngpus=3,
     # cfg.dataset.name = "cifar10"
     cfg.dataset.name = "voc"
     cfg.blind = (B_grid_idx == 0)
-    cfg.N = 2
+    cfg.N = 5
     cfg.dynamic.frames = cfg.N
 
     # -- gaussian noise --
