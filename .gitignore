@@ -9,7 +9,7 @@ logs/
 *pdf
 \.ipynb*
 Pipfile\.lock
-cache/
+/cache/
 reports/
 runs/
 *events.out*
