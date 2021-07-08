@@ -57,11 +57,19 @@ def get_noise_config(cfg,name):
 def create_noise_level_grid(cfg):
     noise_configs = []
 
-    # -- gaussian noise --
+    # -- no noise --
     noise_type = 'none'
     ns = copy.deepcopy(cfg.noise_params[noise_type])
     ns['ntype'] = noise_type
     ns['name'] = "clean"
+    ns = edict(ns)
+    noise_configs.append(ns)
+
+    # -- no noise --
+    noise_type = 'none'
+    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns['ntype'] = noise_type
+    ns['name'] = "none"
     ns = edict(ns)
     noise_configs.append(ns)
 
