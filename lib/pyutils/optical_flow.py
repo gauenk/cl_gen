@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torchvision.transforms.functional as tvF
 
 def align_burst_from_block(burst,block,nblocks,mtype):
+    print("Please switch to align/xforms for these functions!")
     if mtype == "global":
         return align_burst_from_block_global(burst,block,nblocks)
     elif mtype == "local":
@@ -17,6 +18,7 @@ def align_burst_from_block(burst,block,nblocks,mtype):
         raise ValueError(f"Uknown motion type [{mtype}]")
 
 def align_burst_from_flow(burst,flow,nblocks,mtype):
+    print("Please switch to align/xforms for these functions!")
     if mtype == "global":
         return align_burst_from_flow_global(burst,flow,nblocks)
     elif mtype == "local":
@@ -25,6 +27,7 @@ def align_burst_from_flow(burst,flow,nblocks,mtype):
         raise ValueError(f"Uknown motion type [{mtype}]")
 
 def align_burst_from_block_global(bursts,blocks,nblocks):
+    print("Please switch to align/xforms for these functions!")
     T,B,FS = bursts.shape[0],bursts.shape[1],bursts.shape[-1]
     ref_t = T//2
     tiles = tile_across_blocks(bursts,nblocks)
@@ -37,16 +40,19 @@ def align_burst_from_block_global(bursts,blocks,nblocks):
     return crops
 
 def align_burst_from_flow_global(bursts,flow,nblocks):
+    print("Please switch to align/xforms for these functions!")
     ref_blocks = global_flow_to_blocks(flow,nblocks)
     t_blocks = global_blocks_ref_to_frames(ref_blocks,nblocks)
     return align_burst_from_block_global(bursts,blocks,nblocks)
 
 def global_flow_frame_blocks(flow,nblocks):
+    print("Please switch to align/xforms for these functions!")
     ref_blocks = global_flow_to_blocks(flow,nblocks)
     t_blocks = global_blocks_ref_to_frames(ref_blocks,nblocks)
     return t_blocks
 
 def global_blocks_ref_to_frames(ref_blocks_i,nblocks):
+    print("Please switch to align/xforms for these functions!")
     ref_blocks = ref_blocks_i.clone()
     nbatches,nframes = ref_blocks.shape[:2]
     ref_t = nframes//2
@@ -74,7 +80,7 @@ def global_blocks_ref_to_frames(ref_blocks_i,nblocks):
     return frame_blocks
 
 def global_flow_to_blocks(_flow,nblocks):
-    """
+    r"""
     flow.shape = (Num Images in Batch, Num of Frames - 1, 2)
 
     "flow" is a integer direction of motion between two frames
@@ -88,6 +94,7 @@ def global_flow_to_blocks(_flow,nblocks):
        indices[b,t] is the integer index representing the specific
        neighbor for a given flow
     """
+    print("Please switch to align/xforms for these functions!")
     flow = _flow.clone()
     B,Tm1 = flow.shape[:2]
     T = Tm1 + 1
@@ -112,6 +119,7 @@ def global_blocks_to_flow(blocks,nblocks):
     """
     flow 
     """
+    print("Please switch to align/xforms for these functions!")
     B,T = blocks.shape[:2]
     grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
     flow = []
@@ -124,7 +132,7 @@ def global_blocks_to_flow(blocks,nblocks):
             coords.append(coord)
         coords = np.stack(coords)
         coords = coords[:,::-1] # -- x <-> y swap --
-        coords[:,1] *= -1 # -- Matrix_dir -> Spatial_dir --
+        coords[:,0] *= -1 # -- Matrix_dir -> Spatial_dir --
         # -- compute the flow --
         coords[:,0] = np.ediff1d(coords[:,0],0)
         coords[:,1] = np.ediff1d(coords[:,1],0)
@@ -135,6 +143,7 @@ def global_blocks_to_flow(blocks,nblocks):
     return flow
 
 def global_blocks_to_pixel(blocks,nblocks):
+    print("Please switch to align/xforms for these functions!")
     B,T = blocks.shape[:2]
     grid = np.arange(nblocks**2).reshape(nblocks,nblocks)
     coords = []

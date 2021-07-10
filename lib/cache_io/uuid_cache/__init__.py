@@ -50,7 +50,7 @@ class UUIDCache():
         self.root = root
         self.version = version
         self.uuid_file_skel = "uuid_database_v{:s}.json"
-        self.init_uuid_file()
+        # self.init_uuid_file()
 
     @property
     def uuid_file(self):
@@ -70,6 +70,15 @@ class UUIDCache():
 
     def get_uuid_from_config(self,exp_config):
         return get_uuid_from_config(self.data,exp_config)
+
+    def get_config_from_uuid(self,uuid):
+        return get_config_from_uuid(self.data,uuid)
+
+    def get_config_from_uuid_list(self,uuids):
+        configs = []
+        for uuid in uuids:
+            configs.append(self.get_config_from_uuid(uuid))
+        return configs
 
     def init_uuid_file(self):
         if VERBOSE: print(f"Init [{cfg.uuid_file}]")
@@ -100,5 +109,7 @@ class UUIDCache():
         write_uuid_file(self.uuid_file,data)
         print(f"Upgraded UUID cache version from v{self.version-1} to v{self.version}")
         
+    def __str__(self):
+        return f"UUIDCache version [{self.version}] with file at [{self.uuid_file}]"
 
 

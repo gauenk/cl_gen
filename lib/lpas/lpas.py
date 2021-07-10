@@ -45,8 +45,13 @@ def lpas_spoof(burst,motion,nblocks,mtype,acc):
     # print_tensor_stats("[lpas]: aligned[T/2] - burst[T/2]",aligned[T//2] - burst[T//2])
     return scores,aligned
 
-def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",
-                to_align=None,noise_info=None):
+def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",,noise_info=None):
+    return lpas_search_testing(burst,ref_frame,nblocks,
+                               motion=motion,method=method,
+                               to_align=None,noise_info=noise_info)
+
+def lpas_search_testing(burst,ref_frame,nblocks,motion=None,method="simple",
+                        to_align=None,noise_info=None):
     """
     cfg: edict with parameters
     burst: shape: T,B,C,H,W (T = number of frames, B = batch)
@@ -327,7 +332,7 @@ def search_across_frame(t,blocks_i,fixed_frames,optim,patches,ref_grid,motion,B,
 
     # -- eval over grid --
     scores,blocks = optim.sample(patches,block_grids,K=K)
-    topk_index_t = blocks[:,:,t]
+    topk_index_t = blocks[:,:,t] # why use "index" instead of "blocks"?
     blocks_i[str(t)] = topk_index_t #.append(topk_index_t)
 
 def simple_search(optim,patches):

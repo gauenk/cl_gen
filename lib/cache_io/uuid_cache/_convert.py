@@ -15,10 +15,4 @@ def get_config_from_uuid(data,exp_uuid):
         if uuid == exp_uuid: return config
     return -1 # no match
 
-def get_config_from_uuid_list(uuids):
-    configs = []
-    for uuid in uuids:
-        configs.append(get_config_from_uuid(uuid))
-    return configs
-
 
