@@ -45,7 +45,6 @@ def test_global_block_to_flow():
     def run_check(flow,blocks,nblocks):
         est_flow = global_blocks_to_flow(blocks,nblocks)
         delta = torch.sum(torch.abs(est_flow-flow)).item()
-        print(delta,est_flow,flow,blocks)
         assert np.isclose(delta,0),"No error"
 
     def test1():

@@ -58,7 +58,14 @@ def get_g_noise(params):
     """
     Noise Type: Gaussian 
     """
-    gaussian_noise = AddGaussianNoise(params['mean'],params['stddev'])
+    std = None
+    if 'std' in params.keys(): std = params['std']
+    else:
+        print("Please change gaussian noise level from [stddev] to [std]")
+        std = params['stddev']
+    mean = 0.
+    if 'mean' in params.keys(): mean = params['mean']
+    gaussian_noise = AddGaussianNoise(mean,std)
     return gaussian_noise
 
 def get_hg_noise(params):

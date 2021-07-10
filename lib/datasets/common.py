@@ -8,8 +8,13 @@ from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
+def return_optional(pydict,field,default):
+    if field in pydict.keys(): return pydict[field]
+    else: return default
+
 def get_loader(cfg,data,batch_size,mode):
-    if cfg.use_ddp:
+    use_ddp = return_optional(cfg,"use_ddp",False)
+    if use_ddp:
         loader = get_loader_ddp(cfg,data)
     else:
         loader = get_loader_serial(cfg,data,batch_size,mode)
@@ -21,15 +26,21 @@ def get_loader_serial(cfg,data,batch_size,mode):
     if 'drop_last' in cfg.keys(): drop_last = edict(cfg.drop_last)
     else: drop_last = edict({'tr':True,'val':True,'te':True})
 
+    num_workers = return_optional(cfg,"num_workers",1)
     loader_kwargs = {'batch_size': batch_size,
                      'shuffle':True,
                      'drop_last':True,
-                     'num_workers':cfg.num_workers,
+                     'num_workers':num_workers,
                      'pin_memory':True}
-    if cfg.set_worker_seed:
+    set_worker_seed = return_optional(cfg,"set_worker_seed",False)
+    if set_worker_seed:
         loader_kwargs['worker_init_fn'] = set_torch_seed
-    if cfg.use_collate:
-        if cfg.dataset.triplet_loader:
+
+    use_collate = return_optional(cfg,"use_collate",True)
+    triplet_loader = return_optional(cfg,"triplet_loader",False)
+    dict_loader = return_optional(cfg,"dict_loader",True)
+    if use_collate:
+        if triplet_loader:
             loader_kwargs['collate_fn'] = collate_triplet_fn
         elif cfg.dataset.dict_loader:
             loader_kwargs['collate_fn'] = collate_dict

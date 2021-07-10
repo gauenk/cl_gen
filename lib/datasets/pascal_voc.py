@@ -27,7 +27,7 @@ from torch.utils.data.distributed import DistributedSampler
 from settings import ROOT_PATH
 from pyutils.timer import Timer
 from datasets.transforms import get_dynamic_transform,get_noise_transform
-from .common import get_loader
+from .common import get_loader,return_optional
 
 class DenoiseVOC(VOCDetection):
 
@@ -337,12 +337,12 @@ def get_voc_dataset(cfg,mode):
         data.te = ClVOC(root,cfg.cl.image_size,train=False,low_light=low_light)
     elif mode == "simcl" or mode == "denoising":
         batch_size = cfg.batch_size
-        N = cfg.N
-        load_res = cfg.dataset.load_residual
-        noise_type = cfg.noise_type
-        noise_params = cfg.noise_params[noise_type]
+        N = cfg.nframes
+        load_res = return_optional(cfg.dataset,"load_residual",False)
+        # noise_type = cfg.noise_type
+        # noise_params = cfg.noise_params[noise_type]
         noise_info = cfg.noise_params
-        dynamic = cfg.dynamic
+        dynamic_info = cfg.dynamic_info
         rtype = 'dict' if cfg.dataset.dict_loader else 'list'
         data.tr = DenoiseVOC(root,N,noise_info,image_set='train',rtype=rtype)
         data.val = DenoiseVOC(root,N,noise_info,image_set='train',rtype=rtype)
@@ -351,12 +351,11 @@ def get_voc_dataset(cfg,mode):
         data.te = DenoiseVOC(root,N,noise_info,image_set='val',rtype=rtype)
     elif mode == "dynamic":
         batch_size = cfg.batch_size
-        N = cfg.N
-        load_res = cfg.dataset.load_residual
-        noise_type = cfg.noise_type
+        N = cfg.nframes
+        load_res = return_optional(cfg.dataset,"load_residual",False)
         noise_params = cfg.noise_params[noise_type]
         noise_info = cfg.noise_params
-        dynamic_info = cfg.dynamic
+        dynamic_info = cfg.dynamic_info
         bw = cfg.dataset.bw
         data.tr = DynamicVOC(root,"2012","trainval",N,noise_info,dynamic_info,load_res,bw,rtype)
         D = -1
@@ -370,8 +369,8 @@ def get_voc_dataset(cfg,mode):
 
     elif mode == "dynamic-lmdb-all":
         batch_size = cfg.batch_size
-        N = cfg.N
-        load_res = cfg.dataset.load_residual
+        N = cfg.nframes
+        load_res = return_optional(cfg.dataset,"load_residual",False)
         noise_type = cfg.noise_type
         noise_params = cfg.noise_params[noise_type]
         dynamic = cfg.dynamic
