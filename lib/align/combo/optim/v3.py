@@ -8,8 +8,12 @@ from joblib import delayed
 # -- pytorch imports --
 import torch
 
+# -- numba imports --
+from numba import jit,prange
+
 # -- project imports --
 from pyutils import create_meshgrid,tile_patches
+from align import torch_to_numpy
 from align.xforms import blocks_to_flow
 from align._parallel import ProgressParallel
     
@@ -54,7 +58,7 @@ def run_patch_batch_parallel(patches,masks,evaluator,
     blocks = pParallel(delayed_fxn(patches[[i]],masks[[i]],evaluator,
                                    nblocks,iterations,subsizes,K)
                        for i in range(nimages))
-    blocks = torch.cat(blocks,dim=1) # nimages, npix, nframes-1, 2
+    blocks = torch.cat(blocks,dim=0) # nimages, npix, nframes-1, 2
     return blocks
 
 def run_patch_batch_serial(patches,masks,evaluator,
@@ -65,8 +69,8 @@ def run_patch_batch_serial(patches,masks,evaluator,
     for b in range(nimages):
         flow_b = run(patches[[b]],masks[[b]],evaluator,
                        nblocks,iterations,subsizes,K)        
-        blocks.append(flow_b)
-    flows = torch.cat(flow) # nimages, npix, nframes-1, 2
+        flows.append(flow_b)
+    flows = torch.cat(flows) # nimages, npix, nframes-1, 2
     return flows
 
 def run(patches,masks,evaluator,
@@ -93,18 +97,10 @@ def run(patches,masks,evaluator,
         topK_blocks = split_frame_search(patches,masks,evaluator,curr_blocks,
                                          exh_brange,nblocks,K)
         
-        # -- pick top arrangement search over rand subsets of frames --
-        curr_blocks = rand_subset_search(patches,masks,evaluator,curr_blocks,
-                                         topK_blocks,nblocks,subsizes)
+        # # -- pick top arrangement search over rand subsets of frames --
+        # curr_blocks = rand_subset_search(patches,masks,evaluator,curr_blocks,
+        #                                  topK_blocks,nblocks,subsizes)
 
-    # return:
-    # -- curr_blocks(torch.LongTensor) shape (nimages,nframes,nsegs) 
-    #    -- each "long" represents the index from exhaustive search
-    # -- "flow" (torch.LongTensor) shape (nimages,nframes,nsegs,2)
-    #    -- each *pair of ints* represents the _nnf_ of each
-    #       *segmentation* for each *frame*
-    # curr_blocks = rearrange(curr_blocks,'i s t -> i s t')
-    # flow = rearrange(flow,'(i s) t two -> t two',i=nimages)
     flow = blocks_to_flow(curr_blocks,nblocks) # 'i s t two'
     return flow
 
@@ -134,10 +130,13 @@ def split_frame_search(patches,masks,evaluator,curr_blocks,brange,nblocks,K):
     """
     # -- shapes and init --
     nimages,nsegs,nframes = patches.shape[:3]
-    ones = torch.ones((nimages,nsegs,1))
+    ones = np.ones((nimages,nsegs,1))
     topk_blocks = init_topK_split_search(nimages,nsegs,nframes,K)
     assert nimages == 1,"Only batchsize 1 right now."
     ref_block = get_ref_block(nblocks)
+
+    brange = torch_to_numpy(brange)
+    curr_blocks = torch_to_numpy(curr_blocks)
 
     for t in range(nframes):
         if t == nframes//2:
@@ -165,6 +164,10 @@ def rand_subset_search(patches,masks,evaluator,curr_blocks,brange,nblocks,subsiz
     # -- 2.) merge results periodically (e.g. take best one so far) --
     # -- 3.) alternate between (1) and (2)
     nimages,nsegs,nframes = patches.shape[:3]
+
+    brange = torch_to_numpy(brange)
+    curr_blocks = torch_to_numpy(curr_blocks)
+
     for size in subsizes:
         frames = repeat(npr.choice(nframes,size=size),'z -> i s z',i=nimages,s=nsegs)
         # frames = npr.choice(nframes,size=(nimages,nsegs,size))
@@ -177,6 +180,7 @@ def rand_subset_search(patches,masks,evaluator,curr_blocks,brange,nblocks,subsiz
 
     return curr_blocks
 
+# @jit(nopython=True)
 def select_block_ranges(frames,brange,curr_blocks):
     r"""
     frames: [ frame_index_1, frame_index_2, ..., frame_index_F ]
@@ -190,30 +194,33 @@ def select_block_ranges(frames,brange,curr_blocks):
     
     sranges[nested lists] shape = (nimages,nsegs,nframes,*)
     """
+
+    def select_block_ranges_bs(frames,brange,curr_blocks):
+        srange,nframes = [],len(curr_blocks)
+        for f in range(nframes):
+            if f in frames:
+                brange_u = np.unique(brange[f])
+                selected_indices = np.atleast_1d(brange_u)
+            else:
+                selected_indices = np.atleast_1d(curr_blocks[f])
+            srange.append(list(selected_indices))
+        return srange
+    
     nimages = len(brange)
     nsegs = len(brange[0])
     nframes = len(brange[0][0])
-
     sranges = []
+    # sranges = [[[] for j in range(nsegs)] for i in range(nimages)]
     for b in range(nimages):
         sranges_b = []
         for s in range(nsegs):
-            inputs = [frames[b][s],brange[b][s],curr_blocks[b][s]]
-            srange_bs = select_block_ranges_bs(*inputs)
+            srange_bs = select_block_ranges_bs(frames[b][s],
+                                               brange[b][s],
+                                               curr_blocks[b][s])
+            # sranges[b][s] = srange_bs
             sranges_b.append(srange_bs)
         sranges.append(sranges_b)
     return sranges
-
-def select_block_ranges_bs(frames,brange,curr_blocks):
-    srange,nframes = [],len(curr_blocks)
-    for f in range(nframes):
-        if f in frames:
-            brange_u = np.unique(brange[f])
-            selected_indices = np.atleast_1d(brange_u)
-        else:
-            selected_indices = np.atleast_1d(curr_blocks[f])
-        srange.append(list(selected_indices))
-    return srange
 
 def mesh_blocks(brange):
     mesh = []

@@ -12,7 +12,7 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 import settings
-from align import compute_epe
+from align import compute_epe,compute_aligned_psnr
 import align.nnf as nnf
 import align.combo as combo
 import align.combo.optim as optim
@@ -38,7 +38,7 @@ def config():
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.dataset.name = "voc"
     cfg.dataset.dict_loader = True
-    cfg.batch_size = 1
+    cfg.batch_size = 5
     # cfg.dataset.load_residual = False
     # cfg.dataset.triplet_loader = True
     # cfg.dataset.bw = False
@@ -86,8 +86,8 @@ def test_nnf():
     check_parameters(nblocks,patchsize)
 
     # -- create evaluator
-    iterations,K = 1,2
-    subsizes = [2,1]
+    iterations,K = 5,3
+    subsizes = [1,1,1]
     evaluator = combo.eval_scores.EvalBlockScores(score_fxn,patchsize,100,None)
 
     # -- iterate over images --
@@ -125,24 +125,6 @@ def test_nnf():
         isize = edict({'h':H,'w':W})
         aligned_est = align_from_flow(dyn_clean,flow_est,patchsize,isize=isize)
 
-        # -- eval --
-        pad = 2*patchsize
-        cc_aligned_nnf = tvF.center_crop(aligned_nnf,(H-pad,W-pad))
-        cc_static_clean = tvF.center_crop(static_clean,(H-pad,W-pad))
-
-        print("aligned_nnf.shape ",aligned_nnf.shape)
-        delta = torch.sum(torch.abs(cc_static_clean.cpu() - cc_aligned_nnf.cpu())).item()
-        print("static_clean.shape ",static_clean.shape)
-        print("delta ", delta)
-
-        # -- print for fun --
-        # print("[patches.shape]: ",patches.shape)
-        # print("[nnf_pix.shape]: ",nnf_pix.shape)
-        # print("[nnf_pix_best.shape]: ",nnf_pix_best.shape)
-        # # print("[nnf_flow.shape]: ",nnf_flow.shape)
-        # # print("[est_flow.shape]: ",est_flow.shape)
-        # print("[flow.shape]: ",flow.shape)
-
         # -- compare nnf v.s. est --
         est_of = compute_epe(flow_est,flow_gt)
         nnf_of = compute_epe(flow_nnf,flow_gt)
@@ -151,6 +133,24 @@ def test_nnf():
         print(est_of)
         print(nnf_of)
         print(est_nnf)
+
+        # -- eval --
+
+        pad = 2*patchsize
+        isize = edict({'h':H-pad,'w':W-pad})
+        psnr_nnf = compute_aligned_psnr(aligned_nnf,static_clean,isize)
+        psnr_est = compute_aligned_psnr(aligned_est,static_clean,isize)
+        print("PSNR Values")
+        print(psnr_nnf)
+        print(psnr_est)
+
+        # cc_aligned_nnf = tvF.center_crop(aligned_nnf,(H-pad,W-pad))
+        # cc_static_clean = tvF.center_crop(static_clean,(H-pad,W-pad))
+
+        # print("aligned_nnf.shape ",aligned_nnf.shape)
+        # delta = torch.sum(torch.abs(cc_static_clean.cpu() - cc_aligned_nnf.cpu())).item()
+        # print("static_clean.shape ",static_clean.shape)
+        # print("delta ", delta)
 
         # -- compare psnr of nnf v.s. est aligned images --
         # nnf_flow_best = nnf_flow[...,0,:]
