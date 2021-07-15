@@ -1,6 +1,16 @@
 
 import torch
 import numpy as np
+import torch.nn.functional as F
+
+
+def compute_epe(tensor_a,tensor_b):
+    # nimages,npix,nframes-1,two
+    tensor_a = tensor_a.cpu().type(torch.float)
+    tensor_b = tensor_b.cpu().type(torch.float)
+    epe = F.mse_loss(tensor_a,tensor_b,reduce='none')
+    epe = torch.mean(epe,dims=(1,2,3))
+    return epe
 
 def torch_to_numpy(tensor):
     if torch.is_tensor(tensor):

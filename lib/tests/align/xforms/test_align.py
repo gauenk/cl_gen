@@ -20,20 +20,25 @@ def test_align():
 
     def verify_aligned(aligned,burst,ps):
         nframes = aligned.shape[0]
-        c_aligned = tvF.center_crop(aligned,ps,ps)
-        ref = tvF.center_crop(burst[nframes//2],ps,ps)
+        c_aligned = tvF.center_crop(aligned,(ps,ps))
+        ref = tvF.center_crop(burst[nframes//2],(ps,ps))
         for t in range(nframes):
-            frame = c_aligned[t]
+            frame = c_aligned[t,0]
             delta = torch.sum(torch.abs(frame - ref)).item()
             message = f"No error frame [{t}] with values[{c_aligned[t]}] v.s. [{ref}]"
             assert np.isclose(delta,0),message
 
     def run_check(ex):
 
-        blocks_aligned = align_from_blocks(ex.burst,ex.blocks,ex.nblocks,ex.isize)
+        blocks_aligned = align_from_blocks(ex.burst,ex.blocks,
+                                           ex.nblocks,
+                                           ex.patchsize,
+                                           isize=ex.isize)
         verify_aligned(blocks_aligned,ex.burst,ex.patchsize)
 
-        flow_aligned = align_from_flow(ex.burst,ex.flow,ex.nblocks,ex.isize)
+        flow_aligned = align_from_flow(ex.burst,ex.flow,
+                                       ex.patchsize,
+                                       isize=ex.isize)
         verify_aligned(flow_aligned,ex.burst,ex.patchsize)
 
         pix_aligned = align_from_pix(ex.burst,ex.pix,ex.nblocks)
@@ -57,8 +62,8 @@ def test_align():
 
     test1()
     test2()
-    test3()
-    test4()
+    # test3()
+    # test4()
 
 
     

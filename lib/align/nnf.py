@@ -14,16 +14,24 @@ from pyutils import tile_patches
 
 def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
     T,B,C,H,W = burst.shape
+    npix = H*W
     ref_img = burst[ref_t]
     vals,locs = [],[]
     for t in range(T):
-        if t == ref_t: continue
-        img = burst[t]
-        vals_t,locs_t = compute_batch_nnf(ref_img,img,patchsize,K,gpuid)
+        if t == ref_t:
+            vals_t = torch.zeros((1,B,H,W,K))
+            indices = np.c_[np.unravel_index(np.arange(npix),(H,W))]
+            indices = indices.reshape(H,W,2)
+            locs_t = repeat(indices,'h w two -> 1 b h w k two',b=B,k=K)
+        else:
+            img = burst[t]
+            vals_t,locs_t = compute_batch_nnf(ref_img,img,patchsize,K,gpuid)
         vals.append(vals_t)
         locs.append(locs_t)
     vals = np.concatenate(vals,axis=0)
     locs = np.concatenate(locs,axis=0)
+    locs[...,:] = locs[...,::-1] # row,cols -> cols,rows
+    print("burst_nnf.shape", locs.shape)
     return vals,locs
 
 def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
@@ -47,12 +55,12 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
     B,T = 1,1
 
     # -- tile patches --
-    query = repeat(prop_img,'c h w -> 1 1 c h w')
+    query = repeat(ref_img,'c h w -> 1 1 c h w')
     q_patches = tile_patches(query,patchsize).pix.cpu().numpy()
     B,N,R,ND = q_patches.shape
     query = rearrange(q_patches,'b t r nd -> (b t r) nd')
 
-    db = repeat(ref_img,'c h w -> 1 1 c h w')
+    db = repeat(prop_img,'c h w -> 1 1 c h w')
     db_patches = tile_patches(db,patchsize).pix.cpu().numpy()
     Bd,Nd,Rd,NDd = db_patches.shape
     database = rearrange(db_patches,'b t r nd -> (b t r) nd')

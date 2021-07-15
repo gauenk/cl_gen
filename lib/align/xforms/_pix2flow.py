@@ -1,6 +1,6 @@
 # -- python imports --
 import numpy as np
-from einops import rearrange
+from einops import rearrange,repeat
 
 # -- numba imports --
 from numba import jit,prange
@@ -13,17 +13,13 @@ from align._utils import torch_to_numpy
 
 def pix_to_flow(pix):
 
-    # -- [pix] reshape to 3-dim --
-    shape = list(pix.shape)
-    nframes = shape[-2]
-    pix = pix.reshape(-1,nframes,2)
-    nsamples,nframes,two = pix.shape
+    # -- check sizes --
+    nimages,npix,nframes,two = pix.shape
 
     # -- create blocks --
+    pix = rearrange(pix,'i p t two -> (i p) t two')
     flow = pix_to_flow_main(pix)
-
-    # -- expand shape --
-    flow = shape_flow_ndims(flow,shape[:2])
+    flow = rearrange(flow,'(i p) tm1 two -> i p tm1 two',i=nimages)
 
     # -- to tensor --
     flow = torch.LongTensor(flow)
@@ -35,12 +31,16 @@ def pix_to_flow_main(pix):
     # -- compute deltas to ref --
     nframes = pix.shape[-2]
     ref_frame = nframes // 2
-    delta = pix - pix[:,ref_frame]
+    pix_ref = repeat(pix[:,ref_frame],'s two -> s t two',t=nframes)
+    delta = pix - pix_ref
     flow = delta.clone()
 
     # -- get flows-to-_reference_ not frames-to-neighbor --
     flow[:,:ref_frame] = flow[:,1:ref_frame+1] - flow[:,:ref_frame]
     flow[:,ref_frame+1:] = flow[:,ref_frame+1:] - flow[:,ref_frame:-1]
+
+    # -- convert _image_ coords to _object_ coords
+    flow[...,1] = -flow[...,1]
 
     # -- remove middle event --    
     left = flow[:,:ref_frame]

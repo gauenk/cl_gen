@@ -7,7 +7,8 @@ import numpy as np
 from align.xforms import pix_to_flow
 
 # -- testing imports --
-from tests.align.xforms._examples import get_example
+from tests.align.xforms._onepix_examples import get_example as get_onepix_example
+from tests.align.xforms._align_examples import get_example as get_multipix_example
 
 #
 # Testing
@@ -30,19 +31,25 @@ def test_pix_to_flow():
         assert np.isclose(delta,0),f"No error {est_flow} vs {flow}"
 
     def test1():
-        ex = get_example("example_1")
+        ex = get_onepix_example("example_1")
+        run_check(ex.pix,ex.flow)
+
+        ex = get_multipix_example("example_1")
         run_check(ex.pix,ex.flow)
 
     def test2():
-        ex = get_example("example_2")
+        ex = get_onepix_example("example_2")
+        run_check(ex.pix,ex.flow)
+
+        ex = get_multipix_example("example_2")
         run_check(ex.pix,ex.flow)
 
     def test3():
-        ex = get_example("example_3")
+        ex = get_onepix_example("example_3")
         run_check(ex.pix,ex.flow)
 
     def test4():
-        ex = get_example("example_4")
+        ex = get_onepix_example("example_4")
         run_check(ex.pix,ex.flow)
 
 

@@ -54,15 +54,14 @@ def blocks_to_flow_serial(blocks,nblocks):
 
 def blocks_to_flow(blocks,nblocks):
 
-    # -- n-dims to 3-dims --
-    blocks,shape = utils.shape_blocks_3dims(blocks)
+    # -- required dims --
+    nimages,npix,nframes = blocks.shape
 
     # -- compute conversion --
     blocks = torch_to_numpy(blocks)
+    blocks = rearrange(blocks,'i p t -> (i p) t')
     flow = blocks_to_flow_numba(blocks,nblocks)
-
-    # -- 3-dims to n-dims --
-    flow = utils.shape_flow_ndims(flow,shape)
+    flow = rearrange(flow,'(i p) tm1 two -> i p tm1 two',i=nimages)
 
     # -- back to torch --
     flow = torch.LongTensor(flow)

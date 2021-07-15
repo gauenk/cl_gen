@@ -60,23 +60,17 @@ def flow_to_blocks_serial(_flow,nblocks):
 
 def flow_to_blocks(flow,nblocks):
 
-    # -- reshape to 3-dim --
-    shape = list(flow.shape)
-    Tm1 = shape[-2]
-    flow = flow.reshape(-1,Tm1,2)
-    S,T,two = flow.shape
+    # -- check shapes --
+    nimages,npix,nframes_minus_1,two = flow.shape
 
-    # -- ensure ndarray --
+    # -- ensure int64 ndarray --
     flow = torch_to_numpy(flow)
+    flow = flow.astype(np.int64)
 
     # -- create blocks --
-    flow = flow.astype(np.int64)
+    flow = rearrange(flow,'i p tm1 two -> (i p) tm1 two')
     blocks = flow_to_blocks_numba(flow,nblocks)
-
-    # -- expand shape --
-    block_shape = shape[:-1]
-    block_shape[-1] += 1
-    blocks = blocks.reshape(block_shape)
+    blocks = rearrange(blocks,'(i p) t -> i p t',i=nimages)
 
     # -- to tensor --
     blocks = torch.LongTensor(blocks)
@@ -131,7 +125,12 @@ def flow_to_blocks_numba(_flow,nblocks):
     indices = np.zeros((B,T),dtype=np.int64)
     for b in prange(B):
         flow_b = flow[b]
-        flow_b[:,0] *= -1 # -- spatial dir. to image coordinates (dx flips, dy same) --
+        # convert the 
+        #       _spatial_  _object_ motion
+        # into
+        #      _image coordinate_ of _top-left frame_ 
+        # (dx flips, dy same) <==> (dx flips for _object_ to _top-left_) (dy flips twice)
+        flow_b[:,0] *= -1 
         left = ref_bl - np_rcumsum(flow_b[:ref_t]) # -- moving backward
         right = np_2dcumsum(flow_b[ref_t:]) + ref_bl # -- moving forward
         left = left.reshape(-1,2)

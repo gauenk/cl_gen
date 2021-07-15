@@ -9,58 +9,29 @@ import torch
 from align._utils import torch_to_numpy
 from ._utils import per_pixel_centers,tile_to_ndims
 
-def parse_inputs(isize,nframes,centers):
-    print("Decrepcated.")
+def parse_inputs(nimages,isize,centers):
     if isize is None and centers is None:
         raise TypeError("Either isize or centers must not be None.")
     if not(centers is None): return centers
-    else: return per_pixel_centers(isize,nframes)
+    else:
+        centers = per_pixel_centers(isize)
+        centers = np.broadcast_to(centers,(nimages,) + centers.shape)
+        return centers
 
 def flow_to_pix(flow,centers=None,isize=None):
 
-    # -- [old] get centers from inputs --
-    # nframes = flow.shape[-2]+1
-    # centers = parse_inputs(isize,nframes,centers)
-    # centers = tile_to_ndims(centers,flow.shape[:-2])
-
-    # -- [new] get centers from inputs --
-    print("flow.shape",flow.shape)
-    nframes = flow.shape[-2] + 1
-    npix = flow.shape[-3] # new!
-    if not(isize is None):
-        assert npix == isize.h*isize.w,"Num of pixels should match."
-    if centers is None:
-        print("CREATING CENTER")
-        centers = per_pixel_centers(isize,nframes)
-    if centers.ndim == 2:
-        centers = tile_to_ndims(centers,flow.shape[:-2])
-    print("[post ndim check] ",centers.shape)
-
-    # -- checking --
-    assert centers.shape[-2] == flow.shape[-3], "num of pixels should match."
-    # assert centers.shape[-1] == flow.shape[-3], "num of pixels should match."
-
-    # -- [flow] reshape to 3-dim --
-    shape = list(flow.shape)
-    nframes_minus_1 = shape[-2]
-    flow = flow.reshape(-1,nframes_minus_1,2)
-    nsamples,nframes_minus_1,two = flow.shape
-
-    # -- [centers] reshape to 2-dim --
-    cshape = list(centers.shape)
-    centers = centers.reshape(-1,2)
-    nsamples,two = centers.shape
+    # -- check shapes --
+    nimages,npix,nframes_minus_1,two = flow.shape
+    centers = parse_inputs(nimages,isize,centers)
+    c_nimages,c_npix,two = centers.shape
+    assert nimages == c_nimages,"num of images must be eq."
+    assert npix == c_npix,"num of pixels must be eq."
 
     # -- create blocks --
-    print("flow.shape",flow.shape)
+    flow = rearrange(flow,'i p tm1 two -> (i p) tm1 two')
+    centers = rearrange(centers,'i p two -> (i p) two')
     pix = flow_to_pix_torch(flow,centers)
-    print("centers.shape",centers.shape)
-    print("pix.shape",pix.shape)
-
-    # -- expand shape --
-    pix_shape = shape
-    pix_shape[-2] += 1
-    pix = pix.reshape(pix_shape)
+    pix = rearrange(pix,'(i p) t two -> i p t two',i=nimages)
 
     # -- to tensor --
     pix = pix.type(torch.long)
@@ -79,12 +50,29 @@ def flow_to_pix_torch(flow,centers):
     zeros = torch.zeros((nsamples,1,2))
     left_idx = slice(None,nframes//2)
     right_idx = slice(nframes//2,None)
+
+    # -- change from _spatial_ _object_ motion into _image coords_ _object_ motion
+    flow[...,1] = -flow[...,1] 
+    
+    # -- swap dx and dy --
+    
+
+    r"""
+    go from
+
+        "x -> x -> x*" to get "sum(->,->), sum(->)"
+
+    1. (1st flip) the first element is _further_ from ref than the left_idx[-1] element
+    2. The cumulative sum goes from single arrow to sum of arrows
+    3. (2nd flip) back to original order
+    4. (negative) the origin of the starts from _ref_ location.
+    """
+
     left = -flip(csum(flip(flow[:,left_idx]),1))
     right = csum(flow[:,right_idx],1)
     pix = torch.cat([left,zeros,right],dim=1)
                          
     # -- add locations --
-    print("[pre rep] centers.shape",centers.shape)
     centers = repeat(centers,'s two -> s t two',t=nframes)
 
     # -- create pix --

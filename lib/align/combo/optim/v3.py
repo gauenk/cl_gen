@@ -9,25 +9,42 @@ from joblib import delayed
 import torch
 
 # -- project imports --
-from pyutils import create_meshgrid
+from pyutils import create_meshgrid,tile_patches
 from align.xforms import blocks_to_flow
 from align._parallel import ProgressParallel
     
-def run_image_batch(patches,masks,evaluator,
+        
+
+def run_image_burst(burst,patchsize,evaluator,
+                    nblocks,iterations,
+                    subsizes,K):
+
+    pad = 2*(nblocks//2)
+    h,w = patchsize+pad,patchsize+pad
+    patches = tile_patches(burst,patchsize+pad).pix
+    patches = rearrange(patches,'b t s (c h w) -> b s t c h w',h=h,w=w)
+    masks = torch.ones_like(patches).type(torch.long)
+    print("run_image_burst ",patches.shape)
+
+    return run_patch_batch(patches,masks,evaluator,
+                           nblocks,iterations,
+                           subsizes,K)
+
+def run_patch_batch(patches,masks,evaluator,
                     nblocks,iterations,
                     subsizes,K):
     
     PARALLEL = True
     if PARALLEL:
-        return run_image_batch_parallel(patches,masks,evaluator,
+        return run_patch_batch_parallel(patches,masks,evaluator,
                                         nblocks,iterations,
                                         subsizes,K)
     else:
-        return run_image_batch_serial(patches,masks,evaluator,
+        return run_patch_batch_serial(patches,masks,evaluator,
                                       nblocks,iterations,
                                       subsizes,K)
 
-def run_image_batch_parallel(patches,masks,evaluator,
+def run_patch_batch_parallel(patches,masks,evaluator,
                              nblocks,iterations,
                              subsizes,K):
     blocks = []
@@ -37,20 +54,20 @@ def run_image_batch_parallel(patches,masks,evaluator,
     blocks = pParallel(delayed_fxn(patches[[i]],masks[[i]],evaluator,
                                    nblocks,iterations,subsizes,K)
                        for i in range(nimages))
-    blocks = torch.cat(blocks,dim=1) # B, T, R; R = H x W
+    blocks = torch.cat(blocks,dim=1) # nimages, npix, nframes-1, 2
     return blocks
 
-def run_image_batch_serial(patches,masks,evaluator,
+def run_patch_batch_serial(patches,masks,evaluator,
                            nblocks,iterations,
                            subsizes,K):
-    blocks = []
+    flows = []
     nimages = patches.shape[0]
     for b in range(nimages):
-        blocks_b = run(patches[[b]],masks[[b]],evaluator,
+        flow_b = run(patches[[b]],masks[[b]],evaluator,
                        nblocks,iterations,subsizes,K)        
-        blocks.append(blocks_b)
-    blocks = torch.cat(blocks) # B, T, R; R = H x W
-    return blocks
+        blocks.append(flow_b)
+    flows = torch.cat(flow) # nimages, npix, nframes-1, 2
+    return flows
 
 def run(patches,masks,evaluator,
         nblocks,iterations,
@@ -86,11 +103,9 @@ def run(patches,masks,evaluator,
     # -- "flow" (torch.LongTensor) shape (nimages,nframes,nsegs,2)
     #    -- each *pair of ints* represents the _nnf_ of each
     #       *segmentation* for each *frame*
-    curr_blocks = rearrange(curr_blocks,'i s t -> (i s) t')
-    print("[curr_blocks.shape]: ", curr_blocks.shape)
-    flow = blocks_to_flow(curr_blocks,nblocks)
-    print("[flow.shape]: ", flow.shape)
-    flow = rearrange(flow,'(i s) t two -> t i s two',i=nimages)
+    # curr_blocks = rearrange(curr_blocks,'i s t -> i s t')
+    # flow = rearrange(flow,'(i s) t two -> t two',i=nimages)
+    flow = blocks_to_flow(curr_blocks,nblocks) # 'i s t two'
     return flow
 
 def get_ref_block(nblocks):

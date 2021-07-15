@@ -14,6 +14,25 @@ import torchvision.transforms.functional as tvF
 # Proper Shaping
 #
 
+def compute_pix_delta(pix_a,pix_b):
+    delta = 0
+    nimages,npix,nframes,two = pix_a.shape
+    ref_t = nframes//2
+    for i in range(nimages):
+        for pidx_a in range(npix):
+            rpix_a = pix_a[i,pidx_a,ref_t]
+
+            eq_bool = torch.all(torch.eq(rpix_a[None,:],pix_b[i,:,ref_t]),1)
+            pidx_b = np.where(eq_bool)
+            assert len(pidx_b) == 1,"Only one element in pix b."
+            pidx_b = pidx_b[0]
+            assert len(pidx_b) == 1,"Only one element in pix b."            
+            pidx_b = pidx_b[0]
+
+            delta += torch.sum(torch.abs(pix_a[i,pidx_a] - pix_b[i,pidx_b]))
+            #print(delta,torch.cat([pix_a[i,pidx_a],pix_b[i,pidx_b]],dim=-1))
+    return delta
+                
 def tile_to_ndims(tensor,xtra_dims):
     shape = list(tensor.shape)
     if apply_xtra_dims(shape,xtra_dims):
@@ -21,7 +40,7 @@ def tile_to_ndims(tensor,xtra_dims):
         broadcast = np.broadcast_to(tensor,bshape)
         return broadcast
 
-def per_pixel_centers(isize,nframes):
+def per_pixel_centers(isize):
     npix = isize.h * isize.w
     shape = [npix,2]
     xy = np.c_[np.unravel_index(np.arange(npix),(isize.h,isize.w))]
@@ -35,7 +54,6 @@ def create_isize(h,w):
 
 def shape_flow_ndims(flow,shape):
     postfix = list(flow.shape[-2:])
-    print(shape,postfix,flow.shape)
     flow_shape = shape + postfix
     flow = flow.reshape(flow_shape)
     return flow[-2:]

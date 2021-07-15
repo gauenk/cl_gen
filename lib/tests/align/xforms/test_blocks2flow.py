@@ -7,7 +7,7 @@ import numpy as np
 from align.xforms import blocks_to_flow
 
 # -- testing imports --
-from tests.align.xforms._examples import get_example
+from tests.align.xforms._onepix_examples import get_example
 
 #
 # Testing
