@@ -26,6 +26,74 @@ from numba_search import search_raw_array_numba
 from .nearest_search import search_raw_array_pytorch,search_mod_raw_array_pytorch
 from .prepare_bsd400_lmdb import compute_sim_images,shift_concat_image
 
+def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
+                             metric=faiss.METRIC_L2):
+    assert xb.device == xq.device
+
+    nq, d = xq.size()
+    if xq.is_contiguous():
+        xq_row_major = True
+    elif xq.t().is_contiguous():
+        xq = xq.t()    # I initially wrote xq:t(), Lua is still haunting me :-)
+        xq_row_major = False
+    else:
+        raise TypeError('matrix should be row or column-major')
+
+    xq_ptr = swig_ptr_from_FloatTensor(xq)
+
+    nb, d2 = xb.size()
+    assert d2 == d
+    if xb.is_contiguous():
+        xb_row_major = True
+    elif xb.t().is_contiguous():
+        xb = xb.t()
+        xb_row_major = False
+    else:
+        raise TypeError('matrix should be row or column-major')
+    xb_ptr = swig_ptr_from_FloatTensor(xb)
+
+    if D is None:
+        D = torch.empty(nq, k, device=xb.device, dtype=torch.float32)
+    else:
+        assert D.shape == (nq, k)
+        assert D.device == xb.device
+
+    if I is None:
+        I = torch.empty(nq, k, device=xb.device, dtype=torch.int64)
+    else:
+        assert I.shape == (nq, k)
+        assert I.device == xb.device
+
+    D_ptr = swig_ptr_from_FloatTensor(D)
+    I_ptr = swig_ptr_from_LongTensor(I)
+
+    gpu_config = faiss.GpuDistanceParams()
+    gpu_config.metric = metric
+    gpu_config.k = k
+    gpu_config.dims = d
+    gpu_config.vectors = xb_ptr
+    gpu_config.vectorsRowMajor = xb_row_major
+    gpu_config.vectorType = faiss.DistanceDataType_F32
+    gpu_config.numVectors = nb
+    gpu_config.queries = xq_ptr
+    gpu_config.queriesRowMajor = xq_row_major
+    gpu_config.queryType = faiss.DistanceDataType_F32
+    gpu_config.numQueries = nq
+    gpu_config.outDistances = D_ptr
+    gpu_config.outIndices = I_ptr
+    gpu_config.outIndicesType = faiss.DistanceDataType_F32
+    faiss.bfKnn(res, gpu_config)
+
+    # faiss.bruteForceKnn(res, metric,
+    #                     xb_ptr, xb_row_major, nb,
+    #                     xq_ptr, xq_row_major, nq,
+    #                     d, k, D_ptr, I_ptr)
+
+
+    return D, I
+
+
+
 def compare_sim_images_methods(cfg,burst,K,patchsize=3):
     b = 0
     n = 0

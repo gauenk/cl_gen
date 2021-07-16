@@ -12,6 +12,7 @@ Pipfile\.lock
 /cache/
 reports/
 runs/
+tinker/
 *events.out*
 *model_checkpoint*
 *optim_checkpoint*

@@ -1,5 +1,7 @@
 # 2d scatter plot
 import numpy as np
+import matplotlib
+matplotlib.use("agg")
 from matplotlib import cm
 from sklearn.decomposition import PCA
 import seaborn as sns

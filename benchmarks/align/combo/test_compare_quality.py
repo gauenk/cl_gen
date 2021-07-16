@@ -31,7 +31,7 @@ def config():
     cfg = edict()
 
     # -- exp settings --
-    cfg.nframes = 3
+    cfg.nframes = 10
 
     # -- data config --
     cfg.dataset = edict()
@@ -86,8 +86,8 @@ def test_nnf():
     check_parameters(nblocks,patchsize)
 
     # -- create evaluator
-    iterations,K = 5,3
-    subsizes = [1,1,1]
+    iterations,K = 10,2
+    subsizes = [2,2,2,2,2]
     evaluator = combo.eval_scores.EvalBlockScores(score_fxn,patchsize,100,None)
 
     # -- iterate over images --
@@ -104,12 +104,14 @@ def test_nnf():
 
         # -- shape info --
         T,B,C,H,W = dyn_noisy.shape
+        isize = edict({'h':H,'w':W})
         ref_t = nframes//2
         npix = H*W
 
         # -- groundtruth flow --
         flow_gt = repeat(flow_gt,'i tm1 two -> i p tm1 two',p=npix)
         print("sample['flow']: ",flow_gt.shape)
+        aligned_of = align_from_flow(dyn_clean,flow_gt,patchsize,isize=isize)
         
         # -- compute nearest neighbor fields --
         shape_str = 't b h w two -> b (h w) t two'
@@ -119,54 +121,59 @@ def test_nnf():
         flow_nnf = pix_to_flow(nnf_pix_best)
         aligned_nnf = align_from_pix(dyn_clean,nnf_pix_best,patchsize)
 
-        # -- prepare patches --
+        # -- compute proposed search of nnf --
+        flow_split = optim.v1.run_image_burst(dyn_clean,patchsize,evaluator,
+                                              nblocks,iterations,subsizes,K)
+        isize = edict({'h':H,'w':W})
+        aligned_split = align_from_flow(dyn_clean,flow_split,patchsize,isize=isize)
+
+        # -- compute proposed search of nnf --
         flow_est = optim.v3.run_image_burst(dyn_clean,patchsize,evaluator,
                                             nblocks,iterations,subsizes,K)
-        isize = edict({'h':H,'w':W})
         aligned_est = align_from_flow(dyn_clean,flow_est,patchsize,isize=isize)
 
-        # -- compare nnf v.s. est --
-        est_of = compute_epe(flow_est,flow_gt)
+        # -- banner --
+        print("-"*25 + " Results " + "-"*25)
+
+        # -- compare gt v.s. nnf computations --
         nnf_of = compute_epe(flow_nnf,flow_gt)
+        split_of = compute_epe(flow_split,flow_gt)
+        est_of = compute_epe(flow_est,flow_gt)
+
+        split_nnf = compute_epe(flow_split,flow_nnf)
         est_nnf = compute_epe(flow_est,flow_nnf)
+
+        print("-"*50)
         print("EPE Errors")
-        print(est_of)
+        print("-"*50)
+        print("NNF v.s. Optical Flow.")
         print(nnf_of)
+        print("Split v.s. Optical Flow.")
+        print(split_of)
+        print("Proposed v.s. Optical Flow.")
+        print(est_of)
+        print("Split v.s. NNF")
+        print(split_nnf)
+        print("Proposed v.s. NNF")
         print(est_nnf)
 
-        # -- eval --
 
+        # -- psnr eval --
         pad = 2*patchsize
         isize = edict({'h':H-pad,'w':W-pad})
+        psnr_of = compute_aligned_psnr(aligned_of,static_clean,isize)
         psnr_nnf = compute_aligned_psnr(aligned_nnf,static_clean,isize)
+        psnr_split = compute_aligned_psnr(aligned_split,static_clean,isize)
         psnr_est = compute_aligned_psnr(aligned_est,static_clean,isize)
+        print("-"*50)
         print("PSNR Values")
+        print("-"*50)
+        print("Optical Flow [groundtruth v1]")
+        print(psnr_of)
+        print("NNF [groundtruth v2]")
         print(psnr_nnf)
+        print("Split [old method]")
+        print(psnr_split)
+        print("Proposed [new method]")
         print(psnr_est)
 
-        # cc_aligned_nnf = tvF.center_crop(aligned_nnf,(H-pad,W-pad))
-        # cc_static_clean = tvF.center_crop(static_clean,(H-pad,W-pad))
-
-        # print("aligned_nnf.shape ",aligned_nnf.shape)
-        # delta = torch.sum(torch.abs(cc_static_clean.cpu() - cc_aligned_nnf.cpu())).item()
-        # print("static_clean.shape ",static_clean.shape)
-        # print("delta ", delta)
-
-        # -- compare psnr of nnf v.s. est aligned images --
-        # nnf_flow_best = nnf_flow[...,0,:]
-        # print("nnf_flow_best.shape",nnf_flow_best.shape)
-        # nnf_flow_best = rearrange(nnf_flow_best,'b t h w two -> b (h w) t two')
-
-        # print("[stats of nnf_flow_best]: ",nnf_flow_best.min(),nnf_flow_best.max())
-        # print("[(post) nnf_flow_best.shape]: ",nnf_flow_best.shape)
-
-        # print("[stats of nnf_pix_best]: ",nnf_pix_best.min(),nnf_pix_best.max())
-        # print("[(post) nnf_pix_best.shape]: ",nnf_pix_best.shape)
-
-        # patches = torch_to_numpy(patches).astype(np.float)
-
-        # print("[(pre) patches.shape]: ",patches.shape)
-        # # aligned = align_burst_from_blocks_padded_patches(patches,nnf_pix_best,
-        # #                                                  nblocks,patchsize)
-        # print("[aligned.shape]: ",aligned.shape)
-        
