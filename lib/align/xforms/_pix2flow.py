@@ -9,7 +9,7 @@ from numba import jit,prange
 import torch
 
 # -- project imports --
-from align._utils import torch_to_numpy
+from pyutils import torch_to_numpy
 
 def pix_to_flow(pix):
 

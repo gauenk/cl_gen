@@ -7,7 +7,7 @@ from einops import rearrange
 import torch
 
 # -- project imports --
-from align._utils import torch_to_numpy
+from pyutils import torch_to_numpy
 import align.combo._block_utils as block_utils
 
 class EvalBlockScores():

@@ -6,7 +6,7 @@
 # -- project imports --
 import align.nn
 import align.combo
-from align._utils import assert_cfg_fields,compute_epe,compute_aligned_psnr,torch_to_numpy
+from align._utils import assert_cfg_fields,compute_epe,compute_aligned_psnr
 
 def compute_alignment(cfg,align_fxn,images):
     """

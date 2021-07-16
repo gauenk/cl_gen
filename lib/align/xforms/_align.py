@@ -12,7 +12,7 @@ import torch.nn.functional as F
 # -- project imports --
 # from align.xforms._global_motion import *
 from align.xforms._utils import *
-from align._utils import torch_to_numpy
+from pyutils import torch_to_numpy
 # from ._flow2blocks import flow_to_blocks
 from ._flow2pix import flow_to_pix
 # from ._pix2blocks import pix_to_blocks

@@ -13,6 +13,12 @@ from functools import reduce
 # this is the only allowed project import in this file.
 import settings
 
+def torch_to_numpy(tensor):
+    if torch.is_tensor(tensor):
+        return tensor.cpu().numpy()
+    else:
+        return tensor
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 

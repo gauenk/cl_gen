@@ -11,7 +11,7 @@ import torch
 
 # -- project imports --
 import align.xforms._utils as utils
-from align._utils import torch_to_numpy
+from pyutils import torch_to_numpy
 
 def global_blocks_to_flow(_flow,nblocks):
     print("[DEPRECATED: global_blocks_to_flow] use [blocks_to_flow_serial]")

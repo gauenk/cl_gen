@@ -17,11 +17,9 @@ import align.nnf as nnf
 import align.combo as combo
 import align.combo.optim as optim
 from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow
-from pyutils import tile_patches,save_image
+from pyutils import tile_patches,save_image,torch_to_numpy
 from patch_search import get_score_function
 from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
-
-from align._utils import torch_to_numpy
 
 def set_seed(seed):
     np.random.seed(seed)

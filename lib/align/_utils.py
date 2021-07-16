@@ -28,22 +28,14 @@ def compute_epe(tensor_a,tensor_b):
     epe = torch.mean(epe,dim=list(dims[1:]))
     return epe
 
-def torch_to_numpy(tensor):
-    if torch.is_tensor(tensor):
-        return tensor.cpu().numpy()
-    else:
-        return tensor
-
 def construct_return_dict(fields,options):
     results = {}
     for field in fields:
         results[field] = options[field]
     return results
 
-
 def check_all_str(py_list):
     return np.all([isinstance(e,str) for e in py_list])
-
 
 def assert_cfg_fields(cfg):
 

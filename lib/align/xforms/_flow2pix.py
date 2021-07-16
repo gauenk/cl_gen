@@ -6,7 +6,7 @@ from einops import rearrange,repeat
 import torch
 
 # -- project imports --
-from align._utils import torch_to_numpy
+from pyutils import torch_to_numpy
 from ._utils import per_pixel_centers,tile_to_ndims
 
 def parse_inputs(nimages,isize,centers):
@@ -23,6 +23,7 @@ def flow_to_pix(flow,centers=None,isize=None):
     # -- check shapes --
     nimages,npix,nframes_minus_1,two = flow.shape
     centers = parse_inputs(nimages,isize,centers)
+    centers = torch.LongTensor(centers).to(flow.device,non_blocking=True)
     c_nimages,c_npix,two = centers.shape
     assert nimages == c_nimages,"num of images must be eq."
     assert npix == c_npix,"num of pixels must be eq."
@@ -47,7 +48,7 @@ def flow_to_pix_torch(flow,centers):
 
     # -- init pix --
     flip,csum = torch.fliplr,torch.cumsum
-    zeros = torch.zeros((nsamples,1,2))
+    zeros = torch.zeros((nsamples,1,2),device=flow.device)
     left_idx = slice(None,nframes//2)
     right_idx = slice(nframes//2,None)
 
