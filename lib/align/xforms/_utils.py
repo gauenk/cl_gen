@@ -43,7 +43,9 @@ def tile_to_ndims(tensor,xtra_dims):
 def per_pixel_centers(isize):
     npix = isize.h * isize.w
     shape = [npix,2]
-    xy = np.c_[np.unravel_index(np.arange(npix),(isize.h,isize.w))]
+    yx = np.c_[np.unravel_index(np.arange(npix),(isize.h,isize.w))]
+    xy = np.fliplr(yx) # (y,x) -> (x,y)
+    xy = np.ascontiguousarray(xy)
     # xy = rearrange(xy,'p two -> p 1 two')
     # xy = np.broadcast_to(xy,shape)
     return xy

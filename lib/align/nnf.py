@@ -1,5 +1,6 @@
 
 # -- python imports --
+import nvtx
 import numpy as np
 from einops import rearrange,repeat
 
@@ -21,6 +22,7 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
         if t == ref_t:
             vals_t = torch.zeros((1,B,H,W,K))
             indices = np.c_[np.unravel_index(np.arange(npix),(H,W))]
+            # (AT END) swap: (rows,cols) -> (cols,rows) aka (y,x) -> (x,y)
             indices = indices.reshape(H,W,2)
             locs_t = repeat(indices,'h w two -> 1 b h w k two',b=B,k=K)
         else:
@@ -30,7 +32,7 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
         locs.append(locs_t)
     vals = np.concatenate(vals,axis=0)
     locs = np.concatenate(locs,axis=0)
-    locs[...,:] = locs[...,::-1] # row,cols -> cols,rows
+    locs[...,:] = locs[...,::-1] # (HERE) row,cols -> cols,rows
     print("burst_nnf.shape", locs.shape)
     return vals,locs
 
@@ -47,6 +49,7 @@ def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
     locs = np.concatenate(locs,axis=1)
     return vals,locs
 
+@nvtx.annotate("compute_nnf", color="green")
 def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
     """
     Compute the Nearest Neighbor Field for Optical Flow
@@ -91,6 +94,7 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
 
             locs_bt = np.unravel_index(I_bt,(H,W)) # only works with B,T == 1
             locs_bt = np.stack(locs_bt,axis=-1)
+            # (AT END) swap: (rows,cols) -> (cols,rows) aka (y,x) -> (x,y)
             locs_bt = rearrange(locs_bt,'(h w) k two -> h w k two',h=H)
 
             vals.append(vals_bt)

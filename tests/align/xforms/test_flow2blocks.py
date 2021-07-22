@@ -24,6 +24,7 @@ def test_flow_to_block():
     """
     def run_check(flow,blocks,nblocks):
         est_blocks = flow_to_blocks(flow,nblocks)
+        print(est_blocks)
         delta = torch.sum(torch.abs(est_blocks-blocks)).item()
         assert np.isclose(delta,0),f"No error {est_blocks} vs {blocks}"
 
@@ -43,7 +44,12 @@ def test_flow_to_block():
         ex = get_example("example_4")
         run_check(ex.flow,ex.blocks,ex.nblocks)
 
+    def test5():
+        ex = get_example("example_5")
+        run_check(ex.flow,ex.blocks,ex.nblocks)
+
     test1()
     test2()
     test3()
     test4()
+    test5()

@@ -49,3 +49,32 @@ def assert_cfg_fields(cfg):
     return True
 
 
+class BatchIter():
+    def __init__(self,nsamples,batchsize):
+        self.nsamples = nsamples
+        self.batchsize = batchsize
+        self.nbatches = nsamples // batchsize
+        self.nbatches += (nsamples % batchsize) > 0
+        self._iter_index = 0
+
+    def __len__(self):
+        return self.nbatches
+    
+    def __iter__(self):
+        self._iter_index = 0
+        return self
+
+    def __next__(self):
+        if self._iter_index >= self.nbatches:
+            raise StopIteration
+        else:
+            result = self[self._iter_index]
+            self._iter_index += 1
+            return result
+
+    def __getitem__(self,index):
+        start = index * self.batchsize
+        end = start + self.batchsize
+        pbatch = slice(start,end)
+        return pbatch
+

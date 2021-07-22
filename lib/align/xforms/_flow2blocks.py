@@ -50,6 +50,7 @@ def flow_to_blocks_serial(_flow,nblocks):
         left = ref_bl - rcumsum(flow_b[:ref_t]) # -- moving backward
         right = torch.cumsum(flow_b[ref_t:],0) + ref_bl # -- moving forward
         coords = torch.cat([left,coord_ref,right],dim=0)
+        assert np.all(coords >= 0), "all coordinates are non-negative."
         for t in range(T):
             x,y = coords[t][0].item(),coords[t][1].item()
             index = grid[y,x] # up&down == rows, left&right == cols
@@ -136,6 +137,7 @@ def flow_to_blocks_numba(_flow,nblocks):
         left = left.reshape(-1,2)
         right = right.reshape(-1,2)
         coords = np.concatenate((left,coord_ref,right))
+        assert np.all(coords >= 0), "all coordinates are non-negative."
         for t in range(T):
             x,y = int(coords[t][0]),int(coords[t][1])
             index = grid[y,x] # up&down == rows, left&right == cols

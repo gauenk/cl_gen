@@ -39,7 +39,10 @@ def flow_to_pix(flow,centers=None,isize=None):
 
     return pix
 
-def flow_to_pix_torch(flow,centers):
+def flow_to_pix_torch(_flow,centers):
+
+    # -- copy --
+    flow = _flow.clone()
 
     # -- compute deltas to ref --
     nsamples,nframes_minus_1,two = flow.shape
@@ -56,7 +59,6 @@ def flow_to_pix_torch(flow,centers):
     flow[...,1] = -flow[...,1] 
     
     # -- swap dx and dy --
-    
 
     r"""
     go from

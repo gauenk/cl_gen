@@ -26,17 +26,20 @@ def iter_block_batches(blocks,batchsize):
     for i in range(nbatches):
         start = i * batchsize
         end = start + batchsize
-        batch = blocks[...,start:end]
+        batch = blocks[...,start:end,:]
         yield batch
 
     
+# NOT CONCEPTUALLY TESTED;
+# Are these patches the patches (tensor) we want?
+# Connects "Tiling" with "Indexing" with "Blocks"
 @jit(nopython=True)
-def index_block_batches(tensor,batch,patchsize,nblocks):
+def index_block_batches(indexed,tensor,batch,patchsize,nblocks):
     nimages,nsegs,nframes = tensor.shape[:3]
     color,pH_buf,pW_buf = tensor.shape[3:]
     nimages,nsegs,naligns,nframes = batch.shape
     ps = patchsize
-    indexed = np.zeros((nimages,nsegs,nframes,naligns,color,ps,ps))
+    # indexed = np.zeros((nimages,nsegs,nframes,naligns,color,ps,ps))
 
     for i in prange(nimages):
         for s in prange(nsegs):
@@ -44,8 +47,26 @@ def index_block_batches(tensor,batch,patchsize,nblocks):
                 tensor_ist = tensor[i][s][t]
                 for a in range(naligns):
                     bindex = batch[i][s][a][t]
-                    hs = bindex // nblocks
-                    ws = bindex % nblocks
+                    # -- v1 (init) --
+                    # hs = (bindex // nblocks)
+                    # ws = (bindex % nblocks)
+
+                    # -- v2 (object to camera) --
+                    hs = nblocks-(bindex // nblocks) -1
+                    ws = nblocks-(bindex % nblocks) - 1
+                    # if s == 0:
+                    #     print(t,a,bindex,hs,ws)
+                    
+                    # -- v3 (ref optical_flow code) --
+                    # hs = (bindex // nblocks)
+                    # ws = nblocks - (bindex % nblocks) - 1
+
+                    # -- v4 (did i swap v3 somehow?) --
+                    # hs = nblocks - (bindex // nblocks) - 1
+                    # ws = (bindex % nblocks)
+
+                    # if s == 0:
+                    #     print(t,bindex,hs,ws)
                     he = hs + patchsize
                     we = ws + patchsize
                     indexed[i,s,t,a,...] = tensor_ist[:,hs:he,ws:we]

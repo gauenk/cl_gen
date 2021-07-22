@@ -17,6 +17,7 @@ from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
 # -- [local] project imports --
 from ..utils import get_ref_block_index
+from .bootstrap_numba import compute_bootstrap
 
 def get_score_functions(names):
     scores = edict()
@@ -78,9 +79,13 @@ def bootstrapping(cfg,expanded):
     scores_t = torch.zeros(T,B*E,device=device)
     counts_t = torch.zeros(T,1,device=device)
     nbatches,batch_size = 100,100
+    subsets = torch.LongTensor(sample_subset_grids(nbatches*batch_size,T))
+    subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
+    # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batch_size)
+
     for batch_idx in range(nbatches):
-        subsets = torch.LongTensor(sample_subset_grids(T,batch_size))
-        for subset in subsets:
+        # subsets = torch.LongTensor(sample_subset_grids(batch_size,T))
+        for subset in subsets[batch_idx]:
             counts_t[subset] += 1
             subset_pix = samples[subset]
             vprint("subset.shape",subset_pix.shape)
@@ -89,6 +94,7 @@ def bootstrapping(cfg,expanded):
             loss = torch.mean( (subset_ave - ave)**2, dim=0)
             vprint("loss.shape",loss.shape)
             scores_t[subset] += loss
+
     scores_t /= counts_t
     scores = torch.mean(scores_t,dim=0)
     scores_t = scores_t.T # (T,E) -> (E,T)

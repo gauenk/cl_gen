@@ -12,6 +12,8 @@ def get_example(name):
         return example_3()
     elif name == "example_4":
         return example_4()
+    elif name == "example_5":
+        return example_5()
     else:
         raise ValueError(f"Uknown example name [{name}]")
 
@@ -25,14 +27,14 @@ def example_1():
         [8,4,1]
     ]])
     centers = torch.LongTensor([[
-        [2,2]
+        [2,3]
     ]])
     # a.) convert flow axis (y = 0 @ bottom) to object axis (y = 0 @ top)
     # b.) "-" before and "+" after the reference frame using cumulative sums
     pix = torch.LongTensor([[[ 
-        [2-(1),2-(-(-1))],
-        [2,2],
-        [2+(0),2+(-(-1))]
+        [2-(1),3-(-(-1))],
+        [2,3],
+        [2+(0),3+(-(-1))]
     ]]]) 
     nblocks = 3
     isize = edict({'h':1,'w':1})
@@ -58,6 +60,8 @@ def example_2():
         [100,110],
         [100+(0),110+(-(-1))]
     ]]]) # "-" before and "+" after the reference frame using cumulative sums
+    print(flow)
+    print(pix)
     nblocks = 3
     isize = edict({'h':1,'w':1})
     sample = edict({'flow':flow,'blocks':blocks,
@@ -113,6 +117,41 @@ def example_4():
         [100+(1)+(-1)+(1), 110+(-(0))+(-(0))+(-(1))]
     ]]]) # "-" before and "+" after the reference frame using cumulative sums
     nblocks = 5
+    isize = edict({'h':1,'w':1})
+    sample = edict({'flow':flow,'blocks':blocks,
+                    'pix':pix,'centers':centers,
+                    'nblocks':nblocks,'isize':isize})
+    return sample
+
+
+def example_5():
+    flow = torch.LongTensor([[[
+        [1,0],[1,-1],[1,0],[1,0],[1,0],[1,-1],[1,0],[1,0],[1,0]]
+    ]])
+    # blocks = torch.LongTensor([[
+    #     [44,45,57,58,59,55,72,73,74,75]
+    # ]])
+    blocks = torch.LongTensor([[
+        [76,75,63,62,61,60,48,47,46,45]
+    ]])
+    centers = torch.LongTensor([[
+        [100,110]
+    ]])
+    # a.) convert flow axis (y = 0 @ bottom) to object axis (y = 0 @ top)
+    # b.) "-" before and "+" after the reference frame using cumulative sums
+    pix = torch.LongTensor([[[
+        [100-(1)-(1)-(1)-(1)-(1), 110],
+        [100-(1)-(1)-(1)-(1),     110-(-(-1))],
+        [100-(1)-(1)-(1),         110],
+        [100-(1)-(1),             110],
+        [100-(1),                 110],
+        [100,                     110],
+        [100+(1),                 110+(-(-1))],
+        [100+(1)+(1),             110+(-(-1))+(0)],
+        [100+(1)+(1)+(1),         110+(-(-1))+(0)],
+        [100+(1)+(1)+(1)+(1),     110+(-(-1))+(0)],
+    ]]]) # "-" before and "+" after the reference frame using cumulative sums
+    nblocks = 11
     isize = edict({'h':1,'w':1})
     sample = edict({'flow':flow,'blocks':blocks,
                     'pix':pix,'centers':centers,

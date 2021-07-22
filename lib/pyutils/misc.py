@@ -90,7 +90,7 @@ def create_subset_grids(nmin,nmax,indices,max_subset_size):
         subsets_idx = subsets_idx[indices]
     return subsets_idx
 
-def sample_subset_grids(N,num_samples):
+def sample_subset_grids(num_samples,N):
     samples = npr.choice(N,size=(num_samples,N),replace=True)
     return samples
 

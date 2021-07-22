@@ -8,6 +8,7 @@ import align.combo.lpas
 import align.combo.nlpas
 import align.combo.eval_scores
 from align._utils import construct_return_dict
+from .eval_scores import EvalBlockScores
 
 def combo_compute_alignment(cfg,images):
 

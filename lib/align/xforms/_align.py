@@ -19,15 +19,15 @@ from ._flow2pix import flow_to_pix
 from ._blocks2pix import blocks_to_pix
 
 
-def align_from_flow(burst,flow,patchsize,centers=None,isize=None):
+def align_from_flow(burst,flow,nblocks,centers=None,isize=None):
     pix = flow_to_pix(flow,centers,isize)
-    return align_from_pix(burst,pix,patchsize)
+    return align_from_pix(burst,pix,nblocks)
 
-def align_from_blocks(burst,blocks,nblocks,patchsize,centers=None,isize=None):
+def align_from_blocks(burst,blocks,nblocks,centers=None,isize=None):
     pix = blocks_to_pix(blocks,nblocks,centers,isize)
-    return align_from_pix(burst,pix,patchsize)
+    return align_from_pix(burst,pix,nblocks)
 
-def align_from_pix(burst,pix,ps):
+def align_from_pix(burst,pix,nblocks):
     r"""
     Align a burst of frames 
     from a pixel tensor representing 
@@ -40,8 +40,7 @@ def align_from_pix(burst,pix,ps):
 
     # -- add paddings --
     burst = rearrange(burst,'t i c h w -> (t i) c h w')
-    pad_shape = (ps//2,ps//2,ps//2,ps//2)
-    pad_burst = F.pad(burst,pad_shape,mode='reflect')
+    pad_burst = F.pad(burst,[nblocks//2,]*4,mode='reflect')
     pad_burst = rearrange(pad_burst,'(t i) c h w -> t i c h w',i=nimages)
 
     # -- ensure ndarray --
@@ -51,7 +50,7 @@ def align_from_pix(burst,pix,ps):
     # -- create blocks --
     aligned = np.zeros((nframes,nimages,c,h,w)).astype(np.float64)
     pad_burst = pad_burst.astype(np.float64)
-    align_from_pix_numba(aligned,pad_burst,pix,ps)
+    align_from_pix_numba(aligned,pad_burst,pix,nblocks)
 
     # -- back to torch --
     aligned = torch.FloatTensor(aligned)
@@ -64,18 +63,20 @@ def verify_burst_pix_sizes(burst,pix):
     assert nsamples % npix == 0,"Must be a multiple of number of pixels."
 
 @jit(nopython=True)
-def align_from_pix_numba(aligned,burst,pix,ps):
+def align_from_pix_numba(aligned,burst,pix,nblocks):
     nframes,nimages,c,h_pad,w_pad = burst.shape
-    h = h_pad - 2*(ps//2)
-    w = w_pad - 2*(ps//2)
+    h = h_pad - 2*(nblocks//2)
+    w = w_pad - 2*(nblocks//2)
     npix = h*w
     ref_t = nframes//2
     for i in range(nimages):
         for t in range(nframes):
             for p in range(npix):
-                ref_xy =  pix[i,p,ref_t]
-                r_col,r_row = ref_xy[0],ref_xy[1]
-                xy_xfer = pix[i,p,t] + ps//2 # padding
+                ref_xy =  pix[i,p,ref_t] #ordering of "p" is not always order of pix.
+                # r_col,r_row = ref_xy[0],ref_xy[1]
+                r_row,r_col = p//w,p%w
+                # print(r_col,r_row,re_col,re_row)
+                xy_xfer = pix[i,p,t] + nblocks//2 # padding
                 b_col,b_row = xy_xfer[0],xy_xfer[1]
                 aligned[t,i,:,r_row,r_col] = burst[t,i,:,b_row,b_col]
 
