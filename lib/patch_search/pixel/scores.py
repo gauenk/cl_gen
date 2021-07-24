@@ -17,7 +17,7 @@ from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
 # -- [local] project imports --
 from ..utils import get_ref_block_index
-from .bootstrap_numba import compute_bootstrap
+from .bootstrap_numba import compute_bootstrap,create_weights
 
 def get_score_functions(names):
     scores = edict()
@@ -56,6 +56,10 @@ def get_score_function(name):
         return jackknife
     elif name == "bootstrapping":
         return bootstrapping
+    elif name == "bootstrapping_mod1":
+        return bootstrapping_mod1
+    elif name == "bootstrapping_mod2":
+        return bootstrapping_mod2
     elif name == "sim_trm":
         return sim_trm
     elif name == "ransac":
@@ -69,6 +73,7 @@ def bootstrapping(cfg,expanded):
 
     # -- setup vars --
     R,B,E,T,C,H,W = expanded.shape
+    nframes = T
     device = expanded.device
     samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
     samples = samples.contiguous() # speed up?
@@ -78,6 +83,7 @@ def bootstrapping(cfg,expanded):
     # -- compute ave diff between model and subsets --
     scores_t = torch.zeros(T,B*E,device=device)
     counts_t = torch.zeros(T,1,device=device)
+    mask = torch.zeros(T,1,device=device)
     nbatches,batch_size = 100,100
     subsets = torch.LongTensor(sample_subset_grids(nbatches*batch_size,T))
     subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
@@ -86,19 +92,122 @@ def bootstrapping(cfg,expanded):
     for batch_idx in range(nbatches):
         # subsets = torch.LongTensor(sample_subset_grids(batch_size,T))
         for subset in subsets[batch_idx]:
+            mask[...] = 0
+            mask[subset] = 1
             counts_t[subset] += 1
             subset_pix = samples[subset]
-            vprint("subset.shape",subset_pix.shape)
+            # vprint("subset.shape",subset_pix.shape)
             subset_ave = torch.mean(subset_pix,dim=0)
-            vprint("subset_ave.shape",subset_ave.shape)
+            # vprint("subset_ave.shape",subset_ave.shape)
             loss = torch.mean( (subset_ave - ave)**2, dim=0)
-            vprint("loss.shape",loss.shape)
+            # vprint("loss.shape",loss.shape)
             scores_t[subset] += loss
 
     scores_t /= counts_t
     scores = torch.mean(scores_t,dim=0)
     scores_t = scores_t.T # (T,E) -> (E,T)
     vprint("scores.shape",scores.shape)
+
+    # -- no cuda --
+    scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t.cpu(),'(b e) t -> b e t',b=B)
+
+    # -- add back patchsize for compat --
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    return scores,scores_t
+
+def bootstrapping_mod1(cfg,expanded):
+
+    # -- setup vars --
+    R,B,E,T,C,H,W = expanded.shape
+    nframes = T
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
+    samples = samples.contiguous() # speed up?
+    t_ref = T//2
+    # ave = torch.mean(samples,dim=0)
+
+    # -- compute ave diff between model and subsets --
+    scores_t = torch.zeros(T,B*E,device=device)
+    weights = torch.zeros(T,1,1,device=device)
+    counts_t = torch.zeros(T,1,device=device)
+    nbatches,batch_size = 100,100
+    subsets = torch.LongTensor(sample_subset_grids(nbatches*batch_size,T))
+    subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
+    # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batch_size)
+
+    for batch_idx in range(nbatches):
+        # subsets = torch.LongTensor(sample_subset_grids(batch_size,T))
+        for subset in subsets[batch_idx]:
+            subsize = len(subset)
+            counts_t[subset] += 1
+            weights[...] = -1./nframes
+            weights[subset] += 1./subsize
+            loss = torch.mean(torch.sum(weights * samples,dim=0),dim=0)
+            scores_t[subset] += loss
+
+    scores_t /= counts_t
+    scores = torch.mean(scores_t,dim=0)
+    scores_t = scores_t.T # (T,E) -> (E,T)
+    vprint("scores.shape",scores.shape)
+
+    # -- no cuda --
+    scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t.cpu(),'(b e) t -> b e t',b=B)
+
+    # -- add back patchsize for compat --
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    return scores,scores_t
+
+def bootstrapping_mod2(cfg,expanded):
+
+    # -- setup vars --
+    R,B,E,T,C,H,W = expanded.shape
+    nframes = T
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
+    samples = samples.contiguous() # speed up?
+    t_ref = T//2
+    nbatches,batchsize = 10,100
+    nsubsets = nbatches*batchsize
+
+    # -- compute ave diff between model and subsets --
+    scores_t = torch.zeros(B*E,T,device=device)
+    counts_t = torch.zeros(T,1,device=device)
+    # subsets = torch.LongTensor(sample_subset_grids(nbatches*batchsize,T))
+    ## subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
+    # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batchsize)
+    # weights = np.ones((nsubsets,nframes)) * 1./nframes
+    # for s in range(nsubsets):
+    #     usubset = torch.unique(subsets[s])
+    #     weights[s,usubset] -= 1./len(usubset)
+    scores = torch.zeros(B*E,device=device)
+
+    for batch_idx in range(nbatches):
+        weights = create_weights(batchsize,nframes)
+        # for b in range(batchsize):
+        #     print(weights[b])
+        weights = weights.to(device)
+        wsamples = torch.matmul(samples.T,weights.T).T
+        scores += torch.mean(torch.pow(wsamples,2),dim=(0,1))
+    scores /= nbatches
+
+    #     for subset in subsets[batch_idx]:
+    #         subsize = len(subset)
+    #         counts_t[subset] += 1
+    #         weights[...] = -1./nframes
+    #         weights[subset] += 1./subsize
+    #         loss = torch.mean(torch.sum(weights * samples,dim=0),dim=0)
+    #         scores_t[subset] += loss
+
+    # # scores_t /= counts_t
+    # scores = torch.mean(scores_t,dim=0)
+    # scores_t = scores_t.T # (T,E) -> (E,T)
+    # vprint("scores.shape",scores.shape)
 
     # -- no cuda --
     scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)

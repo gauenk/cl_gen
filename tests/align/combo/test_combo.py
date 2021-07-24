@@ -32,7 +32,7 @@ def config():
     cfg = edict()
 
     # -- exp settings --
-    cfg.nframes = 3
+    cfg.nframes = 5
     cfg.frame_size = 32
 
     # -- data config --
@@ -55,9 +55,9 @@ def config():
     cfg.random_seed = 234
 
     # -- combo config --
-    cfg.nblocks = 3
+    cfg.nblocks = 5
     cfg.patchsize = 5
-    cfg.score_fxn_name = "bootstrapping"
+    cfg.score_fxn_name = "bootstrapping_mod2"
     
     return cfg
 
@@ -94,7 +94,7 @@ def test_nnf():
     score_fxn_bs = get_score_function(cfg.score_fxn_name)
 
     # -- some constants --
-    NUM_BATCHES = 1
+    NUM_BATCHES = 5
     nframes,nblocks = cfg.nframes,cfg.nblocks 
     patchsize = cfg.patchsize
     ppf = cfg.dynamic_info.ppf
@@ -103,15 +103,15 @@ def test_nnf():
     # -- create evaluator for ave; simple --
     iterations,K = 1,1
     subsizes = []
-    eval_ave_simp = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,200,None)
+    eval_ave_simp = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,256,None)
 
     # -- create evaluator for ave --
     iterations,K = 1,1
     subsizes = []
-    eval_ave = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,200,None)
+    eval_ave = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,256,None)
 
     # -- create evaluator for bootstrapping --
-    eval_prop = combo.eval_scores.EvalBlockScores(score_fxn_bs,patchsize,200,None)
+    eval_prop = combo.eval_scores.EvalBlockScores(score_fxn_bs,patchsize,256,None)
 
     # -- iterate over images --
     for image_bindex in range(NUM_BATCHES):
@@ -196,6 +196,7 @@ def test_nnf():
         # subsizes = [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
         iterations,K = 1,nblocks**2
         subsizes = [nframes]
+        # subsizes = [3,3,3,3]
         print("Bootstrap loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
