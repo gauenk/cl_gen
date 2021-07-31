@@ -5,8 +5,7 @@ import numpy as np
 from einops import rearrange
 
 # -- numba imports --
-from numba import jit,prange
-
+from numba import jit,prange,cuda
 
 # -- pytorch imports --
 import torch
@@ -29,12 +28,67 @@ def iter_block_batches(blocks,batchsize):
         batch = blocks[...,start:end,:]
         yield batch
 
-    
-# NOT CONCEPTUALLY TESTED;
-# Are these patches the patches (tensor) we want?
-# Connects "Tiling" with "Indexing" with "Blocks"
+def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks):
+    # -- prepare data --
+    batchsize = batch.shape[2]
+    indexed = indexed[:,:,:,:batchsize]
+    tokeep = tokeep[:batchsize]
+    indexed_nba = cuda.as_cuda_array(indexed)
+    batch_nba = cuda.as_cuda_array(batch)
+    tensor_nba = cuda.as_cuda_array(tensor)
+    tokeep_nba = cuda.as_cuda_array(tokeep)
+
+    # -- prepare cuda --
+    npix = tensor.shape[1]
+    threads_per_block = 64
+    blocks = npix//threads_per_block + 1
+
+    # -- run cuda --
+    index_block_batches_cuda[blocks,threads_per_block](indexed_nba,tokeep_nba,tensor_nba,
+                                                       batch_nba,patchsize,nblocks)
+
+    # -- remove padding --
+    # batchsize = np.sum(tokeep,dim=2)
+    # indexed = indexed[:,:,:,:batchsize]
+    # index_block_batches_cuda[blocks,threads_per_block](indexed_nba,tokeep_nba)
+    return indexed
+
+@cuda.jit
+def index_block_batches_cuda(indexed,tokeep,tensor,batch,patchsize,nblocks):
+
+    nimages,nsegs,nframes = tensor.shape[:3]
+    color,pH_buf,pW_buf = tensor.shape[3:]
+    nimages,nsegs,naligns,nframes = batch.shape
+    ps = patchsize
+
+    proc_idx = cuda.grid(1)
+    if proc_idx >= nsegs: return
+    s = proc_idx
+
+    # indexed = np.zeros((nimages,nsegs,nframes,naligns,color,ps,ps))
+
+    for i in range(nimages):
+        for t in range(nframes):
+            tensor_ist = tensor[i][s][t]
+            for a in range(naligns):
+                bindex = batch[i][s][a][t]
+                # if bindex == -1: continue
+
+                hs = nblocks-(bindex // nblocks) -1
+                ws = nblocks-(bindex % nblocks) - 1
+
+                he = hs + patchsize
+                we = ws + patchsize
+                for c in range(color):
+                    for y in range(patchsize):
+                        for x in range(patchsize):
+                            ty = hs + y
+                            tx = ws + x
+                            indexed[i,s,t,a,c,y,x] = tensor_ist[c,ty,tx]
+
 @jit(nopython=True)
-def index_block_batches(indexed,tensor,batch,patchsize,nblocks):
+def index_block_batches_numba(indexed,tensor,batch,patchsize,nblocks):
+
     nimages,nsegs,nframes = tensor.shape[:3]
     color,pH_buf,pW_buf = tensor.shape[3:]
     nimages,nsegs,naligns,nframes = batch.shape
@@ -108,11 +162,13 @@ def index_block_batches_deprecated(blocks,patches,indexing):
 
 def block_batch_update(samples,scores,blocks,K): # store as heap?
 
+    # scores = scores.to('cuda:0',non_blocking=True)
+    # blocks = blocks.to('cuda:0',non_blocking=True)
     # scores = torch.FloatTensor(samples.scores)
     # blocks = torch.LongTensor(samples.blocks)
 
-    scores = torch.FloatTensor(scores)
-    blocks = torch.LongTensor(blocks)
+    # scores = torch.FloatTensor(scores)
+    # blocks = torch.LongTensor(blocks)
 
     if len(samples.scores) == 0:
         samples.scores = scores
@@ -146,5 +202,9 @@ def get_block_batch_topK(samples,K):
     # -- shape em up! --
     scores_topK = rearrange(scores_topK,'(b s) k -> b s k',b=nimages)
     blocks_topK = rearrange(blocks_topK,'(b s) k t -> b s k t',b=nimages)
+
+    # -- to cpu --
+    scores_topK = scores_topK.cpu()
+    blocks_topK = blocks_topK.cpu()
 
     return scores_topK,blocks_topK

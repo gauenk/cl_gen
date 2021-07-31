@@ -73,6 +73,7 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
     faiss_cfg = faiss.GpuIndexFlatConfig()
     faiss_cfg.useFloat16 = False
     faiss_cfg.device = gpuid
+    faiss.cvar.distance_compute_blas_threshold = 40
 
     # -- create database --
     gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)

@@ -17,7 +17,7 @@ from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 
 # -- [local] project imports --
 from ..utils import get_ref_block_index
-from .bootstrap_numba import compute_bootstrap,create_weights
+from .bootstrap_numba import compute_bootstrap,fill_weights,fill_weights_pix
 
 def get_score_functions(names):
     scores = edict()
@@ -60,6 +60,8 @@ def get_score_function(name):
         return bootstrapping_mod1
     elif name == "bootstrapping_mod2":
         return bootstrapping_mod2
+    elif name == "bootstrapping_mod3":
+        return bootstrapping_mod3
     elif name == "sim_trm":
         return sim_trm
     elif name == "ransac":
@@ -84,7 +86,7 @@ def bootstrapping(cfg,expanded):
     scores_t = torch.zeros(T,B*E,device=device)
     counts_t = torch.zeros(T,1,device=device)
     mask = torch.zeros(T,1,device=device)
-    nbatches,batch_size = 100,100
+    nbatches,batch_size = 10,150
     subsets = torch.LongTensor(sample_subset_grids(nbatches*batch_size,T))
     subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
     # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batch_size)
@@ -169,15 +171,15 @@ def bootstrapping_mod2(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
     nframes = T
     device = expanded.device
-    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) (b e)')
+    samples = rearrange(expanded,'r b e t c h w -> (r c h w) t (b e)')
     samples = samples.contiguous() # speed up?
     t_ref = T//2
-    nbatches,batchsize = 10,100
+    nbatches,batchsize = 1000,25
     nsubsets = nbatches*batchsize
 
     # -- compute ave diff between model and subsets --
-    scores_t = torch.zeros(B*E,T,device=device)
-    counts_t = torch.zeros(T,1,device=device)
+    # scores_t = torch.zeros(B*E,T,device=device)
+    # counts_t = torch.zeros(T,1,device=device)
     # subsets = torch.LongTensor(sample_subset_grids(nbatches*batchsize,T))
     ## subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
     # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batchsize)
@@ -185,16 +187,47 @@ def bootstrapping_mod2(cfg,expanded):
     # for s in range(nsubsets):
     #     usubset = torch.unique(subsets[s])
     #     weights[s,usubset] -= 1./len(usubset)
-    scores = torch.zeros(B*E,device=device)
+    # print("-=-=-"*3)
+    # print("[pre mod2]")
+    # print("-=-=-"*3)
+    # print("CUDA:0")
+    # print(torch.cuda.list_gpu_processes('cuda:0'))
+    # print(torch.cuda.memory_summary('cuda:0'))
+    # print("CUDA:1")
+    # print(torch.cuda.list_gpu_processes('cuda:1'))
+    # print(torch.cuda.memory_summary('cuda:1'))
+    # print(samples.shape)
 
+    scores = torch.zeros(B*E,device=device)
+    scores_t = torch.zeros(B*E,T,device=device)
+    counts = torch.zeros((batchsize,nframes),device=device)
+    weights = torch.zeros((batchsize,nframes),device=device)
     for batch_idx in range(nbatches):
-        weights = create_weights(batchsize,nframes)
-        # for b in range(batchsize):
-        #     print(weights[b])
-        weights = weights.to(device)
-        wsamples = torch.matmul(samples.T,weights.T).T
-        scores += torch.mean(torch.pow(wsamples,2),dim=(0,1))
+        weights,counts = fill_weights(weights,counts,batchsize,nframes,cfg.gpuid)
+        counts_t = torch.sum(counts,dim=0)[:,None]
+        # print("weights.shape ",weights.shape)
+        # print("samples.shape ",samples.shape)
+        # print("counts_t.shape ",counts_t.shape)
+        wsamples = weights @ samples
+        wsamples2 = torch.pow(wsamples,2)
+        # print("wsamples2.shape ",wsamples2.shape)
+        w_pix_ave = torch.mean(wsamples2,dim=0)
+        w_pix_ave_nmlz = (counts.T @ w_pix_ave) / counts_t
+        scores_t += w_pix_ave_nmlz.T
+        scores += torch.mean(w_pix_ave_nmlz,dim=0)
+    scores_t /= nbatches
     scores /= nbatches
+
+    # print("-=-=-"*3)
+    # print("[post mod2]")
+    # print("-=-=-"*3)
+    # print("CUDA:0")
+    # print(torch.cuda.list_gpu_processes('cuda:0'))
+    # print(torch.cuda.memory_summary('cuda:0'))
+    # print("CUDA:1")
+    # print(torch.cuda.list_gpu_processes('cuda:1'))
+    # print(torch.cuda.memory_summary('cuda:1'))
+    # torch.cuda.empty_cache()
 
     #     for subset in subsets[batch_idx]:
     #         subsize = len(subset)
@@ -208,16 +241,64 @@ def bootstrapping_mod2(cfg,expanded):
     # scores = torch.mean(scores_t,dim=0)
     # scores_t = scores_t.T # (T,E) -> (E,T)
     # vprint("scores.shape",scores.shape)
-
-    # -- no cuda --
-    scores = rearrange(scores.cpu(),'(b e) -> b e',b=B)
-    scores_t = rearrange(scores_t.cpu(),'(b e) t -> b e t',b=B)
+    scores = rearrange(scores,'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t,'(b e) t -> b e t',b=B)
 
     # -- add back patchsize for compat --
     scores = repeat(scores,'b e -> r b e',r=R)
     scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
 
     return scores,scores_t
+
+def bootstrapping_mod3(cfg,expanded):
+
+    # -- setup vars --
+    R,B,E,T,C,H,W = expanded.shape
+    nframes = T
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> c (r h w) t (b e)')
+    samples = samples.contiguous() # speed up?
+    ncolor,npix,nframes,nsamples = samples.shape
+    t_ref = nframes//2
+    nbatches,batchsize = 100,100
+    nsubsets = nbatches*batchsize
+
+    # -- init zeros --
+    scores = torch.zeros(nsamples,device=device)
+    scores_t = torch.zeros(nsamples,nframes,device=device)
+    counts = torch.zeros((batchsize,npix,nframes),device=device)
+    weights = torch.zeros((batchsize,npix,nframes),device=device)
+
+    # -- run batches --
+    for batch_idx in range(nbatches):
+        weights,counts = fill_weights_pix(weights,counts,batchsize,
+                                          npix,nframes,cfg.gpuid)
+        # print(weights[0,0,:3])
+        # counts_t = torch.sum(counts,dim=0)[:,None]
+
+        wsamples = weights.transpose(1,0) @ samples
+        wsamples = torch.pow(wsamples,2)
+        wsamples = torch.mean(wsamples,dim=(0,1))
+        # print("wsamples.shape ",wsamples.shape)
+        # print("counts.shape ",counts.shape)
+        
+        # wsamples_nmlz = (counts.T @ wsamples) / counts_t
+        # scores_t += wsamples_nmlz.T
+        # scores += torch.mean(wsamples_nmlz,dim=0)
+        scores += torch.mean(wsamples,dim=0)
+    scores_t /= nbatches
+    scores /= nbatches
+
+    # -- reshape --
+    scores = rearrange(scores,'(b e) -> b e',b=B)
+    scores_t = rearrange(scores_t,'(b e) t -> b e t',b=B)
+
+    # -- add back patchsize for compat --
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    return scores,scores_t
+
 
 def shapley(cfg,expanded):
     """

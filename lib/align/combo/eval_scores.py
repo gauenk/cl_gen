@@ -1,6 +1,6 @@
 
 # -- python imports --
-import time,nvtx
+import time,nvtx,numba,tqdm,types
 import numpy as np
 from einops import rearrange,repeat
 from easydict import EasyDict as edict
@@ -10,6 +10,7 @@ import torch
 
 # -- project imports --
 from pyutils import torch_to_numpy,save_image,images_to_psnrs
+from pyutils.mesh_gen import BatchGen
 import align.combo._block_utils as block_utils
 from align._utils import BatchIter
 from align.xforms import blocks_to_pix
@@ -36,16 +37,151 @@ class EvalBlockScores():
         # -- [new] each npix is computed separately --
         nimages = patches.shape[0]
         patches = rearrange(patches,'b p t a c h w -> 1 (b p) a t c h w')
-        scores,scores_t = self.score_fxn(None,patches)
-        scores = rearrange(scores,'1 (b p) a -> b p a',b=nimages).cpu()
+        cfg = edict({'gpuid':1})
+        scores,scores_t = self.score_fxn(cfg,patches)
+        scores = rearrange(scores,'1 (b p) a -> b p a',b=nimages)
         return scores
 
     def compute_scores(self,patches,masks,blocks):
         K = len(patches)
         return self.compute_topK_scores(patches,masks,blocks,K)
 
-    @nvtx.annotate("compute_topK_scores", color="orange")
     def compute_topK_scores(self,patches,masks,blocks,nblocks,K):
+        if isinstance(blocks,BatchGen):
+            return self.compute_topK_scores_gen(patches,masks,blocks,nblocks,K)
+        else:
+            return self.compute_topK_scores_tensor(patches,masks,blocks,nblocks,K)
+
+    @nvtx.annotate("compute_topK_scores", color="orange")
+    def compute_topK_scores_gen(self,patches,masks,block_gens,nblocks,K):
+        r"""
+        Generator
+        """
+        self._clear()
+        # -- current --
+        nimages,nsegs,nframes = patches.shape[:3]
+        pcolor,psH,psW = patches.shape[3:]
+        mcolor = masks.shape[3]
+
+        # -- torch to numpy --
+        device = patches.device
+
+        # -- setup batches --
+        ps = self.patchsize
+        batchsize = self.block_batchsize
+        naligns = batchsize
+        #biter = BatchIter(naligns,batchsize)
+        block_patches = np.zeros((nimages,nsegs,nframes,batchsize,pcolor,ps,ps))
+        block_masks = np.zeros((nimages,nsegs,nframes,batchsize,mcolor,ps,ps))
+        block_patches = torch.FloatTensor(block_patches).to(device,non_blocking=True)
+        block_masks = torch.FloatTensor(block_masks).to(device,non_blocking=True)
+        tokeep = torch.IntTensor(np.arange(naligns)).to(device,non_blocking=True)
+        nomotion = torch.LongTensor([4,]*nframes).reshape(1,nframes).to(device)
+        nomo = True
+
+        # total = 25**4
+        # bs = 128
+        # nbatches = total / bs.
+        idx = -1
+        nbgens = len(block_gens)
+        # print("nbgens.",nbgens)
+        #for block_gen_samples in tqdm.tqdm(block_gens,total=nbgens):
+        for block_gen_samples in block_gens:
+            idx += 1
+            naligns = block_gen_samples.shape[2]
+            # print("block_gen_samples.shape ",block_gen_samples.shape)
+            biter = BatchIter(naligns,self.block_batchsize)
+            for batch_indices in biter:
+                # print(f"batch index: {idx}")
+                
+                # -- index search space  --
+                batch = block_gen_samples[:,:,batch_indices,:]
+                # batch.shape = (????)
+                #batch = blocks[:,:,batch_indices,:]
+                # -- generator so the batch is the batch_index (2nd poor name) --
+                # batch = batch_indices.to(device,non_blocking=False)
+                batchsize = batch.shape[2]
+                
+                # -- find no motion --
+                check = torch.sum(torch.abs(batch[0][0] - nomotion),dim=1)
+                args = torch.where(check == 0)
+                if len(args[0]) > 0: nomo = False
+                
+                # -- index tiled images --
+                # -- [OLD CODE] --
+                # block_patches_i = block_patches[:,:,:,:batchsize]
+                # block_masks_i = block_masks[:,:,:,:batchsize]
+                # bp_shape = block_patches.shape
+                # naligns = bp_shape[3]
+
+                # print(f"[a] block_patches.shape {bp_shape} | naligns {naligns}")
+
+                # -- [OLD CODE] --
+                # block_patches_nba = numba.cuda.as_cuda_array(block_patches_i)
+                # patches_nba = numba.cuda.as_cuda_array(patches)
+                # batch_nba = numba.cuda.as_cuda_array(batch)
+                # block_utils.index_block_batches(block_patches_nba,patches_nba,batch_nba,
+                #                                 self.patchsize,nblocks)
+                
+                block_patches_i = block_utils.index_block_batches(block_patches,patches,
+                                                                  batch,tokeep,
+                                                                  self.patchsize,nblocks)
+
+                
+                # print(batch.shape)
+                # print(block_patches_i.shape)
+                # print("-=-=-"*3)
+                # print("pre.")
+                # print("-=-=-"*3)
+                # print("CUDA:0")
+                # print(torch.cuda.list_gpu_processes('cuda:0'))
+                # print("CUDA:1")
+                # print(torch.cuda.list_gpu_processes('cuda:1'))
+
+                # -- compute directly for sanity check --
+                block_patches_i = block_patches_i.to('cuda:1',non_blocking=True)
+                # block_masks_i = block_masks_i.to('cuda:1',non_blocking=True)
+
+                # print("-=-=-"*3)
+                # print("mid. [a]")
+                # print("-=-=-"*3)
+                # print("CUDA:0")
+                # print(torch.cuda.list_gpu_processes('cuda:0'))
+                # print("CUDA:1")
+                # print(torch.cuda.list_gpu_processes('cuda:1'))
+
+                scores = self.compute_batch_scores(block_patches_i,None)#block_masks_i)
+                
+                # print("-=-=-"*3)
+                # print("mid.")
+                # print("-=-=-"*3)
+                # print("CUDA:0")
+                # print(torch.cuda.list_gpu_processes('cuda:0'))
+                # print("CUDA:1")
+                # print(torch.cuda.list_gpu_processes('cuda:1'))
+
+                scores = scores.cpu()
+                batch = batch.cpu()
+                block_utils.block_batch_update(self.samples,scores,batch,K)
+
+                # print("-=-=-"*3)
+                # print("post.")
+                # print("-=-=-"*3)
+                # print("CUDA:0")
+                # print(torch.cuda.list_gpu_processes('cuda:0'))
+                # print("CUDA:1")
+                # print(torch.cuda.list_gpu_processes('cuda:1'))
+
+                torch.cuda.empty_cache()
+
+        # if nomo is False: print("[gens] no motion detected.")
+        # print("done.")
+        scores,blocks = block_utils.get_block_batch_topK(self.samples,K)
+        return scores,blocks
+        
+
+    @nvtx.annotate("compute_topK_scores", color="orange")
+    def compute_topK_scores_tensor(self,patches,masks,blocks,nblocks,K):
         """
 
         Search Space right now = total # of patches
@@ -79,7 +215,8 @@ class EvalBlockScores():
         - add another dimension to "blocks" for each ref_t pixel (later a batch).
         - index patches with "blocks" using implicit H space.
 
-        blocks.shape = (nimage,nsegs,nframes,narrangements)
+        #[old] blocks.shape = (nimage,nsegs,nframes,narrangements)
+        blocks.shape = (nimage,nsegs,narrangements, nframes)
         """
 
         self._clear()
@@ -87,19 +224,11 @@ class EvalBlockScores():
         nimages,nsegs,nframes = patches.shape[:3]
         pcolor,psH,psW = patches.shape[3:]
         mcolor = masks.shape[3]
-        # nimages,nsegs,naligns,nframes = blocks.shape
-
-        # # -- old --
-        # nimages,num_nl_patches,nframes = patches.shape[:3]
-        # search_space,C,H,W = patches.shape[3:]
-        # B,R,T,H,C,pH,pW = patches.shape
 
         # -- torch to numpy --
         device = patches.device
-        patches = torch_to_numpy(patches)
-        masks = torch_to_numpy(masks)
-        blocks = torch_to_numpy(blocks)
-        naligns = blocks.shape[2]
+        naligns = len(blocks[0][0])
+        # naligns = blocks.shape[2] # NOT a tensor!
 
         # -- setup batches --
         ps = self.patchsize
@@ -107,86 +236,36 @@ class EvalBlockScores():
         biter = BatchIter(naligns,batchsize)
         block_patches = np.zeros((nimages,nsegs,nframes,batchsize,pcolor,ps,ps))
         block_masks = np.zeros((nimages,nsegs,nframes,batchsize,mcolor,ps,ps))
-        
-
-        def sanity(patches):
-            print("patches.shape ",patches.shape)
-            nimages = patches.shape[0]
-            nframes = patches.shape[2]
-            patches = rearrange(patches,'b p t a c h w -> 1 (b p) a t (c h w)')
-            rshape = 'r bp a 1 chw -> r bp a t chw'
-            ref = repeat(patches[:,:,:,[nframes//2]],rshape,t=nframes)
-            ave = torch.mean((ref - patches)**2,dim=(-2,-1))
-            print("ave.shape ",ave.shape)
-            rshape = '1 (b p) a -> b p a'
-            scores = rearrange(ave,rshape,b=nimages).cpu()
-            return scores
-
-        
-        # blocks_rs = rearrange(blocks,'i p t h -> (i h) p t')
-        # print("blocks.shape", blocks.shape)
-        # print("blocks_rs.shape", blocks_rs.shape)
-        # pad = 2*(nblocks//2)
-        # isize = edict({'h':ps+pad,'w':ps+pad})
-        # pix_init = blocks_to_pix(blocks_rs,nblocks,isize=isize)
-        # print("pix_init.shape", pix_init.shape)
-        # pix = rearrange(pix_init,'(i h) p t two -> i p t h two')
-        # print(pix.shape)
-
-        #for batch in block_utils.iter_block_batches(blocks,self.block_batchsize):
-
-        # -- debug --
-        fs = int(np.sqrt(nsegs))
-        is_even = (fs%2) == 0
-        # mid_pix = fs*fs//2 + (fs//2)*is_even
-        mid_pix = 32*10+23
-        # print(mid_pix,mid_pix//fs,mid_pix%fs)
+        block_patches = torch.FloatTensor(block_patches).to(device,non_blocking=True)
+        block_masks = torch.FloatTensor(block_masks).to(device,non_blocking=True)
+        tokeep = torch.IntTensor(np.arange(naligns)).to(device,non_blocking=True)
+        nomotion = torch.LongTensor([4,]*nframes).reshape(1,nframes).to(device)
+        nomo = True
 
         for batch_indices in biter:
+        #for batch_indices in tqdm.tqdm(biter):
 
             # -- index search space  --
-            # batch = pix[:,:,batch_indices]
+            # batch = index_blocks_with_batches(blocks,batch_indices)
             batch = blocks[:,:,batch_indices,:]
-            batchsize = batch.shape[2]
-            # print(batch[0,-1])
-            # print(batch[0,mid_pix])
+
+            # -- find no motion --
+            # check = torch.sum(torch.abs(batch[0][0] - nomotion),dim=1)
+            # args = torch.where(check == 0)
+            # if len(args[0]) > 0: nomo = False
 
             # -- index tiled images --
-            # block_patches = block_utils.index_block_batches(patches,batch,
-            #                                                 self.patchsize,nblocks)
-            # block_masks = block_utils.index_block_batches(masks,batch,
-            #                                               self.patchsize,nblocks)
-            block_patches = torch_to_numpy(block_patches)[:,:,:,:batchsize]
-            block_masks = torch_to_numpy(block_masks)[:,:,:,:batchsize]
-            block_utils.index_block_batches(block_patches,patches,batch,
-                                            self.patchsize,nblocks)
-            # block_utils.index_block_batches(block_masks,masks,batch,
-            #                                 self.patchsize,nblocks)
+            block_patches_i = block_utils.index_block_batches(block_patches,patches,
+                                                              batch,tokeep,
+                                                              self.patchsize,nblocks)
 
-            # -- numpy to torch --
-            block_patches = torch.Tensor(block_patches).to(device)
-            # block_masks = torch.Tensor(block_masks).to(device)
-            
             # -- compute directly for sanity check --
-            scores = self.compute_batch_scores(block_patches,block_masks)
-            # scores = sanity(block_patches)
-            # print(torch_to_numpy(scores[0,-1]))
-            # print(torch_to_numpy(scores[0,mid_pix]))
-            # ref = repeat(block_patches[0,-1,nframes//2,12],
-            #              'c h w -> a c h w',a=batchsize)
-            # for t in range(nframes):
-            #     print(f"[{t}] psnrs ",images_to_psnrs(block_patches[0,-1,t],ref))
-            # print(torch.topk(scores[0,-1],1,largest=False))
-            # print(torch.topk(scores[0,mid_pix],1,largest=False))
-            # print(torch_to_numpy(scores[0,-1]))
-            # # shape = (b p t a c h w)
-            # save_image(torch.FloatTensor(patches[0,-1]),"pactches.png")
-            # save_image(block_patches[0,-1,2],"arangements.png")
-            # print("sleeping.")
-            # time.sleep(3)
-
+            block_patches_i = block_patches_i.to('cuda:1',non_blocking=True)
+            # block_masks = block_masks.to('cuda:1',non_blocking=True)
+            scores = self.compute_batch_scores(block_patches_i,block_masks)
 
             block_utils.block_batch_update(self.samples,scores,batch,K)
+        # if nomo is False: print("no motion detected.")
         scores,blocks = block_utils.get_block_batch_topK(self.samples,K)
         return scores,blocks
         

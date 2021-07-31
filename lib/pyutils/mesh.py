@@ -99,3 +99,4 @@ def create_list_pairs(fields):
             pairs.append([field1,field2])
     return pairs
 
+
