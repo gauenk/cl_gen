@@ -17,13 +17,16 @@ from align.xforms import blocks_to_pix
 
 class EvalBlockScores():
 
-    def __init__(self,score_fxn,patchsize,block_batchsize,noise_info):
+    def __init__(self,score_fxn,score_fxn_name,patchsize,
+                 block_batchsize,noise_info,gpuid=1):
         self.score_fxn = score_fxn
+        self.score_fxn_name = score_fxn_name
         self.patchsize = patchsize
         self.block_batchsize = block_batchsize
         self.noise_info = noise_info
         self.indexing = edict({})
         self.samples = edict({'scores':[],'blocks':[]})
+        self.gpuid = gpuid
 
     def _clear(self):
         self.samples = edict({'scores':[],'blocks':[]})
@@ -37,7 +40,7 @@ class EvalBlockScores():
         # -- [new] each npix is computed separately --
         nimages = patches.shape[0]
         patches = rearrange(patches,'b p t a c h w -> 1 (b p) a t c h w')
-        cfg = edict({'gpuid':1})
+        cfg = edict({'gpuid':self.gpuid})
         scores,scores_t = self.score_fxn(cfg,patches)
         scores = rearrange(scores,'1 (b p) a -> b p a',b=nimages)
         return scores
@@ -73,6 +76,10 @@ class EvalBlockScores():
         #biter = BatchIter(naligns,batchsize)
         block_patches = np.zeros((nimages,nsegs,nframes,batchsize,pcolor,ps,ps))
         block_masks = np.zeros((nimages,nsegs,nframes,batchsize,mcolor,ps,ps))
+        # print("patches.device", patches.device)
+        # print(torch.cuda.memory_summary(0))
+        # print(torch.cuda.memory_summary(1))
+        # print(torch.cuda.memory_summary(2))
         block_patches = torch.FloatTensor(block_patches).to(device,non_blocking=True)
         block_masks = torch.FloatTensor(block_masks).to(device,non_blocking=True)
         tokeep = torch.IntTensor(np.arange(naligns)).to(device,non_blocking=True)
@@ -125,7 +132,8 @@ class EvalBlockScores():
                 
                 block_patches_i = block_utils.index_block_batches(block_patches,patches,
                                                                   batch,tokeep,
-                                                                  self.patchsize,nblocks)
+                                                                  self.patchsize,
+                                                                  nblocks,self.gpuid)
 
                 
                 # print(batch.shape)
@@ -139,7 +147,8 @@ class EvalBlockScores():
                 # print(torch.cuda.list_gpu_processes('cuda:1'))
 
                 # -- compute directly for sanity check --
-                block_patches_i = block_patches_i.to('cuda:1',non_blocking=True)
+                block_patches_i = block_patches_i.to(f'cuda:{self.gpuid}',
+                                                     non_blocking=True)
                 # block_masks_i = block_masks_i.to('cuda:1',non_blocking=True)
 
                 # print("-=-=-"*3)
@@ -257,10 +266,11 @@ class EvalBlockScores():
             # -- index tiled images --
             block_patches_i = block_utils.index_block_batches(block_patches,patches,
                                                               batch,tokeep,
-                                                              self.patchsize,nblocks)
+                                                              self.patchsize,
+                                                              nblocks,self.gpuid)
 
             # -- compute directly for sanity check --
-            block_patches_i = block_patches_i.to('cuda:1',non_blocking=True)
+            block_patches_i = block_patches_i.to(f'cuda:{self.gpuid}',non_blocking=True)
             # block_masks = block_masks.to('cuda:1',non_blocking=True)
             scores = self.compute_batch_scores(block_patches_i,block_masks)
 

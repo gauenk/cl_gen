@@ -25,9 +25,9 @@ def create_weights_cuda(rng_states,nsubsets,nframes,weights,counts):
     # tidx = tx + ty * bw
     # tidx,t,t2,subsize = 0,0,0,0
     to_add = False
-    subset = cuda.local.array(shape=20,dtype=numba.uint8)
+    subset = cuda.local.array(shape=51,dtype=numba.uint8)
     # subset = cuda.local.array(shape=numba.int32(nframes),dtype=numba.float64)
-        
+
     if tidx < weights.shape[0]:
 
         # -- init to zero --
@@ -66,7 +66,7 @@ def fill_weights_pix_cuda(rng_states,nsubsets,npix,nframes,weights,counts):
     # -- get kernel indices --
     r_idx = cuda.grid(1)
     s_idx,p_idx = cuda.grid(2)
-    subset = cuda.local.array(shape=20,dtype=numba.uint8)
+    subset = cuda.local.array(shape=51,dtype=numba.uint8)
         
     if s_idx < weights.shape[0] and p_idx < weights.shape[1]:
 
@@ -107,7 +107,7 @@ def fill_weights_pix(weights,counts,nsubsets,npix,nframes,gpuid):
     return weights,counts
 
 def fill_weights_pix_cuda_launcher(weights,counts,nsubsets,npix,nframes,gpuid):
-    assert nframes <= 15, "Number of frames is maxed at 15."
+    assert nframes <= 51, "Number of frames is maxed at 51."
     numba.cuda.select_device(gpuid)
     device = weights.device
     weights = numba.cuda.as_cuda_array(weights)
@@ -153,7 +153,7 @@ def fill_weights_bar(weights,counts,nsubsets,nframes,gpuid):
     return weights
 
 def fill_weights_foo(weights,counts,nsubsets,nframes,gpuid):
-    assert nframes <= 15, "Number of frames is maxed at 15."
+    assert nframes <= 51, "Number of frames is maxed at 51."
     numba.cuda.select_device(gpuid)
     device = weights.device
     weights = numba.cuda.as_cuda_array(weights)

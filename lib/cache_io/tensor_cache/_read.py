@@ -9,7 +9,7 @@ import torch
 def read_tensor_cache(path,names):
     if names is None:
         tensor_path = path / "tensor.npy"
-        if tensor_path.exists(): return np.load(tensor_path,allow_pickle=False)
+        if tensor_path.exists(): return np.load(tensor_path,allow_pickle=True)
         else: return torch.Tensor([])
     else:
         return read_dict_tensor_cache(path,names)
@@ -19,7 +19,7 @@ def read_dict_tensor_cache(path,names):
     for name in names:
         names_fn = path / f"{name}.npy"
         if not names_fn.exists(): value = []
-        else: value = np.load(names_fn,allow_pickle=False)
+        else: value = np.load(names_fn,allow_pickle=True)
         data[name] = torch.tensor(value)
     return data
 

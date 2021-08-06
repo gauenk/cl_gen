@@ -15,11 +15,21 @@ class TensorCache():
     def __init__(self,root):
         self.root = root
 
-    def convert_files_to_tensors(self,results):
-        return convert_files_to_tensors(self.root,results)
+    #------------------------------------
+    #        Primary Functions
+    #------------------------------------
 
-    def convert_tensors_to_files(self,results):
-        return convert_tensors_to_files(self.root,results)
+    def convert_files_to_tensors(self,uuid,results):
+        path = self.root / uuid # used to just be self.root
+        return convert_files_to_tensors(path,results)
+
+    def convert_tensors_to_files(self,uuid,results):
+        path = self.root / uuid # used to just be self.root
+        return convert_tensors_to_files(path,results)
+
+    #------------------------------------
+    #         Helper Functions
+    #------------------------------------
 
     def append_tensor_cache(self,path,data,dim=2,overwrite=False):
         return append_tensor_cache(path,data,dim,overwrite)

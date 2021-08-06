@@ -102,6 +102,8 @@ def split_frame_search_serial(patches,masks,evaluator,curr_blocks,brange,nblocks
         # blocks.shape = nimages, nsegs, K, nframes
         topK_blocks_t = blocks[:,:,:,t]
         topK_blocks[:,:,t,:] = topK_blocks_t
+        torch.cuda.empty_cache()
+
 
     return topK_blocks
 

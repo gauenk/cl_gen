@@ -49,7 +49,7 @@ class UUIDCache():
     def __init__(self,root,version):
         self.root = root
         self.version = version
-        self.uuid_file_skel = "uuid_database_v{:s}.json"
+        self.uuid_file_skel = "uuid_database_{:s}.json"
         # self.init_uuid_file()
 
     @property
@@ -69,10 +69,18 @@ class UUIDCache():
         return read_uuid_file(self.uuid_file)
 
     def get_uuid_from_config(self,exp_config):
-        return get_uuid_from_config(self.data,exp_config)
+        if self.data is None:
+            self.init_uuid_file()
+            return -1
+        else:
+            return get_uuid_from_config(self.data,exp_config)
 
     def get_config_from_uuid(self,uuid):
-        return get_config_from_uuid(self.data,uuid)
+        if self.data is None:
+            self.init_uuid_file()
+            return None
+        else:
+            return get_config_from_uuid(self.data,uuid)
 
     def get_config_from_uuid_list(self,uuids):
         configs = []

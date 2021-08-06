@@ -53,6 +53,7 @@ def rand_subset_search(patches,masks,evaluator,curr_blocks,brange,nblocks,subsiz
         scores,blocks = evaluator.compute_topK_scores(patches,masks,srch_blocks,nblocks,1)
         blocks = torch_to_numpy(blocks)
         curr_blocks = blocks[:,:,0,:]
+        torch.cuda.empty_cache()
 
     return curr_blocks
 

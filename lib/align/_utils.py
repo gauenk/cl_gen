@@ -25,8 +25,22 @@ def compute_epe(tensor_a,tensor_b):
     tensor_b = tensor_b.cpu().type(torch.float)
     epe = F.mse_loss(tensor_a,tensor_b,reduction='none')
     dims = torch.arange(tensor_a.ndim)
-    epe = torch.mean(epe,dim=list(dims[1:]))
+    epe = torch.mean(epe,dim=(1,3)).T
     return epe
+
+def compute_pair_flow_acc(guess,gt):
+    nimages,npix,nframes_m1,two = guess.shape
+    guess = guess.cpu()
+    gt = gt.cpu()
+    flow_acc = torch.zeros(nframes_m1,nimages)
+    for t in range(nframes_m1):
+        guess_t = guess[:,:,t,:].type(torch.long)
+        gt_t = gt[:,:,t,:].type(torch.long)
+        both = torch.all(guess_t == gt_t,dim=-1)
+        ncorrect = torch.sum(both,dim=1).type(torch.float)
+        acc = 100 * ncorrect / npix
+        flow_acc[t,:] = acc
+    return flow_acc 
 
 def construct_return_dict(fields,options):
     results = {}

@@ -19,6 +19,18 @@ def torch_to_numpy(tensor):
     else:
         return tensor
 
+def dict_torch_to_numpy(dict_tensors):
+    dict_ndarrays = edict()
+    for name,tensor in dict_tensors.items():
+        dict_ndarrays[name] = torch_to_numpy(tensor)
+    return dict_ndarrays
+
+def edict_torch_to_numpy(dict_tensors):
+    edict_ndarrays = edict()
+    for name,tensor in dict_tensors.items():
+        edict_ndarrays[name] = torch_to_numpy(tensor)
+    return edict_ndarrays
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 

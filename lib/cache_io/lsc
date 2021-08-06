@@ -7,21 +7,24 @@ from cache_io.uuid_cache import UUIDCache,print_config
 
 def create_uuid_list_from_glob(path_l):
     uuid_l = []
+    # glob_path_l = str(path_l) + "*"
     for filename in path_l:
         uuid_l.append(str(Path(filename).stem))
     return uuid_l
 
 if len(sys.argv) == 1:
     print("lsc allows users to quickly read cache info.")
+    print("Usage: lsc [version] [path_to_json_dir] [glob_to_uuid_dir]")
     exit()
 
 try:
     version = float(sys.argv[1])
 except:
-    print("lsc requires second argument to be the version number.")
-    exit()
+    version = sys.argv[1]
+    print("lsc recommends the second argument be a float.")
+    # exit()
 
-root = sys.argv[2]
+root = Path(sys.argv[2])
 version = sys.argv[1]
 cache = UUIDCache(root,version)
 
@@ -33,7 +36,6 @@ if not cache.uuid_file.exists():
 path_l = sys.argv[2:]
 uuid_l = create_uuid_list_from_glob(path_l)
 config_l = cache.get_config_from_uuid_list(uuid_l)
-
 if len(config_l) == 1 and config_l[0] == -1:
     print("No uuids selected so printing UUID Database")
     for uuid,config in cache.data.items():

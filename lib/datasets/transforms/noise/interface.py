@@ -29,6 +29,7 @@ def set_noise(cfg,ns):
     return ns.name
 
 def get_noise_config(cfg,name):
+
     # -- 1.) create default config from name --
     if name.split("-")[0] == "g": # gaussian
         wrapper = edict()
@@ -136,8 +137,9 @@ def get_gaussian_config_from_name(cfg,name):
     noise_level = float(noise_str.replace('p','.'))
     ns = copy.deepcopy(cfg.noise_params[noise_type])
     ns['ntype'] = noise_type
-    ns['stddev'] = noise_level
-    ns['name'] = f"g-{ns['stddev']}".replace(".","p")
+    ns['stddev'] = noise_level # legacy
+    ns['std'] = noise_level
+    ns['name'] = f"g-{ns['std']}".replace(".","p")
     ns = edict(ns)
     return ns
 

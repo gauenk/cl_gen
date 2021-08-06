@@ -13,7 +13,7 @@ import torchvision.transforms.functional as tvF
 def print_tensor_stats(prefix,tensor):
     stats_fmt = (tensor.min().item(),tensor.max().item(),
                  tensor.mean().item(),tensor.std().item())
-    stats_str = "%2.2e,%2.2e,%2.2e,%2.2e" % stats_fmt
+    stats_str = "[min,max,mean,std]: %2.2e,%2.2e,%2.2e,%2.2e" % stats_fmt
     print(prefix,stats_str)
 
 def np_log(np_array):

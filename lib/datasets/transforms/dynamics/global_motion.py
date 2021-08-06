@@ -96,13 +96,14 @@ class GlobalCameraMotionTransform():
         # tvUtils.save_image(pic_save,"rs-test_after.png")
         # exit()
 
-        # -- simple, continuous motion --
-        # direction = self.sample_direction()
-        # tl = self.init_coordinate(direction,h,w)
-
         # -- jitter --
-        direction = [0,0]
-        tl = torch.IntTensor([self.frame_size//2,self.frame_size//2])
+        # direction = [0,0]
+        # tl = torch.IntTensor([self.frame_size//2,self.frame_size//2])
+
+        # -- simple, continuous motion --
+        direction = self.sample_direction()
+        tl = self.init_coordinate(direction,h,w)
+
 
         # -- compute pixels per frame and resize image for fractions -- 
         if raw_ppf < 1 and raw_ppf > 0:
@@ -127,9 +128,8 @@ class GlobalCameraMotionTransform():
             # -- jitter --
             # mult = 1.
             # direction = self.sample_direction()
+            # step = (torch.round(mult * direction * ppf)).type(torch.int)
 
-
-            step = (torch.round(mult * direction * ppf)).type(torch.int)
             tl_i = tl + step
 
             delta_list.append(step)

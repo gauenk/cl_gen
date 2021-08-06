@@ -6,7 +6,7 @@
 # -- project imports --
 import align.nn
 import align.combo
-from align._utils import assert_cfg_fields,compute_epe,compute_aligned_psnr
+from align._utils import assert_cfg_fields,compute_epe,compute_aligned_psnr,compute_pair_flow_acc
 
 def compute_alignment(cfg,align_fxn,images):
     """

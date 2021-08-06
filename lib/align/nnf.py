@@ -33,7 +33,7 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
     vals = np.concatenate(vals,axis=0)
     locs = np.concatenate(locs,axis=0)
     locs[...,:] = locs[...,::-1] # (HERE) row,cols -> cols,rows
-    print("burst_nnf.shape", locs.shape)
+    #print("burst_nnf.shape", locs.shape)
     return vals,locs
 
 def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):

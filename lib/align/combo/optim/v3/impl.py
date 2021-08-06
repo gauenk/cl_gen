@@ -25,7 +25,7 @@ from ._subsets import rand_subset_search
 
 def run(patches,masks,evaluator,
         nblocks,iterations,
-        subsizes,K):
+        subsizes,K,proc_idx):
 
     # TODO: if patches are not rectangles, create masks and *USE*
     # -- currently they dont do anything.
@@ -37,18 +37,23 @@ def run(patches,masks,evaluator,
 
     # -- init settings --
     evaluator = copy.deepcopy(evaluator)
+    gpuid = gpuid_from_proc(proc_idx)
+    evaluator.gpuid = gpuid
     nimages,nsegs,nframes = patches.shape[:3]
     assert nimages == 1,"Single batch per search."
     curr_blocks = init_optim_block(nimages,nsegs,nframes,nblocks)
     exh_brange = exh_block_range(nimages,nsegs,nframes,nblocks)
 
+    # -- swap device --
+    patches = patches.to(f'cuda:{gpuid}',non_blocking=True)
+    masks = masks.to(f'cuda:{gpuid}',non_blocking=True)
+    
     # -- debug --
     frame_size = int(np.sqrt(nsegs))
     is_even = frame_size%2 == 0
     mid_edge = frame_size*frame_size//2
     mid_pix = frame_size*frame_size//2 + (frame_size//2)*is_even
     mid_pix = 32*10 + 23
-
 
     # -- initial search using "ave" --
     ave_eval = create_ave_eval(evaluator)
@@ -79,9 +84,9 @@ def run(patches,masks,evaluator,
 
 def create_ave_eval(evaluator):
     score_fxn = get_score_function("ave")
-    ave_eval = EvalBlockScores(score_fxn,evaluator.patchsize,
+    ave_eval = EvalBlockScores(score_fxn,"ave",evaluator.patchsize,
                                 evaluator.block_batchsize,
-                                evaluator.noise_info)
+                                evaluator.noise_info,evaluator.gpuid)
     return ave_eval
 
 def init_split_search(patches,masks,ave_eval,curr_blocks,exh_brange,nblocks):
@@ -90,7 +95,14 @@ def init_split_search(patches,masks,ave_eval,curr_blocks,exh_brange,nblocks):
     curr_blocks = pick_top1_blocks(topK_blocks)
     return curr_blocks
     
-
+def gpuid_from_proc(proc_idx):
+    mod = proc_idx % 3 
+    if mod in [0,1]:
+        gpuid = 1
+    else:
+        gpuid = 2
+    # return gpuid
+    return 1
 
 """
 

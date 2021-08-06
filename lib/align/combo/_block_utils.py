@@ -5,6 +5,7 @@ import numpy as np
 from einops import rearrange
 
 # -- numba imports --
+import numba
 from numba import jit,prange,cuda
 
 # -- pytorch imports --
@@ -28,11 +29,12 @@ def iter_block_batches(blocks,batchsize):
         batch = blocks[...,start:end,:]
         yield batch
 
-def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks):
+def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks,gpuid):
     # -- prepare data --
     batchsize = batch.shape[2]
     indexed = indexed[:,:,:,:batchsize]
     tokeep = tokeep[:batchsize]
+    numba.cuda.select_device(gpuid)
     indexed_nba = cuda.as_cuda_array(indexed)
     batch_nba = cuda.as_cuda_array(batch)
     tensor_nba = cuda.as_cuda_array(tensor)

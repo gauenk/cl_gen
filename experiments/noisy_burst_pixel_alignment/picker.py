@@ -6,8 +6,7 @@ from inquirer import List,prompt
 # import noisy_burst_pixel_alignment.noisy_hdr
 
 import noisy_alignment
-import unsup_denoising_dl
-import unsup_denoising_cl
+import unsup_denoising
 import sup_denoising
 import noisy_hdr
 
@@ -17,8 +16,7 @@ def run():
              message="Pick a experiment to run!",
              choices=["noisy_alignment",
                       "sup_denoising",
-                      "unsup_denoising_dl",
-                      "unsup_denoising_cl",
+                      "unsup_denoising",
                       "noisy_hdr",
                       "none"]
         )
@@ -26,8 +24,7 @@ def run():
     answer = prompt(options)
     choices=["noisy_alignment",
              "sup_denoising",
-             "unsup_denoising_dl",
-             "unsup_denoising_cl",
+             "unsup_denoising",
              "noisy_hdr",
              "none"]
 
@@ -35,10 +32,8 @@ def run():
         noisy_hdr.run()
     elif answer['exp'] == "sup_denoising":
         sup_denoising.run()
-    elif answer['exp'] == "unsup_denoising_dl":
-        unsup_denoising_dl.run()
-    elif answer['exp'] == "unsup_denoising_cl":
-        unsup_denoising_cl.run()
+    elif answer['exp'] == "unsup_denoising":
+        unsup_denoising.run()
     elif answer['exp'] == "noisy_alignment":
         noisy_alignment.run()
     elif answer['exp'] == "none":

@@ -27,7 +27,7 @@ def get_cfg_defaults():
     cfg.noise_params = edict({'pn':{'alpha':10.,'std':0},
                               'g':{'std':25.},'ntype':'pn'})
     cfg.dynamic_info = edict()
-    cfg.dynamic_info.mode = 'jitter'
+    cfg.dynamic_info.mode = 'global'
     cfg.dynamic_info.frame_size = cfg.frame_size
     cfg.dynamic_info.nframes = cfg.nframes
     cfg.dynamic_info.ppf = 0
@@ -88,7 +88,7 @@ def get_exp_cfgs(name):
 
     return named_mesh,order    
 
-def setup_exp_cfg():
+def setup_exp_cfg(base_cfg,exp):
 
     # -- create a copy --
     cfg = copy.deepcopy(base_cfg)
@@ -113,12 +113,12 @@ def setup_exp_cfg():
     
     # -- dynamics function --
     cfg.frame_size = 196
-    cfg.dynamic.ppf = exp.ppf
-    cfg.dynamic.bool = True
-    cfg.dynamic.random_eraser = False
-    cfg.dynamic.frame_size = cfg.frame_size
-    cfg.dynamic.total_pixels = cfg.dynamic.ppf*(cfg.nframes-1)
-    cfg.dynamic.nframes = exp.nframes
+    cfg.dynamic_info.ppf = exp.ppf
+    cfg.dynamic_info.bool = True
+    cfg.dynamic_info.random_eraser = False
+    cfg.dynamic_info.frame_size = cfg.frame_size
+    cfg.dynamic_info.total_pixels = cfg.dynamic_info.ppf*(cfg.nframes-1)
+    cfg.dynamic_info.nframes = exp.nframes
 
     return cfg
 

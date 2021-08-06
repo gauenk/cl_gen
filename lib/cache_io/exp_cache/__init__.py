@@ -5,11 +5,17 @@ Read and write experiments based on configs
 
 """
 
-import shutil,os
+import shutil,os,json,tqdm
+import pandas as pd
 from pathlib import Path
+
+import numpy as np
+from einops import rearrange,repeat
 
 from cache_io.uuid_cache import UUIDCache
 from cache_io.tensor_cache import TensorCache
+
+VERBOSE=False
 
 class ExpCache():
 
@@ -29,11 +35,11 @@ class ExpCache():
     def get_uuid_from_config(self,config):
         return self.uuid_cache.get_uuid_from_config(config)
 
-    def convert_tensors_to_files(self,path,data):
-        return self.tensor_cache.convert_tensors_to_files(path.parents[0],data)
+    def convert_tensors_to_files(self,uuid,data):
+        return self.tensor_cache.convert_tensors_to_files(uuid,data)
 
-    def convert_files_to_tensors(self,path,data):
-        return self.tensor_cache.convert_files_to_tensors(path.parents[0],data)
+    def convert_files_to_tensors(self,uuid,data):
+        return self.tensor_cache.convert_files_to_tensors(uuid,data)
     
     # ---------------------
     #   Primary Functions
@@ -62,20 +68,72 @@ class ExpCache():
 
     def load_records(self,exps):
         records = []
-        for config in tqdm(exps):
+        for config in tqdm.tqdm(exps):
             results = self.load_exp(config)
             uuid = self.get_uuid(config)
             if results is None: continue
-            append_to_record(records,uuid,config,results)
+            self.append_to_record(records,uuid,config,results)
+        records = pd.DataFrame(records)
         return records
 
-    def append_to_record(records,uuid,config,results):
+    def append_to_record(self,records,uuid,config,results):
         record = {'uuid':uuid}
         for key,value in config.items():
             record[key] = value
         for result_id,result in results.items():
             record[result_id] = result
         records.append(record)
+
+    def load_flat_records(self,exps):
+        """
+        Load records but flatten exp configs against
+        experiments. Requires "results" to be have 
+        equal number of rows.
+        """
+        records = []
+        for config in tqdm.tqdm(exps):
+            results = self.load_exp(config)
+            uuid = self.get_uuid(config)
+            if results is None: continue
+            self.append_to_flat_record(records,uuid,config,results)
+        records = pd.concat(records)
+        return records
+
+    def append_to_flat_record(self,records,uuid,config,results):
+
+        # -- init --
+        record = {}
+
+        # -- append results --
+        rlen = -1
+        for result_id,result in results.items():
+            record[result_id] = list(result)
+            rlen = len(result)
+
+        # -- repeat uuid --
+        uuid_np = repeat(np.array([str(uuid)]),'1 -> r',r=rlen)
+        record['uuid'] = list(uuid_np)
+
+        # -- standard append --
+        for key,value in config.items():
+            record[key] = list(repeat(np.array([value]),'1 -> r',r=rlen))
+
+        # -- create id along axis --
+        pdid = np.arange(rlen)
+        record['pdid'] = np.arange(rlen)
+
+        # -- repeat config info along result axis --
+        # print("All should be equal length.")
+        # for key,val in record.items():
+        #     print(key,len(val))
+
+        # record = pd.DataFrame().append(record,ignore_index=True)
+        record = pd.DataFrame(record,index=pdid)
+        records.append(record)
+
+    # -------------------------
+    #     Clear Function
+    # -------------------------
 
     def clear(self):
         print("Clearing Cache.")
@@ -96,35 +154,33 @@ class ExpCache():
         self.uuid_cache.init_uuid_file()
     
     # -------------------------
-    #   Supporting Functions
+    #   Read/Write Functions
     # -------------------------
 
     def read_results(self,uuid):
         uuid_path = self.root / uuid
         if not uuid_path.exists(): return None
         results_path = uuid_path / "results.pkl"
-        results = read_results_file(results_path)
+        results = self.read_results_file(results_path,uuid)
         return results
 
     def write_results(self,uuid,results):
         uuid_path = self.root / Path(uuid)
-        if not uuid_path.exists(): path.mkdir(parents=True)
+        if not uuid_path.exists(): uuid_path.mkdir(parents=True)
         results_path = uuid_path / "results.pkl"
-        write_results_file(results_path,results)
+        self.write_results_file(results_path,uuid,results)
 
     def check_results_exists(self,uuid):
         path = self.root / Path(uuid) / "results.pkl"
         return path.exists()
-
-    def write_results_file(results_path,data):
-        data_files = self.convert_tensors_to_files(path.parents[0],data)
+    
+    def write_results_file(self,path,uuid,data):
+        data_files = self.convert_tensors_to_files(uuid,data)
         with open(path,'w') as f:
             json.dump(data_files,f)
 
-    def read_results_file(results_path):
+    def read_results_file(self,path,uuid):
         with open(path,'r') as f:
             data = json.load(f)
-        data_tensors = self.convert_files_to_tensors(path.parents[0],data)
+        data_tensors = self.convert_files_to_tensors(uuid,data)
         return data_tensors
-
-

@@ -12,16 +12,19 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 import settings
-from align import compute_epe,compute_aligned_psnr
-import align.nnf as nnf
-import align.combo as combo
-from align.combo.optim import AlignOptimizer
-from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow,flow_to_blocks
 from pyutils import tile_patches,save_image,torch_to_numpy
+from pyutils.vst import anscombe
 from patch_search import get_score_function
 from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
 
-# -- profiler --
+# -- [align] package imports --
+from align import compute_epe,compute_aligned_psnr
+import align.nnf as nnf
+from align.combo.eval_scores import EvalBlockScores
+from align.combo.optim import AlignOptimizer
+from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow,flow_to_blocks
+
+# -- cuda profiler --
 import nvtx
 
 def set_seed(seed):
@@ -32,7 +35,7 @@ def config():
     cfg = edict()
 
     # -- exp settings --
-    cfg.nframes = 5
+    cfg.nframes = 15
     cfg.frame_size = 32
 
     # -- data config --
@@ -40,24 +43,27 @@ def config():
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.dataset.name = "voc"
     cfg.dataset.dict_loader = True
+    cfg.dataset.num_workers = 2
     cfg.batch_size = 1
     # cfg.dataset.load_residual = False
     # cfg.dataset.triplet_loader = True
     # cfg.dataset.bw = False
 
-    cfg.noise_params = edict({'g':{'std':50.},'ntype':'g'})
+    # cfg.noise_params = edict({'g':{'std':25.},'ntype':'g'})
+    cfg.noise_params = edict({'pn':{'alpha':10.,'std':0},'ntype':'pn'})
     cfg.dynamic_info = edict()
     cfg.dynamic_info.mode = 'global'
     cfg.dynamic_info.frame_size = cfg.frame_size
     cfg.dynamic_info.nframes = cfg.nframes
-    cfg.dynamic_info.ppf = 1
+    cfg.dynamic_info.ppf = 0
     cfg.dynamic_info.textured = True
     cfg.random_seed = 234
 
     # -- combo config --
-    cfg.nblocks = 5
+    cfg.nblocks = 3
     cfg.patchsize = 5
-    cfg.score_fxn_name = "bootstrapping_mod2"
+    # cfg.score_fxn_name = "bootstrapping"
+    cfg.score_fxn_name = "bootstrapping_mod3"
     
     return cfg
 
@@ -86,7 +92,7 @@ def test_nnf():
     # -- load dataset --
     data,loaders = load_image_dataset(cfg)
     image_iter = iter(loaders.tr)    
-    nskips = 2+4+2
+    nskips = 2+4+2+4+1
     for skip in range(nskips): next(image_iter)
     
     # -- get score function --
@@ -94,7 +100,7 @@ def test_nnf():
     score_fxn_bs = get_score_function(cfg.score_fxn_name)
 
     # -- some constants --
-    NUM_BATCHES = 5
+    NUM_BATCHES = 10
     nframes,nblocks = cfg.nframes,cfg.nblocks 
     patchsize = cfg.patchsize
     ppf = cfg.dynamic_info.ppf
@@ -103,15 +109,17 @@ def test_nnf():
     # -- create evaluator for ave; simple --
     iterations,K = 1,1
     subsizes = []
-    eval_ave_simp = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,256,None)
+    block_batchsize = 256
+    eval_ave_simp = EvalBlockScores(score_fxn_ave,"ave",patchsize,block_batchsize,None)
 
     # -- create evaluator for ave --
     iterations,K = 1,1
     subsizes = []
-    eval_ave = combo.eval_scores.EvalBlockScores(score_fxn_ave,patchsize,256,None)
+    eval_ave = EvalBlockScores(score_fxn_ave,"ave",patchsize,block_batchsize,None)
 
     # -- create evaluator for bootstrapping --
-    eval_prop = combo.eval_scores.EvalBlockScores(score_fxn_bs,patchsize,256,None)
+    block_batchsize = 64
+    eval_prop = EvalBlockScores(score_fxn_bs,"bs",patchsize,block_batchsize,None)
 
     # -- iterate over images --
     for image_bindex in range(NUM_BATCHES):
@@ -129,6 +137,8 @@ def test_nnf():
         static_noisy = sample['snoisy'] # no dynamics and noise
         static_clean = sample['sburst'] # no dynamics and no noise
         flow_gt = sample['flow']
+        if cfg.noise_params.ntype == "pn":
+            dyn_noisy = anscombe.forward(dyn_noisy)
 
         # -- shape info --
         T,B,C,H,W = dyn_noisy.shape
@@ -137,6 +147,7 @@ def test_nnf():
         npix = H*W
 
         # -- groundtruth flow --
+        # print("flow_gt",flow_gt)
         flow_gt_rs = rearrange(flow_gt,'i tm1 two -> i 1 tm1 two')
         blocks_gt = flow_to_blocks(flow_gt_rs,nblocks)
         # print("\n\n")
@@ -159,7 +170,9 @@ def test_nnf():
 
         # -- compute proposed search of nnf --
         start_time = time.perf_counter()
-        split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy,ref_t,patchsize)
+        print(dyn_noisy.shape)
+        # split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy,ref_t,patchsize)
+        split_pix = np.copy(nnf_pix)
         split_pix_best = torch.LongTensor(rearrange(split_pix[...,0,:],shape_str))
         split_pix_best = torch.LongTensor(split_pix_best)
         pix_split = split_pix_best.clone()
@@ -168,25 +181,27 @@ def test_nnf():
         time_split = time.perf_counter() - start_time
 
         # -- compute simple ave --
-        iterations,K = 1,1
+        iterations,K = 0,1
         subsizes = []
         print("[simple] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flow_ave_simp = optim.run(dyn_noisy,patchsize,eval_ave_simp,
-                             nblocks,iterations,subsizes,K)
+        # flow_ave_simp = optim.run(dyn_noisy,patchsize,eval_ave_simp,
+        #                      nblocks,iterations,subsizes,K)
+        flow_ave_simp = flow_gt.clone().cpu()
         aligned_ave_simp = align_from_flow(dyn_clean,flow_ave_simp,nblocks,isize=isize)
         time_ave_simp = time.perf_counter() - start_time
         print(flow_ave_simp.shape)
 
         # -- compute complex ave --
-        iterations,K = 1,1
+        iterations,K = 0,1
         subsizes = []
         print("[complex] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
         flow_ave = optim.run(dyn_noisy,patchsize,eval_ave,
                              nblocks,iterations,subsizes,K)
+        # flow_ave = flow_gt.clone()
         pix_ave = flow_to_pix(flow_ave.clone(),isize=isize)
         aligned_ave = align_from_flow(dyn_clean,flow_ave,nblocks,isize=isize)
         time_ave = time.perf_counter() - start_time
@@ -194,10 +209,16 @@ def test_nnf():
         # -- compute proposed search of nnf --
         # iterations,K = 50,3
         # subsizes = [2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2]
-        iterations,K = 1,nblocks**2
-        subsizes = [nframes]
-        # subsizes = [3,3,3,3]
-        print("Bootstrap loss function")
+        #iterations,K = 1,nblocks**2
+        # K is a function of noise level.
+        # iterations,K = 1,nblocks**2
+        iterations,K = 1,2*nblocks#**2
+        # subsizes = [3]#,3,3,3,3,3,3,3,3,3]
+        # subsizes = [3,3,3,3,3,3,3,]
+        subsizes = [3,3,3,3,3,3,3,3]
+        # subsizes = [nframes]
+        # subsizes = [nframes]
+        print("[Bootstrap] loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
         flow_est = optim.run(dyn_noisy,patchsize,eval_prop,
@@ -271,7 +292,6 @@ def test_nnf():
         ave_nnf = compute_epe(flow_ave,flow_nnf)
         est_nnf = compute_epe(flow_est,flow_nnf)
 
-
         # -- End-Point-Errors --
         print("-"*50)
         print("EPE Errors [smaller is better]")
@@ -296,10 +316,23 @@ def test_nnf():
         print("Proposed v.s. NNF")
         print(est_nnf)
 
+        # -- compare accuracy of method nnf v.s. actual nnf --
+        def compute_flow_acc(guess,gt):
+            both = torch.all(guess.type(torch.long) == gt.type(torch.long),dim=-1)
+            ncorrect  = torch.sum(both)
+            acc = 100 * float(ncorrect) / both.numel()
+            return acc 
+
+        split_nnf_acc = compute_flow_acc(flow_split,flow_nnf)
+        ave_simp_nnf_acc = compute_flow_acc(flow_ave_simp,flow_nnf)
+        ave_nnf_acc = compute_flow_acc(flow_ave,flow_nnf)
+        est_nnf_acc = compute_flow_acc(flow_est,flow_nnf)
+
+
         # -- PSNR to Reference Image --
         pad = 2*(nframes-1)*ppf+4
         isize = edict({'h':H-pad,'w':W-pad})
-        print("isize: ",isize)
+        # print("isize: ",isize)
         aligned_of = remove_center_frame(aligned_of)
         aligned_nnf = remove_center_frame(aligned_nnf)
         aligned_split = remove_center_frame(aligned_split)
@@ -332,6 +365,21 @@ def test_nnf():
         print("Proposed [new method]")
         print(psnr_est)
 
+
+        # -- print nnf accuracy here --
+
+        print("-"*50)
+        print("NNF Accuracy [bigger is better]")
+        print("-"*50)
+
+        print("Split v.s. NNF")
+        print(split_nnf_acc)
+        print("Ave [Simple] v.s. NNF")
+        print(ave_simp_nnf_acc)
+        print("Ave v.s. NNF")
+        print(ave_nnf_acc)
+        print("Proposed v.s. NNF")
+        print(est_nnf_acc)
 
         # -- location of PSNR errors --
         csize = 30
@@ -400,3 +448,5 @@ def test_nnf():
         print("ave([NNF] - [Ave]): %2.3f" % delta_ave.mean().item())
         print("ave([NNF] - [Proposed]): %2.3f" % delta_est.mean().item())
 
+if __name__ == "__main__":
+    test_nnf()

@@ -2,7 +2,7 @@ from inquirer import List,prompt
 
 import noisy_alignment.experiments.compare_to_theory as compare_to_theory
 import noisy_alignment.experiments.compare_to_competitors as compare_to_competitors
-import noisy_alignment.experiments.stress_tests as tress_tests
+import noisy_alignment.experiments.stress_tests as stress_tests
 
 def run():
     options = [

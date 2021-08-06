@@ -1,23 +1,17 @@
 
 
 # -- python --
-import numpy as np
-import pandas as pd
-import numpy.random as npr
 from easydict import EasyDict as edict
 
 # -- python plotting --
 import matplotlib
-import seaborn as sns
 matplotlib.rcParams['text.usetex'] = True
-import matplotlib.pyplot as plt
-from matplotlib import cm as plt_cm
 
 # -- project imports --
-from pyutils import add_legend,create_meshgrid,np_log,create_list_pairs
+from pyutils import create_list_pairs
 
 # -- local imports --
-from pretty_plots.stat_test_properties.misc import skip_with_endpoints,filter_sim_fields_range
+from pretty_plots.stat_test_properties.misc import filter_sim_fields_range
 from pretty_plots.stat_test_properties.plot import plot_single_sim_group,plot_sim_test_pairs,stratify_contour_plots,stratify_line_plots
 
 

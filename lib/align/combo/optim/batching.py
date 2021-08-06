@@ -39,6 +39,8 @@ def run_burst(fxn,burst,patchsize,evaluator,
     # save_image(patches[0,32*15],"patches_31x15.png",(-0,5,0.5))
     # save_image(patches[0,32*16],"patches_32x16.png",(-0,5,0.5))
     # exit()
+    torch.cuda.empty_cache()
+    # print("patches.device ",patches.device)
 
     return run_image_batch(fxn,patches,masks,evaluator,
                            nblocks,iterations,
@@ -116,8 +118,11 @@ def run_pixel_batch(fxn,patches,masks,evaluator,
     choose parallel or serial
     """
     evaluator = copy.deepcopy(evaluator)
-
-    PARALLEL = False
+    PARALLEL = True
+    # if evaluator.score_fxn_name == "ave":
+    #     PARALLEL = True
+    # else:
+    #     PARALLEL = False
     if PARALLEL:
         return run_pixel_batch_parallel(fxn,patches,masks,evaluator,
                                         nblocks,iterations,
@@ -131,18 +136,45 @@ def run_pixel_batch_parallel(fxn,patches,masks,evaluator,
                              nblocks,iterations,
                              subsizes,K):
     
-    PIX_BATCHSIZE = 32
     nimages,npix,nframes,c,h,w = patches.shape
     nimages,npix,nframes,c,h,w = masks.shape
 
+    # -- alg. comp. efficiency --
+    if evaluator.score_fxn_name == "ave":
+        if nframes > 10:
+            PIX_BATCHSIZE = 64
+            N_JOBS = 6
+        else:
+            PIX_BATCHSIZE = 128
+            N_JOBS = 4
+    elif evaluator.score_fxn_name == "bs":
+        if nframes < 10:
+            if h <= 7:
+                PIX_BATCHSIZE = 128
+                N_JOBS = 8
+            else:
+                PIX_BATCHSIZE = 128
+                N_JOBS = 6
+        elif nframes == 20:
+            PIX_BATCHSIZE = 128
+            N_JOBS = 4
+        else:
+            PIX_BATCHSIZE = 64
+            N_JOBS = 4
+    else:
+        # print("eval",evaluator.score_fxn_name)
+        PIX_BATCHSIZE = 128
+        N_JOBS = 4
+    
+    # print(h,PIX_BATCHSIZE,N_JOBS)
     piter = BatchIter(npix,PIX_BATCHSIZE)
 
     flows = []
-    pParallel = ProgressParallel(False,len(piter),n_jobs=8)
+    pParallel = ProgressParallel(False,len(piter),n_jobs=N_JOBS)
     delayed_fxn = delayed(fxn)
     flows = pParallel(delayed_fxn(patches[:,pbatch],masks[:,pbatch],evaluator,
-                                  nblocks,iterations,subsizes,K)
-                      for pbatch in piter)
+                                  nblocks,iterations,subsizes,K,p)
+                      for p,pbatch in enumerate(piter))
     flows = torch.cat(flows,dim=1) # nimages, npix, nframes-1, 2
     return flows
 
@@ -150,15 +182,15 @@ def run_pixel_batch_serial(fxn,patches,masks,evaluator,
                            nblocks,iterations,
                            subsizes,K):
     
-    PIX_BATCHSIZE = 256
+    PIX_BATCHSIZE = 16
     nimages,npix,nframes,c,h,w = patches.shape
     nimages,npix,nframes,c,h,w = masks.shape
 
     piter = BatchIter(npix,PIX_BATCHSIZE)
     flows = []
-    for pbatch in piter:
+    for p,pbatch in enumerate(piter):
         flow_p = fxn(patches[:,pbatch],masks[:,pbatch],evaluator,
-                     nblocks,iterations,subsizes,K)        
+                     nblocks,iterations,subsizes,K,p)
         flows.append(flow_p)
     flows = torch.cat(flows,dim=1)
     return flows

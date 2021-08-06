@@ -75,7 +75,7 @@ class DenoiseVOC(VOCDetection):
         if self._return_type == "list":
             return noisy_img, spoof_res, raw_img, spoof_dir
         elif self._return_type == "dict":
-            return noisy_img, spoof_res, raw_img, spoof_dir
+            return noisy_img, spoof_res, raw_img, spoof_dir, index
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 
@@ -126,7 +126,7 @@ class DynamicVOC(VOCDetection):
         if self._return_type == "list":
             return img_set, res_set, clean_target, flow
         elif self._return_type == "dict":
-            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'flow':flow, 'iid':iid}
+            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'flow':flow, 'iid':iid, 'index':index}
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 class DynamicVOC_LMDB_All():

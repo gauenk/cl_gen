@@ -6,6 +6,7 @@ from einops import rearrange,repeat
 from easydict import EasyDict as edict
 
 # -- pytorch --
+import torch
 import torchvision.transforms as tvT
 
 # -- project --
@@ -67,13 +68,18 @@ class WrapperDataset():
         T = burst.shape[0]
         sburst = repeat(burst[T//2],'c h w -> t c h w',t=T)
         snoisy = self.noise_fxn(sburst)
+        index_th = torch.IntTensor([index])
 
         sample = {'burst':burst,'noisy':noisy,'flow':flow,
-                  'sburst':sburst,'snoisy':snoisy}
+                  'sburst':sburst,'snoisy':snoisy,'index':index_th}
         return sample
 
 def sample_to_cuda(sample):
     for key in sample.keys():
         sample[key] = sample[key].cuda(non_blocking=True)
+
+def dict_to_device(sample,device):
+    for key in sample.keys():
+        sample[key] = sample[key].to(device,non_blocking=True)
 
 

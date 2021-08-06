@@ -58,7 +58,6 @@ def create_proposed_parameter_grid():
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
 
 
-
     start,end = 1000,1200
     int_spacing = (end - start + 1)
     num = 1
