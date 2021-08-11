@@ -40,15 +40,29 @@ class AddHeteroGaussianNoise():
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
     
 
+import uuid,time
+
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0., std=1e-2):
         self.mean = mean
         self.std = std / 255.
-        
+        # self.counter = 0
+        # print("Creating a new gaussian noise.")
+
     def __call__(self, tensor):
+        # milli_time = round(time.time() * 1000)
+        # name = str(uuid.uuid4()) + f"_{milli_time}"
+        # fn = f"./rands/rng_{name}_{self.counter}.txt"
+        # np.savetxt(fn,torch.get_rng_state().numpy())
+        # fn = f"./rands/img_{name}_{self.counter}.txt"
+        # np.savetxt(fn,tensor.numpy().ravel())
         pic = torch.normal(tensor.add(self.mean),self.std)
+        # fn = f"./rands/noisy_{name}_{self.counter}.txt"
+        # np.savetxt(fn,pic.numpy().ravel())
+        # self.counter += 1
         return pic
+
     
     def __repr__(self):
         return self.__class__.__name__ + '(mean={0}, std={1})'.format(self.mean, self.std)
@@ -70,6 +84,7 @@ class AddLowLightNoiseBW(object):
         we assume C = 3 and then we convert it to BW. 
         """
         # if pic.max() <= 1: pic *= 255.
+        print("noise",torch.get_rng_state())
         device = pic.device
         pix_max = 2**self.nbits-1
         pic_bw = tvF.rgb_to_grayscale(pic,1)

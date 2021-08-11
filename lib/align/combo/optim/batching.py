@@ -170,7 +170,7 @@ def run_pixel_batch_parallel(fxn,patches,masks,evaluator,
     piter = BatchIter(npix,PIX_BATCHSIZE)
 
     flows = []
-    pParallel = ProgressParallel(False,len(piter),n_jobs=N_JOBS)
+    pParallel = ProgressParallel(False,len(piter),n_jobs=N_JOBS,prefer="threads")
     delayed_fxn = delayed(fxn)
     flows = pParallel(delayed_fxn(patches[:,pbatch],masks[:,pbatch],evaluator,
                                   nblocks,iterations,subsizes,K,p)

@@ -27,8 +27,9 @@ def get_loader_serial(cfg,data,batch_size,mode):
     else: drop_last = edict({'tr':True,'val':True,'te':True})
 
     num_workers = return_optional(cfg,"num_workers",1)
+    shuffle = return_optional(cfg,"shuffle_dataset",True)
     loader_kwargs = {'batch_size': batch_size,
-                     'shuffle':True,
+                     'shuffle':shuffle,
                      'drop_last':True,
                      'num_workers':num_workers,
                      'pin_memory':True}
@@ -51,7 +52,7 @@ def get_loader_serial(cfg,data,batch_size,mode):
     loader.tr = DataLoader(data.tr,**loader_kwargs)
     loader_kwargs['drop_last'] = drop_last.val
     loader.val = DataLoader(data.val,**loader_kwargs)
-    loader_kwargs['shuffle'] = True
+    loader_kwargs['shuffle'] = shuffle
     loader_kwargs['drop_last'] = drop_last.te
     loader.te = DataLoader(data.te,**loader_kwargs)
     return loader
@@ -104,7 +105,8 @@ def collate_dict(batch):
         if key in dim1:
             fbatch[key] = torch.stack(elem,dim=1)
         else:
-            fbatch[key] = torch.stack(elem,dim=0)
+            if torch.is_tensor(elem[0]):
+                fbatch[key] = torch.stack(elem,dim=0)
     return fbatch
 
 def collate_fn(batch):
@@ -122,6 +124,8 @@ def collate_triplet_fn(batch):
     return noisy,res,clean,directions
 
 def set_torch_seed(worker_id):
+    # np.random.seed(torch.initial_seed() + worker_id)
     torch.manual_seed(torch.initial_seed() + worker_id)
+    torch.cuda.manual_seed(torch.initial_seed() + worker_id)
 
 

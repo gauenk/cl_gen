@@ -13,15 +13,23 @@ def get_cfg_defaults():
     cfg = edict()
 
     # -- frame info --
-    cfg.nframes = 10
-    cfg.frame_size = 32
+    cfg.nframes = 5
+    cfg.frame_size = 64
+    cfg.nepochs = 30
+    # cfg.nepochs = 3
+    cfg.test_interval = 5
+    cfg.use_anscombe = False
+    cfg.train_log_interval = 10
+    cfg.test_log_interval = 10
+    cfg.global_step = 0
+    cfg.gpuid = 1
 
     # -- data config --
     cfg.dataset = edict()
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
     cfg.dataset.name = "voc"
     cfg.dataset.dict_loader = True
-    cfg.dataset.num_workers = 2
+    cfg.dataset.num_workers = 4
     cfg.batch_size = 1
     cfg.drop_last = {'tr':True,'val':True,'te':True}
     cfg.noise_params = edict({'pn':{'alpha':10.,'std':0},
@@ -39,19 +47,15 @@ def get_cfg_defaults():
     cfg.nblocks = 3
     cfg.patchsize = 3
     # cfg.score_fxn_name = "bootstrapping"
-    cfg.score_fxn_name = "bootstrapping_mod2"
-    # cfg.score_fxn_name = "bootstrapping_mod3"
-    # cfg.score_fxn_name = "bootstrapping_mod4"
-
+    cfg.score_fxn_name = "bootstrapping_mod3"
+    
     return cfg
 
 def get_exp_cfgs(name):
     # ignore name for now.
 
     # -- create patchsize grid --
-    # patchsize = [3,5]
-    # patchsize = [3,5,7,15]
-    patchsize = [11]
+    patchsize = [3]
     ps_ticks = patchsize
     ps_tickmarks = ps_ticks
     ps_tickmarks_str = ["%d" % x for x in ps_tickmarks]
@@ -59,27 +63,22 @@ def get_exp_cfgs(name):
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
-    # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
-    # noise_types = ['g-100p0','g-5p0']
-    noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
-    # noise_types = ['g-75p0','g-25p0','g-5p0']
-    # std_ticks = [5.,25.,50.,75.,100.,150.]
-    std_ticks = [5.,25.,75.,150.]
+    #noise_types = ['g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
+    # std_ticks = [5.,25.,50.,75.,100.]
+    noise_types = ['g-15p','g-10p','g-5p0','g-1p0']
+    std_ticks = [float(x.split("-")[1].replace("p",".")) for x in noise_types]
     std_tickmarks = std_ticks
-    std_tickmarks_str = ["%d" % x for x in std_tickmarks]
+    std_tickmarks_str = ["%d" % int(x) for x in std_tickmarks]
 
     alpha_ticks = [-1,-1,-1,-1,-1]
     alpha_tickmarks = alpha_ticks
     alpha_tickmarks_str = ["%d" % x for x in alpha_tickmarks]
 
     # -- create frame number grid --
-    nframes = [10,3] # [31]
+    nframes = [5]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
-
-    # -- bootstrapping name --
-    bsname = ['bootstrapping_mod2']
 
     # -- create number of local regions grid --
     nblocks = [3]
@@ -88,18 +87,31 @@ def get_exp_cfgs(name):
     ppf = [0]
 
     # -- batch size --
-    batch_size = [1]
+    batch_size = [10]
+
+    # -- neural network --
+    nn_arch = ['fdvd']
+    # nn_arch = ['fdvd','kpn']
+    # nn_arch = ['kpn']
+
+    # -- sim method --
+    # sim_method = ['l2_global','l2_local','bs_local_v1','of']
+    # sim_type = ['a','n2n','sup']
+    # sim_method = ['l2_global','l2_local','bs_local_v1']
+    sim_method = ['l2_global']
+    sim_type = ['b','n2n','sup']
+    # sim_method = ['l2_global']
+    # sim_type = ['sup','n2n']
 
     # -- random seed --
-    random_seed = [234,345,456]
+    random_seed = [123]
 
     # -- create a list of arrays to mesh --
     lists = [patchsize,noise_types,nframes,nblocks,
-             bsname,ppf,batch_size,random_seed]
+             ppf,batch_size,nn_arch,sim_method,sim_type,random_seed]
     order = ['patchsize','noise_type','nframes','nblocks',
-             'bsname','ppf','batch_size','random_seed']
+             'ppf','batch_size','nn_arch','sim_method','sim_type','random_seed']
     named_params = edict({o:l for o,l in zip(order,lists)})
-
 
     # -- create mesh --
     mesh = create_meshgrid(lists)
@@ -111,8 +123,8 @@ def get_exp_cfgs(name):
         named_mesh.append(named_elem)
 
     # -- keep only pairs lists --
-    # filters = [{'nframes-ppf':[[3,3],[5,1]]}]
-    # named_mesh = apply_mesh_filters(named_mesh,filters)
+    filters = [{'sim_method-sim_type':[['l2_global','a'],['l2_local','a'],['bs_local_v1','a'],['of','a'],['l2_global','n2n'],['l2_global','sup']]}]
+    named_mesh = apply_mesh_filters(named_mesh,filters)
 
     # -- format grids --
     logs = {'nframes':False,'patchsize':True,'std':False,'alpha':False}
@@ -143,11 +155,15 @@ def setup_exp_cfg(base_cfg,exp):
     # -- number of frames --
     cfg.nframes = int(exp.nframes)
 
-    # -- bootstrapping name --
-    cfg.score_fxn_name = exp.bsname
-
     # -- batchsize --
     cfg.batch_size = int(exp.batch_size)
+
+    # -- neural network --
+    cfg.nn_arch = exp.nn_arch
+
+    # -- sim method --
+    cfg.sim_method = exp.sim_method
+    cfg.sim_type = exp.sim_type
 
     # -- combinatoric search info --
     cfg.nblocks = int(exp.nblocks)

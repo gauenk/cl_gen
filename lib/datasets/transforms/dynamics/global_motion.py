@@ -59,7 +59,7 @@ class GlobalCameraMotionTransform():
         self.szm = thT.Compose([ScaleZeroMean()])
         self.noise_trans = noise_trans
 
-    def __call__(self, pic):
+    def __call__(self, pic, tl=None):
         
         # pics = pic.unsqueeze(0).repeat(cfg.nframes,1,1,1) 
         clean_target = None
@@ -102,11 +102,11 @@ class GlobalCameraMotionTransform():
 
         # -- simple, continuous motion --
         direction = self.sample_direction()
-        tl = self.init_coordinate(direction,h,w)
-
+        if tl is None: tl = self.init_coordinate(direction,h,w)
 
         # -- compute pixels per frame and resize image for fractions -- 
         if raw_ppf < 1 and raw_ppf > 0:
+            print("WARNING: ppf is less than 1. Weird stuff might happen.")
             h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
             tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
             pic = tvF.resize(pic,(h_new,w_new))
@@ -168,7 +168,7 @@ class GlobalCameraMotionTransform():
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
         if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
         flow = self._motion_dinit_to_flow(delta_list)
-        return pics,res,clean_target,flow
+        return pics,res,clean_target,flow,tl
 
     def _motion_dinit_to_flow(self,delta):
         T,D = delta.shape
@@ -211,6 +211,7 @@ class GlobalCameraMotionTransform():
     def sample_direction(self):
         if self.reset_seed:
             torch.manual_seed(0)
+            torch.cuda.manual_seed(0)
         radius = 1
         rand_int = torch.rand(1)
         theta = rand_int * 2 * self.PI

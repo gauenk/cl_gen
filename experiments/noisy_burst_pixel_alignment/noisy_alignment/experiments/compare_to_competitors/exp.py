@@ -1,6 +1,6 @@
 
 # -- python imports --
-import time,os
+import time,os,copy
 import numpy as np
 import pandas as pd
 from einops import rearrange,repeat
@@ -111,6 +111,8 @@ def execute_experiment(cfg):
         static_clean = sample['sburst'] # no dynamics and no noise
         flow_gt = sample['flow']
         image_index = sample['index']
+        tl_index = sample['tl_index']
+        rng_state = sample['rng_state']
         if cfg.noise_params.ntype == "pn":
             dyn_noisy = anscombe.forward(dyn_noisy)
 
@@ -281,10 +283,16 @@ def execute_experiment(cfg):
         # print(record.record)
         # print("-"*20)
         batch_results = flatten_internal_dict(batch_results)
-        format_fields(batch_results,image_index)
+        format_fields(batch_results,image_index,rng_state)
         print("inner.")
         for key,value in batch_results.items():
             print(key,value.shape)
+
+        # -- append more info --
+        # batch_results['image_index'] = image_index
+        # batch_results['tl_index'] = tl_index
+        # batch_results['rng_state'] = rng_state
+
         # tmp_df = pd.DataFrame(batch_results)
         # print("-"*10)
         # print(tmp_df)
@@ -371,7 +379,7 @@ def flatten_internal_dict(results):
     return mgrouped
 
 
-def format_fields(mgrouped,index):
+def format_fields(mgrouped,index,rng_state):
 
     # -- list keys --
     print(list(mgrouped.keys()))
@@ -428,6 +436,10 @@ def format_fields(mgrouped,index):
     print("index.shape: ",index.shape)    
     mgrouped['image_index'] = index
 
+    # -- rng_state --
+    rng_state = np.array([copy.deepcopy(rng_state) for m in range(nmethods)])
+    print("rng_state.shape: ",rng_state.shape)
+    mgrouped['rng_state'] = rng_state
 
     # -- test --
     df = pd.DataFrame().append(mgrouped,ignore_index=True)

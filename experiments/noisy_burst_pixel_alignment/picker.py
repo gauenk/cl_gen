@@ -11,22 +11,23 @@ import sup_denoising
 import noisy_hdr
 
 def run():
+    # choices=["noisy_alignment",
+    #          "sup_denoising",
+    #          "unsup_denoising",
+    #          "noisy_hdr",
+    #          "none"]
+
+    choices=["noisy_alignment",
+             "unsup_denoising",
+             "none"]
+
     options = [
         List('exp',
              message="Pick a experiment to run!",
-             choices=["noisy_alignment",
-                      "sup_denoising",
-                      "unsup_denoising",
-                      "noisy_hdr",
-                      "none"]
+             choices=choices
         )
     ]
     answer = prompt(options)
-    choices=["noisy_alignment",
-             "sup_denoising",
-             "unsup_denoising",
-             "noisy_hdr",
-             "none"]
 
     if answer['exp'] == "noisy_hdr":
         noisy_hdr.run()
