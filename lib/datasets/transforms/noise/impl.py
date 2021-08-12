@@ -84,7 +84,7 @@ class AddLowLightNoiseBW(object):
         we assume C = 3 and then we convert it to BW. 
         """
         # if pic.max() <= 1: pic *= 255.
-        print("noise",torch.get_rng_state())
+        # print("noise",torch.get_rng_state())
         device = pic.device
         pix_max = 2**self.nbits-1
         pic_bw = tvF.rgb_to_grayscale(pic,1)

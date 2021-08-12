@@ -91,7 +91,7 @@ def run_exp(exp_info):
     plot_experiment(records,exp_grids)
 
 def run_experiment_set(cfg,cache,experiments,exec_exps):
-    PARALLEL = True
+    PARALLEL = False
     if PARALLEL:
         return run_experiments_set_parallel(cfg,cache,experiments,exec_exps)
     else:

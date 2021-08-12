@@ -107,12 +107,12 @@ class WrapperDataset():
         # -- get image + dynamics + noise --
         image = self.data[index][self.FULL_IMAGE_INDEX]
         burst,flow,tl_index = self.dynamic_fxn(image)
-        noisy = self.noise_fxn(burst+0.5)
+        noisy = self.noise_fxn(burst)+0.5
 
         # -- auxillary vars --
         T = burst.shape[0]
         sburst = repeat(burst[T//2],'c h w -> t c h w',t=T)
-        snoisy = self.noise_fxn(sburst)
+        snoisy = self.noise_fxn(sburst)+0.5
         index_th = torch.IntTensor([index])
 
         sample = {'burst':burst,'noisy':noisy,

@@ -2,6 +2,9 @@ import torch
 from easydict import EasyDict as edict
 from einops import rearrange,repeat
 
+
+from pyutils.vst import anscombe
+
 from patch_search import get_score_function
 import align.nnf as nnf
 from align.combo.eval_scores import EvalBlockScores
@@ -14,9 +17,9 @@ def get_align_method(cfg,method_name):
     elif method_name == "l2_local":
         return get_sim_l2_local(cfg)
     elif method_name == "bs_local_v3":
-        return get_sim_bs_global(cfg,"v3")
+        return get_sim_bs_local(cfg,"v3")
     elif method_name == "bs_local_v2":
-        return get_sim_bs_global(cfg,"v2")
+        return get_sim_bs_local(cfg,"v2")
     elif method_name == "of":
         return get_sim_of(cfg)
     else:
@@ -30,7 +33,11 @@ def get_sim_l2_global(cfg):
         isize = edict({'h':H,'w':W})
         # burst = inputs['burst']
         # isize = inputs['isize']
-        nnf_vals,nnf_pix = nnf.compute_burst_nnf(burst,ref_t,cfg.patchsize,K=1)
+        search = burst
+        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+            search = anscombe.forward(burst)
+            search /= search.mean()
+        nnf_vals,nnf_pix = nnf.compute_burst_nnf(search,ref_t,cfg.patchsize,K=1)
         shape_str = 't b h w two -> b (h w) t two'
         nnf_pix_best = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
         flow = pix_to_flow(nnf_pix_best)
@@ -49,9 +56,14 @@ def get_sim_l2_local(cfg):
         if db is None: db = burst
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
-        flow = optim.run(burst,cfg.patchsize,eval_block,
+        search = burst
+        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+            search = anscombe.forward(burst)
+            search /= search.mean()
+        flow = optim.run(search,cfg.patchsize,eval_block,
                         cfg.nblocks,iterations,subsizes,K)
         aligned = align_from_flow(burst,flow,cfg.nblocks,isize=isize)
+        aligned = aligned.to(burst.device,non_blocking=True)
         return aligned,flow
 
     return align_fxn
@@ -67,22 +79,30 @@ def get_sim_bs_local(cfg,version):
         if db is None: db = burst
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
-        flow = optim.run(burst,cfg.patchsize,eval_prop,
+        search = burst
+        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+            search = anscombe.forward(burst)
+            search /= search.mean()
+        flow = optim.run(search,cfg.patchsize,eval_prop,
                          cfg.nblocks,iterations,subsizes,K)
         aligned = align_from_flow(burst,flow,cfg.nblocks,isize=isize)
+        aligned = aligned.to(burst.device,non_blocking=True)
         return aligned,flow
     return align_fxn
 
 def get_bootstrapping_params(nframes,nblocks):
     if nframes == 3:
         K = nblocks**2
-        subsizes = [3]
+        subsizes = [nframes]
     elif nframes == 5:
-        K = nblocks**2
-        subsizes = [3,3,3]
-    else:
         K = 2*nblocks
-        subsizes = [3,3,3,3,3,3]
+        subsizes = [nframes]
+    elif nframes <= 20:
+        K = 2*nblocks
+        subsizes = [2,]*nframes
+    else:
+        K = nblocks
+        subsizes = [2,]*nframes
     return K,subsizes
 
 def get_bootstrapping_fxn(version):
@@ -102,6 +122,7 @@ def get_sim_of(cfg):
         isize = inputs['isize']
         nimages,nframes_m1,two = flow.shape
         aligned = align_from_flow(burst,flow_gt,cfg.nblocks,isize=isize)
+        aligned = aligned.to(burst.device,non_blocking=True)
         return aligned,flow
     return align_fxn
 

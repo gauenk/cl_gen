@@ -35,6 +35,7 @@ from ._nn_archs import get_nn_model
 def set_seed(seed):
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
 
 def remove_center_frame(frames):
     nframes = frames.shape[0]
@@ -104,6 +105,7 @@ def execute_experiment(cfg):
         if epoch % cfg.test_interval == 0:
             result_te = test_model(cfg,model,loaders.te,loss_fxn,epoch)
             append_result_to_dict(results,result_te)
+        if epoch % cfg.save_interval == 0: pass
     result_te = test_model(cfg,model,loaders.te,loss_fxn,epoch)
     append_result_to_dict(results,result_te)
     runtime = time.perf_counter() - start_time

@@ -42,12 +42,13 @@ def get_train_log_info(cfg,model,denoised,loss,dyn_noisy,dyn_clean,
     info['image_psnrs'] = image_psnrs
     
     # -- sim images psnrs
-    nsims = sims.shape[0]
+    nimages = sims.shape[1]
+    nsims = sims.shape[0]-1
     clean = repeat(dyn_clean[ref_t],'b c h w -> s b c h w',s=nsims)
     ref_clean = rearrange(clean,'s b c h w -> (s b) c h w')
-    sims = rearrange(sims,'s b c h w -> (s b) c h w')
+    sims = rearrange(sims[1:],'s b c h w -> (s b) c h w')
     sim_psnrs = images_to_psnrs(ref_clean,sims)
-    sim_psnrs = rearrange(sim_psnrs,'(t b) -> t b',t=nframes)
+    sim_psnrs = rearrange(sim_psnrs,'(t b) -> t b',b=nimages)
     info['sim_psnrs'] = sim_psnrs
 
     # -- aligned image psnrs --

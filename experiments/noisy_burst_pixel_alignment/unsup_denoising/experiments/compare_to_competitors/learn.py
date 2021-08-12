@@ -10,7 +10,7 @@ import torch
 # -- project imports --
 from easydict import EasyDict as edict
 from datasets.wrap_image_data import dict_to_device
-from pyutils import print_tensor_stats
+from pyutils import print_tensor_stats,save_image
 
 from .log_learn import get_train_log_info,print_train_log_info,get_test_log_info
 
@@ -18,7 +18,6 @@ def train_model(cfg,model,loss_fxn,optim,data_loader,sim_fxn):
 
     tr_info = []
     # nbatches = len(data_loader)
-    # nbatches = 500
     nbatches = 500
     data_iter = iter(data_loader)
     # for batch_iter,sample in enumerate(data_loader):
@@ -32,13 +31,11 @@ def train_model(cfg,model,loss_fxn,optim,data_loader,sim_fxn):
         dict_to_device(sample,device)
         dyn_noisy = sample['noisy'] # dynamics and noise
         noisy = dyn_noisy # alias
-        dyn_clean = sample['burst']-0.5 # dynamics and no noise
+        dyn_clean = sample['burst'] # dynamics and no noise
         static_noisy = sample['snoisy'] # no dynamics and noise
-        static_clean = sample['sburst']-0.5 # no dynamics and no noise
+        static_clean = sample['sburst'] # no dynamics and no noise
         flow_gt = sample['flow']
         image_index = sample['index']
-        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-            dyn_noisy = anscombe.forward(dyn_noisy)
 
         # -- shape info --
         T,B,C,H,W = dyn_noisy.shape
@@ -74,7 +71,8 @@ def train_model(cfg,model,loss_fxn,optim,data_loader,sim_fxn):
 
         # print("-"*20)
         # print_tensor_stats("denoised",denoised)
-        # print_tensor_stats("sim",sims)
+        # print_tensor_stats("sim_0",sims[[0]])
+        # print_tensor_stats("sim_1",sims[[1]])
         # print_tensor_stats("dyn_noisy",dyn_noisy)
         # print_tensor_stats("aligned",aligned)
         # print_tensor_stats("dyn_clean",dyn_clean)
@@ -108,7 +106,7 @@ def test_model(cfg,model,test_loader,loss_fxn,epoch):
 
     model = model.to(cfg.device)
     test_iter = iter(test_loader)
-    nbatches,D = 25,len(test_iter) 
+    nbatches,D = 30,len(test_iter) 
     # nbatches = 2
     # nbatches = D
     nbatches = nbatches if D > nbatches else D
@@ -126,7 +124,7 @@ def test_model(cfg,model,test_loader,loss_fxn,epoch):
             
             # -- unpack --
             dyn_noisy = sample['noisy']
-            dyn_clean = sample['burst'] - 0.5
+            dyn_clean = sample['burst']
             flow_gt = sample['flow']
             nframes = dyn_clean.shape[0]
             clean = dyn_clean[nframes//2]

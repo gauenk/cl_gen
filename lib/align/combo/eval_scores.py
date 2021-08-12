@@ -68,6 +68,11 @@ class EvalBlockScores():
 
         # -- torch to numpy --
         device = patches.device
+        gpuid = device.index
+        if gpuid != self.gpuid:
+            print(f"Updating EvalScores gpuid from {self.gpuid} to {gpuid}")
+            self.gpuid = gpuid
+
 
         # -- setup batches --
         ps = self.patchsize
@@ -102,12 +107,14 @@ class EvalBlockScores():
                 # print(f"batch index: {idx}")
                 
                 # -- index search space  --
-                batch = block_gen_samples[:,:,batch_indices,:]
+                batch = block_gen_samples[:,:,batch_indices,:]                
+                batch = batch.to(device)
                 # batch.shape = (????)
                 #batch = blocks[:,:,batch_indices,:]
                 # -- generator so the batch is the batch_index (2nd poor name) --
                 # batch = batch_indices.to(device,non_blocking=False)
                 batchsize = batch.shape[2]
+                
                 
                 # -- find no motion --
                 check = torch.sum(torch.abs(batch[0][0] - nomotion),dim=1)
@@ -236,6 +243,11 @@ class EvalBlockScores():
 
         # -- torch to numpy --
         device = patches.device
+        gpuid = device.index
+        if gpuid != self.gpuid:
+            print(f"Updating EvalScores gpuid from {self.gpuid} to {gpuid}")
+            self.gpuid = gpuid
+
         naligns = len(blocks[0][0])
         # naligns = blocks.shape[2] # NOT a tensor!
 
@@ -256,7 +268,9 @@ class EvalBlockScores():
 
             # -- index search space  --
             # batch = index_blocks_with_batches(blocks,batch_indices)
+
             batch = blocks[:,:,batch_indices,:]
+            batch = batch.to(device)
 
             # -- find no motion --
             # check = torch.sum(torch.abs(batch[0][0] - nomotion),dim=1)

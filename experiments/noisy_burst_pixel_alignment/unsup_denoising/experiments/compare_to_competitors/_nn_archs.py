@@ -25,7 +25,8 @@ def get_kpn_model(cfg):
 
     # -- create closure for loss --
     def wrap_loss_fxn(denoised,gt_img,denoised_frames,step):
-        loss_basic,loss_anneal = loss_fxn_base(denoised_frames,denoised,gt_img,step)
+        gt_img_nmlz = gt_img - 0.5#gt_img.mean()
+        loss_basic,loss_anneal = loss_fxn_base(denoised_frames,denoised,gt_img_nmlz,step)
         return loss_basic + loss_anneal
     loss_fxn = wrap_loss_fxn
 
@@ -36,9 +37,11 @@ def get_kpn_model(cfg):
     # -- wrap call function for interface --
     forward_fxn = model.forward
     def wrap_forward(dyn_noisy,noise_info):
-        kpn_stack = rearrange(dyn_noisy,'t b c h w -> b t c h w')
-        kpn_cat = rearrange(dyn_noisy,'t b c h w -> b (t c) h w')
+        noisy = dyn_noisy - 0.5#dyn_noisy.mean()
+        kpn_stack = rearrange(noisy,'t b c h w -> b t c h w')
+        kpn_cat = rearrange(noisy,'t b c h w -> b (t c) h w')
         denoised,denoised_ave,filters = forward_fxn(kpn_cat,kpn_stack)
+        denoised_ave += 0.5
         return denoised_ave,denoised
     model.forward = wrap_forward
 
@@ -68,7 +71,7 @@ def get_fdvd_model(cfg):
     def wrap_forward(dyn_noisy,noise_params):
         T,B,C,H,W = dyn_noisy.shape
         burst = rearrange(dyn_noisy,'t b c h w -> b (t c) h w')
-        burst /= burst.max()
+        # burst /= burst.max()
         noise_map = noise_params.g.std * torch.ones(B,1,H,W) / 255.
         noise_map = noise_map.to(burst.device,non_blocking=True)
         return forward_fxn(burst,noise_map)

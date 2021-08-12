@@ -20,9 +20,15 @@ def get_sim_method(cfg,method_name):
             aligned,flow = aligned_fxn(burst,db,gt_info)
             nframes = aligned.shape[0]
             ref = nframes//2
-            aligned = torch.stack([aligned[:ref],aligned[ref+1:]])
+            aligned = torch.cat([aligned[:ref],aligned[ref+1:]])
             sims,masks = uniform_pix_sampling(aligned)
             sims[0] = burst[nframes//2]
+        elif sim_type == "c":
+            aligned,flow = aligned_fxn(burst,db,gt_info)
+            nframes = aligned.shape[0]
+            ref = nframes//2
+            aligned = torch.cat([aligned[:ref],aligned[ref+1:]])
+            sims,masks = uniform_pix_sampling(aligned)
         elif sim_type == "sup":
             sims,masks = get_gt_clean_sim(burst,gt_info)
         elif sim_type == "n2n":
@@ -36,13 +42,19 @@ def get_sim_method(cfg,method_name):
 def uniform_pix_sampling(aligned,S=2):
     nframes,nimages,ncolor,h,w = aligned.shape
     device = aligned.device
-    gpuid = int(str(device).split(":")[1])
+    gpuid = device.index
     numba.cuda.select_device(gpuid)
     sims = torch.zeros((S,nimages,ncolor,h,w)).to(device)
     # rands = np.random.choice(nframes,(h,w))
-    index_bursts_by_frames(sims,aligned)
+
+    aligned_nba = cuda.as_cuda_array(aligned)
+    sims_nba = cuda.as_cuda_array(sims)
+    index_bursts_by_frames(sims_nba,aligned_nba)
+
     masks = torch.zeros((S,nimages,ncolor,h,w)).to(device)
-    fill_masks(masks,aligned)
+    masks_nba = cuda.as_cuda_array(masks)
+    fill_masks(masks_nba,aligned_nba)
+
     return sims,masks
 
 def fill_masks(masks,aligned):
@@ -86,16 +98,13 @@ def uniform_pix_sample_by_frames_numba(rng_states,nimages,ncolor,
     r_idx = cuda.grid(1)
     h_idx,w_idx = cuda.grid(2)
     subset = cuda.local.array(shape=51,dtype=numba.uint8) # MAX FRAMES = 51
-    if h_idx < aligned.shape[0] and w_idx < aligned.shape[1]:
+    if h_idx < H and w_idx < W:
 
         # -- assign rand pix to sims --
         for s in range(S):
             # -- sim random frame --
-            rand_float = nframes*xoroshiro128p_uniform_float32(rng_states, r_idx)
-            rand_t = 0
-            while rand_t < rand_float:
-                rand_t += 1
-            rand_t -= 1
+            rand_float = nframes*xoroshiro128p_uniform_float32(rng_states, r_idx+s)
+            rand_t = int(rand_float)
             for i in range(nimages):
                 for c in range(ncolor):                
                     sims[s][i][c][h_idx][w_idx] = aligned[rand_t][i][c][h_idx][w_idx]

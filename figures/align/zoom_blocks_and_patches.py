@@ -67,20 +67,45 @@ def no_pointy_tics(ax):
     for tic in ax.yaxis.get_major_ticks():
         tic.tick1line.set_visible(False)
         tic.tick2line.set_visible(False)
+    for tic in ax.xaxis.get_minor_ticks():
+        tic.tick1line.set_visible(False)
+        tic.tick2line.set_visible(False)
+    for tic in ax.yaxis.get_minor_ticks():
+        tic.tick1line.set_visible(False)
+        tic.tick2line.set_visible(False)
 
-def zoomed():
-    nblocks = 3
-    patchsize = 5
+def get_burst_data(nblocks,patchsize,nframes,offset,ppf):
 
-    zoom_size = 2*(nblocks//2) + patchsize
-    data = np.random.rand(zoom_size, zoom_size) * 3
-    print(data)
+    # -- image --
+    dyns = ppf*(nframes-1)
+    zoom_size = 2*(nblocks//2) + patchsize + dyns
+    c_size = 2*(nblocks//2) + patchsize
+    image = np.random.rand(zoom_size, zoom_size) * 3
+
+    # -- image to burst --
+    burst = []
+    for t in range(nframes):
+        ox,oy = offset[t]
+        x = nblocks//2 - ox
+        y = nblocks//2 - oy
+        image_t = image[ox:ox+c_size,oy:oy+c_size]
+        burst.append(image_t)
+    burst = np.stack(burst)
+    return burst
+
+def zoomed(burst,nblocks,patchsize):
+
+    # zoom_size = 2*(nblocks//2) + patchsize
+    # data = np.random.rand(zoom_size, zoom_size) * 3
+    # print(data)
+    nframes = burst.shape[0]
+    data = burst[nframes//2]
     
     # -- create discrete colormap --
     # cmap = colors.ListedColormap(['red', 'blue', 'orange'])
     # cmap = colors.ListedColormap(['#3d3d3d', '#707070','#FFFFFF'])
-    cmap = colors.ListedColormap(['#FFFFFF', '#707070',])
-    # cmap = colors.ListedColormap(['#000000', '#FFFFFF'])
+    # cmap = colors.ListedColormap(['#FFFFFF', '#707070',])
+    cmap = colors.ListedColormap(['#000000', '#FFFFFF'])
 
     # -- blues --
     # cmap = colors.ListedColormap(['#4630ff', '#5085fb','#8fc7ff'])
@@ -92,7 +117,7 @@ def zoomed():
     
     # -- create subplots for zoomed-in patch --
     gs_zoom = GridSpec(1,1)
-    gs_zoom.update(left=0.0, right=0.25, wspace=0.05)
+    gs_zoom.update(left=0.0, right=0.18, wspace=0.05)
     zoom_ax = plt.subplot(gs_zoom[0,0])
 
     # -- create subplots for blocks --
@@ -109,20 +134,82 @@ def zoomed():
 
     # -- fill subplots for blocks --
     # gcolor = '#808080'
+    h,w = data.shape
+    ps = patchsize
     gcolor = '#000000'
     for i in range(nblocks):
         for j in range(nblocks):
             ax_i,ax_j = i,j
             data_ij = get_data_ij(data,i,j,nblocks,patchsize)
-            ax[ax_i][ax_j].imshow(data_ij, cmap=cmap, norm=norm)
-            ax[ax_i][ax_j].grid(which='major', axis='both',
-                                linestyle='-', color=gcolor, linewidth=2)
-            ax[ax_i][ax_j].set_xticks(np.arange(-.5, patchsize, 1));
-            ax[ax_i][ax_j].set_yticks(np.arange(-.5, patchsize, 1));
+            # ax[ax_i][ax_j].imshow(data_ij, cmap=cmap, norm=norm)
+            # ax[ax_i][ax_j].grid(which='major', axis='both',
+            #                     linestyle='-', color=gcolor, linewidth=2)
+            # ax[ax_i][ax_j].set_xticks(np.arange(-.5, patchsize, 1));
+            # ax[ax_i][ax_j].set_yticks(np.arange(-.5, patchsize, 1));
+            # ax[ax_i][ax_j].set_xticklabels([])
+            # ax[ax_i][ax_j].set_yticklabels([])
+            # ax[ax_i][ax_j].set_aspect('equal')
+            # no_pointy_tics(ax[ax_i][ax_j])
+
+    #---------------------------------------------------------
+    #---------------------------------------------------------
+    #---------------------------------------------------------
+
+
+            # -- mask out all center frame except center patch --
+            alphas = 0.15 * np.ones(data.shape)
+            alphas[i:i+ps,j:j+ps] = 1.
+
+            # data_ij = get_data_ij(data,i,j,patchsize)
+            ax[ax_i][ax_j].imshow(data, alpha=alphas, cmap=cmap, norm=norm)
+            # ax[ax_i][ax_j].grid(which='major', axis='both',
+            #                     linestyle='-', color=gcolor, linewidth=2)
+            xstart = -.5 + j
+            ystart = -.5 + i
+
+            # -- partial gridlines --
+            xgrid = np.arange(xstart, xstart + patchsize+1, 1)
+            ygrid = np.arange(ystart, ystart + patchsize+1, 1)
+
+            for yk in ygrid:
+                xstart_m = xstart / w + 0.5/w
+                xend_m = (xstart+ps) / w + 0.5/w
+                ax[ax_i][ax_j].axhline(y=yk, xmin=xstart_m,
+                                          xmax=xend_m,
+                                          color=gcolor)
+            ystart = (nblocks-1)-0.5-i
+            for xk in xgrid:
+                ystart_m = ystart / h + 0.5/h
+                yend_m = (ystart+ps) / h + 0.5/h
+                ax[ax_i][ax_j].axvline(x=xk, ymin=ystart_m,
+                                          ymax=yend_m,
+                                          color=gcolor)
+ 
+            # ax[ax_i][ax_j].set_xticks(np.arange(xstart, xstart + patchsize+1, 1));
+            # ax[ax_i][ax_j].set_yticks(np.arange(ystart, ystart + patchsize+1, 1));
+
+            ax[ax_i][ax_j].grid(which='minor', axis='both', alpha=0.15,
+                                   linestyle='-', color=gcolor, linewidth=2)
+            ax[ax_i][ax_j].set_xticks(np.arange(-.5, h, 1),minor=True);
+            ax[ax_i][ax_j].set_yticks(np.arange(-.5, w, 1),minor=True);
+
             ax[ax_i][ax_j].set_xticklabels([])
             ax[ax_i][ax_j].set_yticklabels([])
             ax[ax_i][ax_j].set_aspect('equal')
             no_pointy_tics(ax[ax_i][ax_j])
+
+            if j == nblocks//2 and i == (nblocks-1):
+                ax[ax_i][ax_j].set_xlabel(f"Search Space of 5x5 Patches",fontsize=20)
+
+            if j == nblocks//2 and i == 0:
+                ax[ax_i][ax_j].set_xlabel(r"Frame $t$ Centered at Pixel $x$",fontsize=20)
+                ax[ax_i][ax_j].xaxis.set_label_position('top') 
+
+
+    #---------------------------------------------------------
+    #---------------------------------------------------------
+    #---------------------------------------------------------
+
 
     # -- plot middle of left-hand side --
     ax_i,ax_j = 1,0
@@ -130,11 +217,12 @@ def zoomed():
     zoom_ax.imshow(data,cmap=cmap,norm=norm)
     zoom_ax.grid(which='major', axis='both', linestyle='-',
                  color=gcolor, linewidth=2)
-    zoom_ax.set_xticks(np.arange(-.5, zoom_size, 1));
-    zoom_ax.set_yticks(np.arange(-.5, zoom_size, 1));
+    zoom_ax.set_xticks(np.arange(-.5, w, 1));
+    zoom_ax.set_yticks(np.arange(-.5, h, 1));
     zoom_ax.set_xticklabels([])
     zoom_ax.set_yticklabels([])
     no_pointy_tics(zoom_ax)
+    zoom_ax.set_xlabel("Zoomed\nView",fontsize=20)
     # tic.tick1On = tic.tick2On = False
 
     # -- draw arrows --
@@ -146,7 +234,21 @@ def zoomed():
     plt.savefig(SAVE_DIR / "zoomed.png",bbox_inches='tight',transparent=True,dpi=300)
 
 def main():
-    zoomed()
+
+    # -- seed --
+    seed = 234
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    # -- settings --
+    nblocks = 3
+    patchsize = 5
+    nframes = 3
+    offset = np.array([[1,0],[0,0],[0,1]])
+    ppf = 1
+    burst = get_burst_data(nblocks,patchsize,nframes,offset,ppf)
+
+    zoomed(burst,nblocks,patchsize)
 
 if __name__ == "__main__":
     main()

@@ -34,6 +34,7 @@ def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks,gpuid):
     batchsize = batch.shape[2]
     indexed = indexed[:,:,:,:batchsize]
     tokeep = tokeep[:batchsize]
+    # print(gpuid,indexed.device,tokeep.device)
     numba.cuda.select_device(gpuid)
     indexed_nba = cuda.as_cuda_array(indexed)
     batch_nba = cuda.as_cuda_array(batch)
@@ -194,7 +195,7 @@ def get_block_batch_topK(samples,K):
     for i in range(nimages):
         for s in range(nsegs):
             topK = torch.topk(scores[i,s],K,largest=False)
-            scores_topK.append(topK.values)
+            scores_topK.append(scores[i,s,topK.indices])
             blocks_topK.append(blocks[i,s,topK.indices])
 
     # -- stack em up! --

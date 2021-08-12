@@ -180,7 +180,8 @@ def bootstrapping_mod2(cfg,expanded):
     samples = rearrange(expanded,'r b e t c h w -> (r c h w) t (b e)')
     samples = samples.contiguous() # speed up?
     t_ref = T//2
-    nbatches,batchsize = 40,50
+    # nbatches,batchsize = 80,25
+    nbatches,batchsize = 10,25
     nsubsets = nbatches*batchsize
 
     scores = torch.zeros(B*E,device=device)
@@ -189,10 +190,11 @@ def bootstrapping_mod2(cfg,expanded):
     weights = torch.zeros((batchsize,nframes),device=device)
 
     # -- cuda memory --
-    t = torch.cuda.get_device_properties(cfg.gpuid).total_memory
-    r = torch.cuda.memory_reserved(cfg.gpuid)
-    a = torch.cuda.memory_allocated(cfg.gpuid)
-    f = r-a  # free inside reserved
+    # t = torch.cuda.get_device_properties(cfg.gpuid).total_memory
+    # r = torch.cuda.memory_reserved(cfg.gpuid)
+    # a = torch.cuda.memory_allocated(cfg.gpuid)
+    # f = r-a  # free inside reserved
+    # print(samples.shape)
     # print(f"gpu:{cfg.gpuid}",t,f)
 
     for batch_idx in range(nbatches):
@@ -206,6 +208,14 @@ def bootstrapping_mod2(cfg,expanded):
         scores_t += w_pix_ave_nmlz.T
         # scores += torch.mean(w_pix_ave_nmlz,dim=0)
         scores += torch.mean(w_pix_ave,dim=0)
+
+        # -- cuda memory --
+        # t = torch.cuda.get_device_properties(cfg.gpuid).total_memory
+        # r = torch.cuda.memory_reserved(cfg.gpuid)
+        # a = torch.cuda.memory_allocated(cfg.gpuid)
+        # f = r-a  # free inside reserved
+        # print(f"gpu:{cfg.gpuid}",t,f)
+    
         # torch.cuda.empty_cache()
     scores_t /= nbatches
     scores /= nbatches

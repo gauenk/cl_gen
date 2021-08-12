@@ -15,8 +15,8 @@ import picker
 
 def run():
     print("PID: [{}]".format(os.getpid()))
-    # unsup_denoising.run()
-    noisy_alignment.run()
+    unsup_denoising.run()
+    # noisy_alignment.run()
     # picker.run()
 
 if __name__ == "__main__":

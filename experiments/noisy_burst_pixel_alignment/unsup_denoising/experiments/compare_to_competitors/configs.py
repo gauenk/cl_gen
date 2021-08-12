@@ -14,12 +14,13 @@ def get_cfg_defaults():
 
     # -- frame info --
     cfg.nframes = 5
+    cfg.use_anscombe = True
     cfg.frame_size = 64
-    cfg.nepochs = 30
+    cfg.nepochs = 10
     # cfg.nepochs = 3
-    cfg.test_interval = 5
-    cfg.use_anscombe = False
-    cfg.train_log_interval = 10
+    cfg.test_interval = 2
+    cfg.save_interval = 5
+    cfg.train_log_interval = 50
     cfg.test_log_interval = 10
     cfg.global_step = 0
     cfg.gpuid = 1
@@ -55,7 +56,7 @@ def get_exp_cfgs(name):
     # ignore name for now.
 
     # -- create patchsize grid --
-    patchsize = [3]
+    patchsize = [11]
     ps_ticks = patchsize
     ps_tickmarks = ps_ticks
     ps_tickmarks_str = ["%d" % x for x in ps_tickmarks]
@@ -65,7 +66,8 @@ def get_exp_cfgs(name):
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     #noise_types = ['g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.]
-    noise_types = ['g-15p','g-10p','g-5p0','g-1p0']
+    # noise_types = ['g-15p','g-10p','g-5p0','g-1p0']
+    noise_types = ['g-15p','g-5p0']
     std_ticks = [float(x.split("-")[1].replace("p",".")) for x in noise_types]
     std_tickmarks = std_ticks
     std_tickmarks_str = ["%d" % int(x) for x in std_tickmarks]
@@ -87,21 +89,23 @@ def get_exp_cfgs(name):
     ppf = [0]
 
     # -- batch size --
-    batch_size = [10]
+    batch_size = [4]
 
     # -- neural network --
-    nn_arch = ['fdvd']
-    # nn_arch = ['fdvd','kpn']
+    # nn_arch = ['fdvd']
+    nn_arch = ['fdvd','kpn']
     # nn_arch = ['kpn']
 
     # -- sim method --
     # sim_method = ['l2_global','l2_local','bs_local_v1','of']
     # sim_type = ['a','n2n','sup']
-    # sim_method = ['l2_global','l2_local','bs_local_v1']
-    sim_method = ['l2_global']
-    sim_type = ['b','n2n','sup']
+    sim_method = ['l2_global','l2_local','bs_local_v2']
+    # sim_method = ['l2_global']
+    sim_type = ['b','c','n2n','sup']
     # sim_method = ['l2_global']
     # sim_type = ['sup','n2n']
+    # sim_type = ['n2n']
+    # sim_type = ['sup']
 
     # -- random seed --
     random_seed = [123]
@@ -123,7 +127,7 @@ def get_exp_cfgs(name):
         named_mesh.append(named_elem)
 
     # -- keep only pairs lists --
-    filters = [{'sim_method-sim_type':[['l2_global','a'],['l2_local','a'],['bs_local_v1','a'],['of','a'],['l2_global','n2n'],['l2_global','sup']]}]
+    filters = [{'sim_method-sim_type':[['l2_global','c'],['l2_local','c'],['bs_local_v1','c'],['of','c'],['l2_global','n2n'],['l2_global','sup']]}]
     named_mesh = apply_mesh_filters(named_mesh,filters)
 
     # -- format grids --
