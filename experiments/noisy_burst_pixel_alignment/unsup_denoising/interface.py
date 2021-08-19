@@ -24,15 +24,6 @@ from pyutils.vst import anscombe
 from patch_search import get_score_function
 from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
 
-# -- [align] package imports --
-import align.nnf as nnf # nnf method
-from align.combo.eval_scores import EvalBlockScores # eval method choice
-from align.combo.optim import AlignOptimizer # optimizer
-from align.xforms import flow_to_pix,pix_to_flow,flow_to_blocks # conversions
-from align.xforms import align_from_flow,align_from_pix  # alignments
-from align import compute_epe,compute_aligned_psnr # evaluation
-from align.xforms import create_isize # misc
-
 # -- [experiment] imports --
 import cache_io
 from unsup_denoising.experiments import picker

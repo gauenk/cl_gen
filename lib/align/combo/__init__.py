@@ -6,9 +6,9 @@
 # -- project imports --
 import align.combo.lpas
 import align.combo.nlpas
-import align.combo.eval_scores
+import align.combo.batching
 from align._utils import construct_return_dict
-from .eval_scores import EvalBlockScores
+from align.combo.batching import EvalBlockScores,EvalBootBlockScores
 
 def combo_compute_alignment(cfg,images):
 

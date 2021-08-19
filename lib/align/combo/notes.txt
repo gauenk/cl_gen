@@ -1,0 +1,34 @@
+
+        Search Space right now = total # of patches
+        
+        Goal:
+        - given a set of patches and block arangements
+
+        Old:
+        - patches tiled into "H" arrangements
+        - "blocks" subsets different orderings of "H" from each "T" frames
+        - inner-loop evals over the indexed region, patches[:,:,:,blocks,:,:,:]
+
+        Update:
+        - The "H" (arrangements) is implicit
+        - The "R" (num_nl_patches) can be grouped with "C,pH,pW" into "F": features
+        
+        Thinking:
+        - Vectorized ops are faster
+        - Rearrange requires mysterious computation overhead
+        - Each patch has different subset of the H^T arrangements
+
+        Restriction:
+        - compute_score requires specific image shape
+
+        Question: How do we want to split/vectorize pixels?
+        - FAISS uses batches to run kNN; we should do the same
+          - Batches of pixels means ref_t uses "batch" and all other frames remain.
+          - Simple case is to batch them all.
+        
+        Todo:
+        - add another dimension to "blocks" for each ref_t pixel (later a batch).
+        - index patches with "blocks" using implicit H space.
+
+        #[old] blocks.shape = (nimage,nsegs,nframes,narrangements)
+        blocks.shape = (nimage,nsegs,narrangements, nframes)

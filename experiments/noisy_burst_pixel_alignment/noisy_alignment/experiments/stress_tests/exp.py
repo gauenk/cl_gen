@@ -19,7 +19,7 @@ from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
 # -- [align] package imports --
 from align import compute_epe,compute_aligned_psnr
 import align.nnf as nnf
-from align.combo.eval_scores import EvalBlockScores
+from align.combo import EvalBlockScores,EvalBootBlockScores
 from align.combo.optim import AlignOptimizer
 from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow,flow_to_blocks
 

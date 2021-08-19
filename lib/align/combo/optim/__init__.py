@@ -5,7 +5,7 @@ Optimizers over the Combinatorial Search Space
 
 import align.combo.optim.v1 as v1
 import align.combo.optim.v3 as v3
-from align.combo.optim.batching import run_burst,run_image_batch,run_pixel_batch
+from align.combo.optim.launcher import run_burst,run_image_batch,run_pixel_batch
 
 def get_optim_run(version):
     if version == "v1":
