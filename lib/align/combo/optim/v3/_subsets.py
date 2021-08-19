@@ -50,7 +50,8 @@ def rand_subset_search(patches,masks,evaluator,curr_blocks,brange,nblocks,subsiz
         rands = npr.choice(nframes,size=size,replace=False)
         frames = repeat(rands,'z -> i s z',i=nimages,s=nsegs)
         srch_blocks = get_search_blocks(frames,brange,curr_blocks,device)
-        scores,blocks = evaluator.compute_topK_scores(patches,masks,srch_blocks,nblocks,1)
+        scores,scores_t,blocks = evaluator.compute_topK_scores(patches,masks,
+                                                               srch_blocks,nblocks,1)
         blocks = torch_to_numpy(blocks)
         curr_blocks = blocks[:,:,0,:]
         torch.cuda.empty_cache()

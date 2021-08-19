@@ -120,40 +120,70 @@ def execute_experiment(cfg):
         T,B,C,H,W = dyn_noisy.shape
         isize = edict({'h':H,'w':W})
         ref_t = nframes//2
-        npix = H*W
+        nimages,npix,nframes = B,H*W,T
 
         # -- create results dict --
+        pixs = edict()
+        flows = edict()
+        aligned = edict()
         runtimes = edict()
+        optimal_scores = edict() # score function at optimal
+
 
         # -- groundtruth flow --
         flow_gt_rs = rearrange(flow_gt,'i tm1 two -> i 1 tm1 two')
         blocks_gt = flow_to_blocks(flow_gt_rs,nblocks)
-        flow_gt = repeat(flow_gt,'i tm1 two -> i p tm1 two',p=npix)
-        aligned_of = align_from_flow(dyn_clean,flow_gt,nblocks,isize=isize)
-        pix_gt = flow_to_pix(flow_gt.clone(),isize=isize)
+        flows.of = repeat(flow_gt,'i tm1 two -> i p tm1 two',p=npix)
+        aligned.of = align_from_flow(dyn_clean,flows.of,nblocks,isize=isize)
+        pixs.of = flow_to_pix(flows.of.clone(),isize=isize)
         runtimes.of = 0. # given
+        optimal_scores.of = np.zeros((nimages,npix,1,nframes)) # clean target is zero
+        aligned.clean = static_clean
+        # optimal_scores.of = eval_ave.score_burst_from_flow(dyn_noisy,
+        #                                                    flows.of,
+        #                                                    patchsize,nblocks)[0]
+        print("post optimal scores of.")
 
-        # -- compute nearest neighbor fields --
+        # -- compute nearest neighbor fields [global] --
         start_time = time.perf_counter()
         shape_str = 't b h w two -> b (h w) t two'
         nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean,ref_t,patchsize)
         nnf_pix_best = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
         nnf_pix_best = torch.LongTensor(nnf_pix_best)
-        pix_nnf = nnf_pix_best.clone()
-        flow_nnf = pix_to_flow(nnf_pix_best)
-        aligned_nnf = align_from_pix(dyn_clean,nnf_pix_best,nblocks)
+        pixs.nnf = nnf_pix_best.clone()
+        flows.nnf = pix_to_flow(nnf_pix_best)
+        aligned.nnf = align_from_pix(dyn_clean,nnf_pix_best,nblocks)
         runtimes.nnf = time.perf_counter() - start_time
+        optimal_scores.nnf = np.zeros((nimages,npix,1,nframes)) # clean target is zero
+
+        # -- compute nearest neighbor fields [local] --
+        start_time = time.perf_counter()
+        iterations,K,subsizes =0,1,[]
+        optim = AlignOptimizer("v3")
+        flows.nnf_local = optim.run(dyn_clean,patchsize,eval_ave,
+                                    nblocks,iterations,subsizes,K)
+        pixs.nnf_local = flow_to_pix(flows.nnf_local.clone(),isize=isize)
+        aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf_local,nblocks)
+        runtimes.nnf_local = time.perf_counter() - start_time
+        optimal_scores.nnf_local = eval_ave.score_burst_from_flow(dyn_noisy,
+                                                                  flows.nnf_local,
+                                                                  patchsize,nblocks)[1]
+        optimal_scores.nnf_local = torch_to_numpy(optimal_scores.nnf_local)
 
         # -- compute proposed search of nnf --
+        print("Global NNF Noisy")
         start_time = time.perf_counter()
         split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy,ref_t,patchsize)
         # split_pix = np.copy(nnf_pix)
         split_pix_best = torch.LongTensor(rearrange(split_pix[...,0,:],shape_str))
         split_pix_best = torch.LongTensor(split_pix_best)
-        pix_split = split_pix_best.clone()
-        flow_split = pix_to_flow(split_pix_best)
-        aligned_split = align_from_pix(dyn_clean,split_pix_best,nblocks)
+        pixs.split = split_pix_best.clone()
+        flows.split = pix_to_flow(split_pix_best)
+        aligned.split = align_from_pix(dyn_clean,split_pix_best,nblocks)
         runtimes.split = time.perf_counter() - start_time
+        optimal_scores.split = eval_ave.score_burst_from_flow(dyn_noisy,flows.nnf_local,
+                                                              patchsize,nblocks)[1]
+        optimal_scores.split = torch_to_numpy(optimal_scores.split)
 
         # -- compute complex ave --
         iterations,K = 0,1
@@ -161,12 +191,13 @@ def execute_experiment(cfg):
         print("[complex] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flow_ave = optim.run(dyn_noisy,patchsize,eval_ave,
+        flows.ave = optim.run(dyn_noisy,patchsize,eval_ave,
                              nblocks,iterations,subsizes,K)
-        # flow_ave = flow_gt.clone()
-        pix_ave = flow_to_pix(flow_ave.clone(),isize=isize)
-        aligned_ave = align_from_flow(dyn_clean,flow_ave,nblocks,isize=isize)
+        # flows.ave = flows.of.clone()
+        pixs.ave = flow_to_pix(flows.ave.clone(),isize=isize)
+        aligned.ave = align_from_flow(dyn_clean,flows.ave,nblocks,isize=isize)
         runtimes.ave = time.perf_counter() - start_time
+        optimal_scores.ave = optimal_scores.split # same "ave" function
 
         # -- compute simple ave --
         iterations,K = 0,1
@@ -174,12 +205,13 @@ def execute_experiment(cfg):
         print("[simple] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        # flow_ave_simp = optim.run(dyn_noisy,patchsize,eval_ave_simp,
+        # flows.ave_simp = optim.run(dyn_noisy,patchsize,eval_ave_simp,
         #                      nblocks,iterations,subsizes,K)
-        flow_ave_simp = flow_ave.clone().cpu()
-        pix_ave_simp = flow_to_pix(flow_ave_simp.clone(),isize=isize)
-        aligned_ave_simp = align_from_flow(dyn_clean,flow_ave_simp,nblocks,isize=isize)
+        flows.ave_simp = flows.ave.clone().cpu()
+        pixs.ave_simp = flow_to_pix(flows.ave_simp.clone(),isize=isize)
+        aligned.ave_simp = align_from_flow(dyn_clean,flows.ave_simp,nblocks,isize=isize)
         runtimes.ave_simp = time.perf_counter() - start_time
+        optimal_scores.ave_simp = optimal_scores.split # same "ave" function
 
         # -- compute proposed search of nnf --
         # iterations,K = 50,3
@@ -208,32 +240,23 @@ def execute_experiment(cfg):
         print("[Bootstrap] loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flow_est = optim.run(dyn_noisy,patchsize,eval_prop,
+        flows.est = optim.run(dyn_noisy,patchsize,eval_prop,
                              nblocks,iterations,subsizes,K)
-        # flow_est = flow_gt.clone()
-        pix_est = flow_to_pix(flow_est.clone(),isize=isize)
-        aligned_est = align_from_flow(dyn_clean,flow_est,patchsize,isize=isize)
+        # flows.est = flows.of.clone()
+        pixs.est = flow_to_pix(flows.est.clone(),isize=isize)
+        aligned.est = align_from_flow(dyn_clean,flows.est,patchsize,isize=isize)
         runtimes.est = time.perf_counter() - start_time
-        # aligned_est = aligned_of.clone()
+        optimal_scores.est = eval_prop.score_burst_from_flow(dyn_noisy,flows.nnf_local,
+                                                             patchsize,nblocks)[1]
+        optimal_scores.est = torch_to_numpy(optimal_scores.est)
+
+        # aligned.est = aligned.of.clone()
         # time_est = 0.
 
         # -- format results --
         #pad = 2*(nframes-1)*ppf+4
         pad = 3#2*(nframes-1)*ppf+4
         isize = edict({'h':H-pad,'w':W-pad})
-        frames = edict({
-            'of':aligned_of,'nnf':aligned_nnf,'split':aligned_split,
-            'ave_simp':aligned_ave_simp,'ave':aligned_ave,
-            'est':aligned_est,'clean':static_clean,
-        })
-        flows = edict({
-            'gt':flow_gt,'nnf':flow_nnf,'split':flow_split,
-            'ave':flow_ave,'ave_simp':flow_ave_simp,'est':flow_est
-        })
-        pixs = edict({
-            'gt':pix_gt,'nnf':pix_nnf,'split':pix_split,
-            'ave':pix_ave,'ave_simp':pix_ave_simp,'est':pix_est
-        })
 
         # -- flows to numpy --
         is_even = cfg.frame_size%2 == 0
@@ -243,14 +266,15 @@ def execute_experiment(cfg):
         pixs_np = edict_torch_to_numpy(pixs)
 
         # -- End-Point-Errors --
-        epes_of = compute_flows_epe(flows)
-        flows.gt = flows.nnf
-        epes_nnf = compute_flows_epe(flows)
-        nnf_acc = compute_nnf_acc(flows)
+        epes_of = compute_flows_epe_wrt_ref(flows,"of")
+        epes_nnf = compute_flows_epe_wrt_ref(flows,"nnf")
+        epes_nnf_local = compute_flows_epe_wrt_ref(flows,"nnf_local")
+        nnf_acc = compute_acc_wrt_ref(flows,"nnf")
+        nnf_local_acc = compute_acc_wrt_ref(flows,"nnf_local")
 
         # -- PSNRs --
-        frames = remove_frame_centers(frames)
-        psnrs = compute_frames_psnr(frames,isize)
+        aligned = remove_frame_centers(aligned)
+        psnrs = compute_frames_psnr(aligned,isize)
 
         # -- print report ---
         print("\n"*3) # banner
@@ -262,43 +286,35 @@ def execute_experiment(cfg):
         print_delta_summary_psnrs(psnrs)
         print_verbose_epes(epes_of,epes_nnf)
         print_nnf_acc(nnf_acc)
+        print_nnf_local_acc(nnf_local_acc)
         print_summary_epes(epes_of,epes_nnf)
         print_summary_psnrs(psnrs)
 
-        # -- append to record --
+        # -- prepare results to be appended --
         psnrs = edict_torch_to_numpy(psnrs)
         epes_of = edict_torch_to_numpy(epes_of)
         epes_nnf = edict_torch_to_numpy(epes_nnf)
+        epes_nnf_local = edict_torch_to_numpy(epes_nnf_local)
         nnf_acc = edict_torch_to_numpy(nnf_acc)
-        # image_index = np.array([image_index])
+        nnf_local_acc = edict_torch_to_numpy(nnf_local_acc)
         image_index  = torch_to_numpy(image_index)
-
         batch_results = {'runtimes':runtimes,
+                         'optimal_scores':optimal_scores,
                          'psnrs':psnrs,
                          'epes_of':epes_of,
-                         'epes_nnf':epes_nnf,                         
-                         'nnf_acc':nnf_acc}
+                         'epes_nnf':epes_nnf,
+                         'epes_nnf_local':epes_nnf_local,
+                         'nnf_acc':nnf_acc,
+                         'nnf_local_acc':nnf_local_acc}
                          
-        # record.append(batch_results)
-        # print(record.record)
-        # print("-"*20)
+        # -- format results --
         batch_results = flatten_internal_dict(batch_results)
         format_fields(batch_results,image_index,rng_state)
-        print("inner.")
+
+        print("shape check.")
         for key,value in batch_results.items():
             print(key,value.shape)
 
-        # -- append more info --
-        # batch_results['image_index'] = image_index
-        # batch_results['tl_index'] = tl_index
-        # batch_results['rng_state'] = rng_state
-
-        # tmp_df = pd.DataFrame(batch_results)
-        # print("-"*10)
-        # print(tmp_df)
-        # print(batch_results)
-        # print(len(batch_results['psnrs']))
-        # print("-"*10)
         record.append(batch_results)
     # print("\n"*3)
     # print("-"*20)
@@ -325,7 +341,6 @@ def execute_experiment(cfg):
     return record.record
     
 
-
 def get_result_method_names(results):
     return list(results['psnrs'].keys())
 
@@ -335,38 +350,16 @@ def flatten_internal_dict(results):
     # print("methods.")
     # print(methods)
     method_dict = {key:{} for key in methods}
-    # print("\n"*3)
-    # print("results.")
-    # print("\n"*3)
-    for key_a,value_a in results.items():
-        for key_b,value_b in value_a.items():
-            # print(key_a,key_b,value_b)
-            # if isinstance(value_b,list):
-            #     if torch.is_tensor(value_b[0]):
-            #         value_b  = torch.stack(value_b,dim=0)
-            #     else:
-            #         value_b = torch.Tensor(value_b)
-            #     print(value_b.shape)
-            # if isinstance(value_b,np.ndarray):
-            #     value_b = np.array(value_b)
-            #     print(value_b.shape)
-            method_dict[key_b][key_a] = value_b
-            method_dict[key_b]['methods'] = key_b
-    # print("\n"*3)
-    # print("method_dict")
-    # print("\n"*3)
+    for result_name,result_dict in results.items():
+        for method_name,result in result_dict.items():
+            method_dict[method_name][result_name] = result
+            method_dict[method_name]['methods'] = method_name
+        
     for key_a,value_a in method_dict.items():
-        # print("-"*30)
         flattened.append(value_a)
-        # for key_b,value_b in value_a.items():
-        #     print(key_a,key_b,value_b)
     flattened = pd.DataFrame(flattened)
-    # print(flattened)
-    # print(flattened.columns)
-    # for key in list(flattened.columns):
-    #     print(flattened[key])
     dicts = flattened.to_dict('records')
-    # print("-"*30)
+
     mgrouped = {}
     for elem in dicts:
         for key,value in elem.items():
@@ -374,8 +367,7 @@ def flatten_internal_dict(results):
                 mgrouped[key].append(value)
             else:
                 mgrouped[key] = [value]
-    # print(mgrouped)
-    # print("-"*30)
+
     return mgrouped
 
 
@@ -390,7 +382,6 @@ def format_fields(mgrouped,index,rng_state):
     nmethods,nframes,batchsize = psnrs.shape
 
     # -- psnrs --
-    print("psnrs.shape: ",psnrs.shape)
     psnrs = rearrange(psnrs,'m t i -> (m i) t')
     print("psnrs.shape: ",psnrs.shape)
     mgrouped['psnrs'] = psnrs
@@ -398,20 +389,21 @@ def format_fields(mgrouped,index,rng_state):
     # -- methods --
     methods = np.array(mgrouped['methods'])
     methods = repeat(methods,'m -> (m i)',i=batchsize)
-    # rmethods = np.repeat(methods,batchsize).reshape(nmethods,batchsize)
-    # tmethods = np.tile(rmethods,nframes).reshape(nmethods,nframes,batchsize)
-    # methods = tmethods.ravel()
     print("methods.shape: ",methods.shape)
     mgrouped['methods'] = methods
 
     # -- runtimes --
     runtimes = np.array(mgrouped['runtimes'])
     runtimes = repeat(runtimes,'m -> (m i)',i=batchsize)
-    # rruntimes = np.repeat(runtimes,batchsize).reshape(nmethods,batchsize)
-    # truntimes = np.tile(rruntimes,nframes).reshape(nmethods,nframes,batchsize)
-    # runtimes = truntimes.ravel()
     print("runtimes.shape: ",runtimes.shape)
     mgrouped['runtimes'] = runtimes
+
+    # -- optimal scores --
+    scores = np.array(mgrouped['optimal_scores'])
+    print(scores.shape)
+    scores = rearrange(scores,'m i p 1 t -> (m i) p t',i=batchsize)
+    print("scores.shape: ",scores.shape)
+    mgrouped['optimal_scores'] = scores
 
     # -- epes_of --
     epes_of = np.array(mgrouped['epes_of'])
@@ -424,6 +416,20 @@ def format_fields(mgrouped,index,rng_state):
     epes_nnf = rearrange(epes_nnf,'m t i -> (m i) t')
     print("epes_nnf.shape: ",epes_nnf.shape)
     mgrouped['epes_nnf'] = epes_nnf
+
+    # -- epes_nnf_local --
+    epes_nnf_local = np.array(mgrouped['epes_nnf_local'])
+    epes_nnf_local = rearrange(epes_nnf_local,'m t i -> (m i) t')
+    print("epes_nnf_local.shape: ",epes_nnf_local.shape)
+    mgrouped['epes_nnf_local'] = epes_nnf_local
+
+
+    # -- nnf_local_acc --
+    print("NNF_LOCAL_ACC")
+    nnf_local_acc = np.array(mgrouped['nnf_local_acc'])
+    nnf_local_acc = rearrange(nnf_local_acc,'m t i -> (m i) t')
+    print("nnf_local_acc.shape: ",nnf_local_acc.shape)
+    mgrouped['nnf_local_acc'] = nnf_local_acc
 
     # -- nnf_acc --
     nnf_acc = np.array(mgrouped['nnf_acc'])

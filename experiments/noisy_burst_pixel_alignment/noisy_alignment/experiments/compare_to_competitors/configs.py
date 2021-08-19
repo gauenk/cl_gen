@@ -73,7 +73,7 @@ def get_exp_cfgs(name):
     alpha_tickmarks_str = ["%d" % x for x in alpha_tickmarks]
 
     # -- create frame number grid --
-    nframes = [10,3] # [31]
+    nframes = [15,10,3] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]

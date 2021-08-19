@@ -26,34 +26,44 @@ def center_crop_frames(frames,csize=30):
     return cc_frames
     
 def compute_nnf_acc(flows):
+    return compute_acc_wrt_ref(flows,"nnf")
+
+def compute_acc_wrt_ref(flows,ref):
+    skip_fields = ["clean"]
     accs = edict()
-    accs.of = compute_pair_flow_acc(flows.gt,flows.nnf)
-    accs.nnf = compute_pair_flow_acc(flows.nnf,flows.nnf)
-    accs.split = compute_pair_flow_acc(flows.split,flows.nnf)
-    accs.ave_simp = compute_pair_flow_acc(flows.ave_simp,flows.nnf)
-    accs.ave = compute_pair_flow_acc(flows.ave,flows.nnf)
-    accs.est = compute_pair_flow_acc(flows.est,flows.nnf)
+    for field in flows.keys():
+        if field in skip_fields: continue
+        accs[field] = compute_pair_flow_acc(flows[field],flows[ref])
     return accs
 
 def compute_frames_psnr(frames,isize):
+    skip_fields = ["clean"]
     psnrs = edict()
-    psnrs.of = compute_aligned_psnr(frames.of,frames.clean,isize)
-    psnrs.nnf = compute_aligned_psnr(frames.nnf,frames.clean,isize)
-    psnrs.split = compute_aligned_psnr(frames.split,frames.clean,isize)
-    psnrs.ave_simp = compute_aligned_psnr(frames.ave_simp,frames.clean,isize)
-    psnrs.ave = compute_aligned_psnr(frames.ave,frames.clean,isize)
-    psnrs.est = compute_aligned_psnr(frames.est,frames.clean,isize)
+    for field in frames.keys():
+        if field in skip_fields: continue
+        psnrs[field] = compute_aligned_psnr(frames[field],frames.clean,isize)
     return psnrs
 
-def compute_flows_epe(flows):
+def compute_flows_epe_wrt_ref(flows,ref):
+    skip_fields = []
     epes = edict()
-    epes.of = compute_epe(flows.gt,flows.gt)
-    epes.nnf = compute_epe(flows.nnf,flows.gt)
-    epes.split = compute_epe(flows.split,flows.gt)
-    epes.ave_simp = compute_epe(flows.ave_simp,flows.gt)
-    epes.ave = compute_epe(flows.ave,flows.gt)
-    epes.est = compute_epe(flows.est,flows.gt)
+    for field in flows.keys():
+        if field in skip_fields: continue
+        epes[field] = compute_epe(flows[field],flows[ref])
     return epes
+
+# def compute_flows_epe(flows):
+#     epes = compute_flows_epe_wrt_ref(flows,ref)
+    # epes = edict()
+    # for field in flows.keys():
+    #     epes[field] = compute_epe(flows[field],flows[ref])
+    # epes.of = compute_epe(flows.gt,flows.gt)
+    # epes.nnf = compute_epe(flows.nnf,flows.gt)
+    # epes.split = compute_epe(flows.split,flows.gt)
+    # epes.ave_simp = compute_epe(flows.ave_simp,flows.gt)
+    # epes.ave = compute_epe(flows.ave,flows.gt)
+    # epes.est = compute_epe(flows.est,flows.gt)
+    # return epes
 
 def remove_frame_centers(frames):
     nc_frames = edict()
@@ -168,4 +178,19 @@ def print_nnf_acc(nnf_acc):
     print(nnf_acc.ave)
     print("Proposed v.s. NNF")
     print(nnf_acc.est)
+
+def print_nnf_local_acc(nnf_acc):
+    print("-"*50)
+    print("Local NNF Accuracy [bigger is better]")
+    print("-"*50)
+
+    print("Split v.s. NNF")
+    print(nnf_acc.split)
+    print("Ave [Simple] v.s. NNF")
+    print(nnf_acc.ave_simp)
+    print("Ave v.s. NNF")
+    print(nnf_acc.ave)
+    print("Proposed v.s. NNF")
+    print(nnf_acc.est)
+
 

@@ -10,6 +10,22 @@ import torch.nn.functional as F
 import torchvision.utils as tv_utils
 import torchvision.transforms.functional as tvF
 
+def detached_cpu_tensor(img):
+    if torch.is_tensor(img):
+        return img.detach().cpu()
+    else:
+        return torch.Tensor(img)
+
+def include_batch_dim(img):
+    if img.ndim == 2:
+        return img[None,None,:]
+    elif img.ndim == 3:
+        return img[None,:]
+    elif img.ndim == 4: return img
+    else:
+        msg = f"[images.py:include_batch_dim] Uknown case images with ndim [{img.ndim}]"
+        raise NotImplemented(msg)
+
 def print_tensor_stats(prefix,tensor):
     stats_fmt = (tensor.min().item(),tensor.max().item(),
                  tensor.mean().item(),tensor.std().item())
@@ -52,8 +68,18 @@ def normalize_image_to_zero_one(img):
     return img
 
 def images_to_psnrs(img1,img2):
+    img1 = detached_cpu_tensor(img1)
+    img2 = detached_cpu_tensor(img2)
+
+    assert img1.ndim == img2.ndim, "Equal number of dims"
+
+    img1 = include_batch_dim(img1)
+    img2 = include_batch_dim(img2)
+
+    assert img1.ndim == 4, "Must be BatchSize x iDim0 x iDim1 x iDim2"
+
     B = img1.shape[0]
-    mse = F.mse_loss(img1.detach().cpu(),img2.detach().cpu(),reduction='none').reshape(B,-1)
+    mse = F.mse_loss(img1,img2,reduction='none').reshape(B,-1)
     mse = torch.mean(mse,1).detach().numpy() + 1e-16
     psnrs = mse_to_psnr(mse)
     return psnrs

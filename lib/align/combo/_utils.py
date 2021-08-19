@@ -1,4 +1,7 @@
 
+print("NOT USED ANYWHERE!")
+exit()
+
 def compute_topK_scores_gen(self,patches,masks,biter,nblocks,K):
     r"""
     Generator

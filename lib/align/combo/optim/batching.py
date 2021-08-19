@@ -33,6 +33,8 @@ def run_burst(fxn,burst,patchsize,evaluator,
     h,w = patchsize+pad,patchsize+pad
     patches = tile_patches(burst,patchsize+pad).pix
     patches = rearrange(patches,'b t s (h w c) -> b s t c h w',h=h,w=w)
+    # pad = 2*(nblocks//2)
+    #burst_to_patches(image,patchsize+pad)
     # patches = rearrange(patches,'b t s (w h c) -> b s t c h w',h=h,w=w)
     masks = torch.ones_like(patches).type(torch.long)
     # save_image(patches[0,0],"patches_0.png",(-0,5,0.5))
@@ -145,8 +147,8 @@ def run_pixel_batch_parallel(fxn,patches,masks,evaluator,
             PIX_BATCHSIZE = 64
             N_JOBS = 6
         else:
-            PIX_BATCHSIZE = 128
-            N_JOBS = 4
+            PIX_BATCHSIZE = 256
+            N_JOBS = 8
     elif evaluator.score_fxn_name == "bs":
         if nframes < 10:
             if h <= 7:

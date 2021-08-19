@@ -48,7 +48,7 @@ def get_sim_l2_global(cfg):
     
 def get_sim_l2_local(cfg):
     ave_fxn = get_score_function("ave")
-    block_batchsize = 128
+    block_batchsize = 256
     eval_block = EvalBlockScores(ave_fxn,"ave",cfg.patchsize,block_batchsize,None)    
     optim = AlignOptimizer("v3")
     iterations,subsizes,K = 0,[],1

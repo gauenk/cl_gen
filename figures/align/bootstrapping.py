@@ -11,6 +11,7 @@ from matplotlib.figure import Figure
 from matplotlib.gridspec import GridSpec
 from matplotlib import colors
 import matplotlib.pyplot as plt
+from einops import rearrange,repeat
 from pathlib import Path
 from matplotlib.patches import ConnectionPatch
 from scipy.ndimage.interpolation import affine_transform
@@ -21,6 +22,10 @@ import torch
 # -- project imports --
 from pyutils import save_image
 from patch_search.pixel.bootstrap_numba import fill_weights
+from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
+
+# -- local imports --
+from configs import get_cfg_defaults
 
 
 SAVE_DIR = Path("./figures/align/")
@@ -145,7 +150,7 @@ def get_burst_data(nblocks,patchsize,nframes,offset,ppf):
     burst = np.stack(burst)
     return burst
 
-def plot_bootstrapping():
+def plot_bootstrapping(noisy,clean):
 
     # -- settings --
     nblocks = 3
@@ -166,16 +171,19 @@ def plot_bootstrapping():
     counts = torch.zeros((nsubsets,nframes),device=device)
     fill_weights(weights,counts,nsubsets,nframes,gpuid)
     weights = weights.cpu().numpy()
+    weights += 1./nframes
     print(weights)
 
     # -- plot weights --
     postfix = "randmat"
     bcolor = '#00FFFF'
-    create_weight_plot(None,None,weights,nblocks,nframes,patchsize,postfix,bcolor)
+    create_weight_plot(None,None,weights,nblocks,
+                       nframes,patchsize,postfix,bcolor)
 
     # -- plot weights @ image frames --
     postfix = "wsum"
-    aves = create_weight_burst_plot(None,None,burst,weights,nblocks,nframes,
+    aves = create_weight_burst_plot(None,None,noisy,clean,burst,
+                                    weights,nblocks,nframes,
                                     patchsize,postfix,bcolor)
     # -- plot average stack --
     postfix = "astack"
@@ -296,7 +304,7 @@ def create_ave_stack_plot(input_fig,input_ax,aves,postfix,bcolor):
     plt.close("all")
     plt.clf()
 
-def create_weight_burst_plot(input_fig,input_ax,burst,weights,
+def create_weight_burst_plot(input_fig,input_ax,noisy,clean,burst,weights,
                              nblocks,nframes,patchsize,postfix,bcolor):
 
     # -- create colormap --
@@ -331,7 +339,10 @@ def create_weight_burst_plot(input_fig,input_ax,burst,weights,
             frame = burst[t][:patchsize,:patchsize]
             weight_nmlz = weight_row_nmlz[t].reshape(1,1,1)
             weight = weight_row[t].reshape(1,1,1)
-            ave += weight_row[t] * frame
+
+            #ave += weight_row[t] * frame
+            ave += weight_row[t] * noisy[t].cpu()
+
             w_axis = axes[row][2*t]
             w_axis.imshow(weight, cmap='Greys',vmin=vmin,vmax=1.0)
             w_axis.set_xticklabels([])
@@ -340,11 +351,18 @@ def create_weight_burst_plot(input_fig,input_ax,burst,weights,
             no_pointy_tics(w_axis)
     
             frame_ax = axes[row][2*t+1]
-            frame_ax.imshow(frame, cmap='Greys',vmin=vmin,vmax=1.0)
-            frame_ax.grid(which='major', axis='both',
-                    linestyle='-', color=gcolor, linewidth=2)
-            frame_ax.set_xticks(np.arange(-.5, frame.shape[1], 1));
-            frame_ax.set_yticks(np.arange(-.5, frame.shape[0], 1));
+
+            # -- replace weight with image --
+            weight = noisy[t] - noisy[t].min()
+            weight /= weight.max()
+            weight = weight.cpu().numpy()
+            frame_ax.imshow(weight, vmin=0,vmax=1.0)
+            # -- use weight --
+            # frame_ax.imshow(frame, cmap='Greys',vmin=vmin,vmax=1.0)
+            # frame_ax.grid(which='major', axis='both',
+            #         linestyle='-', color=gcolor, linewidth=2)
+            # frame_ax.set_xticks(np.arange(-.5, frame.shape[1], 1));
+            # frame_ax.set_yticks(np.arange(-.5, frame.shape[0], 1));
             frame_ax.set_xticklabels([])
             frame_ax.set_yticklabels([])
             frame_ax.set_aspect('equal')
@@ -354,24 +372,36 @@ def create_weight_burst_plot(input_fig,input_ax,burst,weights,
         aves.append(ave)
         frame_ax = axes[row][-1]
         frame_ax.imshow(ave, cmap='Greys')
-        frame_ax.grid(which='major', axis='both',
-                linestyle='-', color=gcolor, linewidth=2)
-        frame_ax.set_xticks(np.arange(-.5, frame.shape[1], 1));
-        frame_ax.set_yticks(np.arange(-.5, frame.shape[0], 1));
+        # frame_ax.imshow(ave, cmap='Greys')
+        # frame_ax.grid(which='major', axis='both',
+        #         linestyle='-', color=gcolor, linewidth=2)
+        # frame_ax.set_xticks(np.arange(-.5, frame.shape[1], 1));
+        # frame_ax.set_yticks(np.arange(-.5, frame.shape[0], 1));
         frame_ax.set_xticklabels([])
         frame_ax.set_yticklabels([])
         frame_ax.set_aspect('equal')
         no_pointy_tics(frame_ax)
 
         # -- write plus signs --
-        if nrows < 5:
-            left,top = 5.75,2.25
+        method = "use_image"
+        if method == "use_pix":
+            if nrows < 5:
+                left,top = 5.75,2.25
+            else:
+                left,top = 5.25,2.25
         else:
-            left,top = 5.25,2.25
+            left,top = 70.75,35.25
         for t in range(nframes-1):
             axes[row][2*t+1].text(left, top, r'$+$', fontsize=20)
         axes[row][2*nframes-1].text(left, top, r'$=$', fontsize=20)                
         
+
+
+    # -- save frame - ave image --
+    ave = torch.stack(aves,dim=0)
+    tosave = rearrange(torch.mean(noisy.cpu(),dim=0) - ave,'s h w c -> s c h w')
+    save_image(tosave,SAVE_DIR/"./bootstrap_noisy_delta_ave.png")
+
     # -- save figure --
     fname = SAVE_DIR / f"bootstrapping_{postfix}.png"
     plt.savefig(fname,transparent=True,bbox_inches='tight',dpi=300)
@@ -419,7 +449,42 @@ def main():
     seed = 234
     np.random.seed(seed)
     torch.manual_seed(seed)
-    plot_bootstrapping()
+
+    # -- settings --
+    cfg = get_cfg_defaults()
+    cfg.use_anscombe = True
+    cfg.noise_params.ntype = 'g'
+    cfg.noise_params.g.std = 25.
+    cfg.nframes = 3
+    cfg.num_workers = 0
+    cfg.dynamic_info.nframes = cfg.nframes
+    cfg.dynamic_info.ppf = 10
+    cfg.nblocks = 3
+    cfg.patchsize = 10
+    cfg.gpuid = 1
+    cfg.device = f"cuda:{cfg.gpuid}"
+
+    # -- load dataset --
+    data,loaders = load_image_dataset(cfg)
+    train_iter = iter(loaders.tr)
+
+    # -- fetch sample --
+    sample = next(train_iter)
+    sample_to_cuda(sample)
+
+    # -- unpack data --
+    noisy,clean = sample['noisy'],sample['burst']
+
+    # -- save ave image --
+    save_image(torch.mean(noisy[:,0],dim=0),SAVE_DIR/"./bootstrap_noisy_ave.png")
+
+    # -- format for plots --
+    print("noisy.shape",noisy.shape)
+    noisy = rearrange(noisy[:,0],'t c h w -> t h w c')
+    clean = rearrange(clean[:,0],'t c h w -> t h w c')
+
+    plot_bootstrapping(noisy,clean)
+
 
 if __name__ == "__main__":
     main()

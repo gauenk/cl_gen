@@ -67,8 +67,8 @@ def split_frame_search_single(t,device,patches,masks,evaluator,ones,brange,
         blocks_t = ones * t
         srch_blocks = mesh_block_ranges(blocks_t,brange,curr_blocks)
         srch_blocks = torch.LongTensor(srch_blocks).to(device,non_blocking=True)
-        scores,blocks = evaluator.compute_topK_scores(patches,masks,srch_blocks,
-                                                      nblocks,K)
+        scores,scores_t,blocks = evaluator.compute_topK_scores(patches,masks,
+                                                               srch_blocks,nblocks,K)
         # blocks.shape = nimages, nsegs, K, nframes
         topK_blocks[:,:,t,:] = blocks[:,:,:,t]
 
@@ -97,8 +97,8 @@ def split_frame_search_serial(patches,masks,evaluator,curr_blocks,brange,nblocks
         srch_blocks = get_search_blocks(blocks_t,brange,curr_blocks,device,False)
         # srch_blocks = mesh_block_ranges_gen(blocks_t,brange,curr_blocks,bsize,device)
         # srch_blocks = mesh_block_ranges(blocks_t,brange,curr_blocks,device)
-        scores,blocks = evaluator.compute_topK_scores(patches,masks,srch_blocks,
-                                                        nblocks,K)
+        scores,scores_t,blocks = evaluator.compute_topK_scores(patches,masks,
+                                                               srch_blocks,nblocks,K)
         # blocks.shape = nimages, nsegs, K, nframes
         topK_blocks_t = blocks[:,:,:,t]
         topK_blocks[:,:,t,:] = topK_blocks_t

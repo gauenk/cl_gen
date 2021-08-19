@@ -1,5 +1,6 @@
 
 # -- python --
+import numpy as np
 from pathlib import Path
 from easydict import EasyDict as edict
 
@@ -16,10 +17,12 @@ from pyplots.misc import filter_sim_fields_range
 from pyplots.contours import plot_contour_pairs
 from pyplots.contours import stratify_contour_plots
 from pyplots.lines import stratify_line_plots,plot_single_sim_group
+from pyplots.legend import add_legend
 #from pyplots.contours import plot_sim_test_pairs
 
 # -- local imports --
 from .example_images import plot_example_images
+from .quality_v_noise import create_quality_v_noise_plot,create_ideal_v_noise_plot
 
 def plot_experiment(records,egrids,exp_cfgs):
     """
@@ -43,9 +46,50 @@ def plot_experiment(records,egrids,exp_cfgs):
 
     print("plot examples.")
     plot_example_images(records,exp_cfgs)
+    fname = "all"
     print("plot exp.")
     records = records.astype({'methods':'string'})
     records = records.astype({'nframes':'int'})
+
+    # -- quality v noise --
+    # create_quality_v_noise_plot(records,egrids,exp_cfgs)
+    create_ideal_v_noise_plot(records,egrids,exp_cfgs)
+
+    # -- plot accuracy of methods  --
+    import numpy as np
+    for nframes,fgroup in records.groupby('nframes'):
+        handles,labels = [],[]
+        fig,ax = plt.subplots(figsize=(8,4))
+        for method,mgroup in fgroup.groupby('methods'):
+            mdata = []
+            for std,std_group in mgroup.groupby('std'):
+                psnrs = []
+                for mpsnrs in std_group['psnrs']:
+                    psnrs.extend(list(mpsnrs))
+                ave_psnr = np.mean(psnrs)
+                mdata.append([std,ave_psnr])
+            mdata = np.array(mdata)
+            x,y = mdata[:,0],mdata[:,1]
+            print(method,x,y)
+            # -- order by y --
+            order = np.argsort(x)
+            y = y[order]
+            x = x[order]
+            smethod = method.replace("_","-")
+            handle = ax.plot(x,y,'x-',label=smethod)
+            labels.append(smethod)
+            handles.append(handle)
+        title = "Method"
+        add_legend(ax,title,labels,None,shrink = True,
+                   fontsize=15,framealpha=1.0,ncol=1,shrink_perc=.80)
+        save_dir = Path("./")
+        fn =  save_dir / f"./psnr_v_noise_{nframes}.png"
+        plt.savefig(fn,transparent=True,bbox_inches='tight',dpi=300)
+        plt.close('all')
+    
+
+    print(records)
+
     print(records['methods'])
     sims = records[records['methods'].isin(['ave','est'])]
     sims = sims[sims['patchsize'].isin([7])]
@@ -56,7 +100,6 @@ def plot_experiment(records,egrids,exp_cfgs):
         title = f"Method All"#[{tmethod}]"
         fname = f"method_all"#{method}"
         print(mgroup)
-
         plot_results(ax,mgroup,egrids,title,fname)
     psnr_info = edict({'group':'psnrs','title':'PSNRS'})
     save_dir = Path("./")

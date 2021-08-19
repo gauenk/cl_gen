@@ -62,55 +62,65 @@ def plot_landscape(scores,blocks,seed):
 
     # -- pix index --
     pindex = 16*32+16
-
-    # -- create figs --
-    fig,ax = plt.subplots(1,1,figsize=(8,4))
-    ax = [ax]
-    handles = []
-    for itype in scores.keys():
-        for pm_method in ['ave']:#scores[itype].keys():
-            # print(blocks[itype][pm_method].shape)
-            # print(scores[itype][pm_method].shape)
-            xgrid = blocks[itype][pm_method][pindex]
-            ygrid = scores[itype][pm_method][pindex]
-
-            order = np.argsort(xgrid)
-            xgrid = xgrid[order]
-            ygrid = ygrid[order]
-
-            argmin_y = np.argmin(ygrid)
-            min_x = xgrid[argmin_y]
-
-
-            ax[0].vplot(min_x)
-            h = ax[0].plot(xgrid,ygrid,'-x',label=label,color=colors[itype][pm_method])
-            label = f"[{itype}]: {pm_method}"
-            handles.append(h)
-
-    ax[0].set_xlabel("Index of Proposed Patch in Search Space.",fontsize=15)
-    ax[0].set_ylabel("Measure of Alignment",fontsize=15)
-
-    # -- add legend --
-    # titles = []
-    # handles = []
-    # for field in fields:
-    #     sfield = field.replace("_"," ").title()
-    #     titles.append(sfield)
-    #     pop = patches.Patch(color=colors[field], label=sfield)
-    #     handles.append(pop)
-    # ax[-1].axis("off")
-    # box = ax[-2].get_position()
-    # ax[-1].set_position([box.x0, box.y0,
-    #                      box.width, box.height])
-    # add_legend(ax[-1],"Methods",titles,handles,shrink = False,fontsize=12,
-    #            framealpha=0.0,ncol=1)
-
-    # -- save plot --
-    plt.savefig(f"./loss_landscape_{seed}.png",
-                transparent=True,dpi=300,bbox_inches='tight')
-    plt.close("all")
-    plt.clf()
-
+    pindex_list = [10*32+10,8*32+16,16*32+16,20*32+14]
+    methods = ['ave','bs']
+    for pindex in pindex_list:
+    
+        # -- get max_y --
+        max_y = 0
+        for itype in scores.keys():
+            for pm_method in methods:#scores[itype].keys():
+                max_y_tmp = np.max(scores[itype][pm_method][pindex])
+                if max_y_tmp > max_y: max_y = max_y_tmp
+    
+        # -- create figs --
+        fig,ax = plt.subplots(1,1,figsize=(8,4))
+        ax = [ax]
+        handles = []
+        for itype in scores.keys():
+            for pm_method in methods:#scores[itype].keys():
+                # print(blocks[itype][pm_method].shape)
+                # print(scores[itype][pm_method].shape)
+                xgrid = blocks[itype][pm_method][pindex]
+                ygrid = scores[itype][pm_method][pindex]
+    
+                order = np.argsort(xgrid)
+                xgrid = xgrid[order]
+                ygrid = ygrid[order]
+    
+                argmin_y = np.argmin(ygrid)
+                min_x = xgrid[argmin_y]
+    
+                label = f"[{itype}]: {pm_method}"
+                noise = np.random.normal(loc=0,scale=0.1,size=(1,))
+                ax[0].vlines(min_x+noise,0,max_y,color=colors[itype][pm_method],linewidth=2)
+                h = ax[0].plot(xgrid,ygrid,'-x',label=label,color=colors[itype][pm_method])
+                handles.append(h)
+    
+        ax[0].set_xlabel("Index of Proposed Patch in Search Space.",fontsize=15)
+        ax[0].set_ylabel("Measure of Alignment",fontsize=15)
+    
+        # -- add legend --
+        # titles = []
+        # handles = []
+        # for field in fields:
+        #     sfield = field.replace("_"," ").title()
+        #     titles.append(sfield)
+        #     pop = patches.Patch(color=colors[field], label=sfield)
+        #     handles.append(pop)
+        # ax[-1].axis("off")
+        # box = ax[-2].get_position()
+        # ax[-1].set_position([box.x0, box.y0,
+        #                      box.width, box.height])
+        # add_legend(ax[-1],"Methods",titles,handles,shrink = False,fontsize=12,
+        #            framealpha=0.0,ncol=1)
+    
+        # -- save plot --
+        plt.savefig(f"./loss_landscape_{seed}_{pindex}.png",
+                    transparent=True,dpi=300,bbox_inches='tight')
+        plt.close("all")
+        plt.clf()
+    
 def search_blocks_to_str(search_block):
     search_block_str = []
     for elem in search_block:
@@ -140,6 +150,39 @@ def boxes_from_flow(flow,h,w):
     pix = rearrange(pix,'b (h w) t two -> t b h w two',h=h,w=w)
     return pix
 
+def tile_pair_to_full(scores,blocks,srch_blocks,
+                      frames_pair,nframes,nblocks):
+    """
+
+    Paste the "scores" from "blocks" 
+    to the associated "srch_blocks"
+
+    """
+
+    # -- find indices of srch_blocks_pair in srch_blocks --
+    print(blocks.shape)
+    print(srch_blocks.shape)
+    npix,naligns_pair,two = blocks.shape
+    npix,naligns,nframes = srch_blocks.shape
+    scores_full = np.zeros((npix,naligns))
+    assert len(frames_pair) == 1,"pair only uses a single, non-ref frame"
+    sel_blocks_full = srch_blocks[:,:,frames_pair] # all blocks of this frame
+    sel_blocks_pair = blocks[:,:,frames_pair]
+    for bvalue in range(nblocks**2): # or range(naligns_pair)
+        args_full = np.where(bvalue == sel_blocks_full)
+        args_full_x,args_full_y = args_full[0],args_full[1]
+
+        args_pair = np.where(bvalue == sel_blocks_pair)
+        args_pair_x,args_pair_y = args_pair[0],args_pair[1]
+        counts = np.bincount(args_pair_x)
+
+        assert np.all(counts == 1),"Only one occurance for pair blocks."
+
+        for p in range(npix):
+            scores_full[p,args_full_y] = scores[p,args_pair_y[p]]
+
+    return scores_full,srch_blocks
+
 def run_with_seed(seed):
     
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
@@ -152,7 +195,7 @@ def run_with_seed(seed):
     cfg = get_cfg_defaults()
     cfg.use_anscombe = False
     cfg.noise_params.ntype = 'g'
-    cfg.noise_params.g.std = 10.
+    cfg.noise_params.g.std = 25.
     cfg.nframes = 3
     cfg.dynamic_info.nframes = cfg.nframes
     cfg.nblocks = 3
@@ -218,7 +261,16 @@ def run_with_seed(seed):
     brange = exh_block_range(nimages,npix,cfg.nframes,cfg.nblocks)
     curr_blocks = init_optim_block(nimages,npix,cfg.nframes,cfg.nblocks)
     srch_blocks = get_search_blocks(frames,brange,curr_blocks,cfg.device)    
+    np_srch_blocks = torch_to_numpy(srch_blocks[0])
     S = len(srch_blocks[0,0])
+
+    # -- create constants --
+    frames_pair = np.array([0])
+    frames = repeat(frames_pair,'z -> i s z',i=nimages,s=npix)
+    brange = exh_block_range(nimages,npix,cfg.nframes,cfg.nblocks)
+    curr_blocks_pair = init_optim_block(nimages,npix,cfg.nframes,cfg.nblocks)
+    srch_blocks_pair = get_search_blocks(frames,brange,curr_blocks_pair,cfg.device)
+    S_pair = len(srch_blocks[0,0])
 
     # -- encode blocks --
     single_search_block = srch_blocks[0,0].cpu().numpy()
@@ -231,8 +283,42 @@ def run_with_seed(seed):
     #
     # -=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-
 
+
     #
-    # --- run split search ---
+    # --- run PAIRED split search ---
+    #
+
+    ave_fxn = get_score_function("ave")
+    block_batchsize = 128
+    evaluator = EvalBlockScores(ave_fxn,"ave",cfg.patchsize,block_batchsize,None)
+    get_topK = evaluator.compute_topK_scores
+
+    # -- a) run clean --
+    clean_scores,clean_blocks = get_topK(clean_patches,masks,
+                                         srch_blocks_pair,cfg.nblocks,S_pair)
+    scores_full = torch_to_numpy(clean_scores[0])
+    blocks_full = torch_to_numpy(clean_blocks[0])
+
+    # -- b) tile results to full blocks --
+    scores_full,blocks_full = tile_pair_to_full(scores_full,blocks_full,np_srch_blocks,
+                                                frames_pair,cfg.nframes,cfg.nblocks)
+    scores.clean.ave = scores_full
+    blocks.clean.ave = batch_search_blocks_to_labels(blocks_full,block_strings)
+
+    # -- a) run noisy --
+    noisy_scores,noisy_blocks = get_topK(noisy_patches,masks,
+                                         srch_blocks_pair,cfg.nblocks,S_pair)
+    scores_full = torch_to_numpy(noisy_scores[0])
+    blocks_full = torch_to_numpy(noisy_blocks[0])
+
+    # -- b) tile results to full blocks --
+    scores_full,blocks_full = tile_pair_to_full(scores_full,blocks_full,np_srch_blocks,
+                                                frames_pair,cfg.nframes,cfg.nblocks)
+    scores.noisy.ave = scores_full
+    blocks.noisy.ave = batch_search_blocks_to_labels(blocks_full,block_strings)
+
+    #
+    # --- run FULL split search ---
     #
 
     ave_fxn = get_score_function("ave")
@@ -244,21 +330,22 @@ def run_with_seed(seed):
     clean_scores,clean_blocks = get_topK(clean_patches,masks,srch_blocks,cfg.nblocks,S)
 
     clean_scores = torch_to_numpy(clean_scores)
-    scores.clean.ave = clean_scores[0]
+    scores.clean.full_ave = clean_scores[0]
 
     clean_blocks = torch_to_numpy(clean_blocks)
     batch_blocks = clean_blocks[0,:,:,:]
-    blocks.clean.ave = batch_search_blocks_to_labels(batch_blocks,block_strings)
+    blocks.clean.full_ave = batch_search_blocks_to_labels(batch_blocks,block_strings)
 
     # -- run noisy --
     noisy_scores,noisy_blocks = get_topK(noisy_patches,masks,srch_blocks,cfg.nblocks,S)
 
     noisy_scores = torch_to_numpy(noisy_scores)
-    scores.noisy.ave = noisy_scores[0]
+    scores.noisy.full_ave = noisy_scores[0]
 
     noisy_blocks = torch_to_numpy(noisy_blocks)
     batch_blocks = noisy_blocks[0,:,:,:]
-    blocks.noisy.ave = batch_search_blocks_to_labels(batch_blocks,block_strings)
+    blocks.noisy.full_ave = batch_search_blocks_to_labels(batch_blocks,block_strings)
+
 
     #
     # --- run bootstrapping ---
@@ -270,9 +357,9 @@ def run_with_seed(seed):
     get_topK = evaluator.compute_topK_scores
 
     # -- run noisy --
-    # noisy_scores,noisy_blocks = get_topK(noisy_patches,masks,srch_blocks,cfg.nblocks,S)
+    noisy_scores,noisy_blocks = get_topK(noisy_patches,masks,srch_blocks,cfg.nblocks,S)
 
-    noisy_blocks = torch_to_numpy(noisy_blocks)
+    noisy_scores = torch_to_numpy(noisy_scores)
     scores.noisy.bs = noisy_scores[0]
 
     noisy_blocks = torch_to_numpy(noisy_blocks)
@@ -280,9 +367,9 @@ def run_with_seed(seed):
     blocks.noisy.bs = batch_search_blocks_to_labels(batch_blocks,block_strings)
 
     # -- run clean --
-    # clean_scores,clean_blocks = get_topK(clean_patches,masks,srch_blocks,cfg.nblocks,S)
+    clean_scores,clean_blocks = get_topK(clean_patches,masks,srch_blocks,cfg.nblocks,S)
 
-    clean_blocks = torch_to_numpy(clean_blocks)
+    clean_scores = torch_to_numpy(clean_scores)
     scores.clean.bs = clean_scores[0]
 
     clean_blocks = torch_to_numpy(clean_blocks)
@@ -302,7 +389,7 @@ def main():
     pid = os.getpid()
     print("Running loss_landscape.py")
     print(f"PID: {pid}")
-    nrands = 1
+    nrands = 20
     for r in range(nrands):
         random_seed = int(torch.rand(1)*100)
         print(f"random_seed: [{random_seed}]")

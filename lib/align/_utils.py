@@ -1,8 +1,11 @@
 
 import torch
 import numpy as np
+from einops import rearrange
+from pyutils import tile_patches
 import torch.nn.functional as F
 import torchvision.transforms.functional as tvF
+
 
 from pyutils import images_to_psnrs
 
@@ -58,10 +61,15 @@ def assert_cfg_fields(cfg):
     assert len(cfg.return_fields) > 0, "Return fields must be a non-empty"
     assert check_all_str(cfg.return_fields), "Return fields type must all be a str"
 
-
-
     return True
 
+def burst_to_patches(burst,patchsize):
+    assert burst.ndim == 5, "Must have 5 dims for tiling."
+    ps = patchsize
+    patches = tile_patches(burst,ps).pix
+    patches = rearrange(patches,'b t s (h w c) -> b s t c h w',h=ps,w=ps)
+    # nimages, npix, nframes, ncolors, ps, ps = patches.shape
+    return patches
 
 class BatchIter():
     def __init__(self,nsamples,batchsize):

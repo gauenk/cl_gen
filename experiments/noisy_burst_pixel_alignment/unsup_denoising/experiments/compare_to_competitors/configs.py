@@ -16,7 +16,7 @@ def get_cfg_defaults():
     cfg.nframes = 5
     cfg.use_anscombe = True
     cfg.frame_size = 64
-    cfg.nepochs = 10
+    cfg.nepochs = 1
     # cfg.nepochs = 3
     cfg.test_interval = 2
     cfg.save_interval = 5
@@ -48,7 +48,7 @@ def get_cfg_defaults():
     cfg.nblocks = 3
     cfg.patchsize = 3
     # cfg.score_fxn_name = "bootstrapping"
-    cfg.score_fxn_name = "bootstrapping_mod3"
+    cfg.score_fxn_name = "bootstrapping_mod2"
     
     return cfg
 
@@ -99,11 +99,11 @@ def get_exp_cfgs(name):
     # -- sim method --
     # sim_method = ['l2_global','l2_local','bs_local_v1','of']
     # sim_type = ['a','n2n','sup']
-    sim_method = ['l2_global','l2_local','bs_local_v2']
+    # sim_method = ['l2_global','l2_local','bs_local_v2']
+    sim_method = ['l2_global']
+    # sim_type = ['c','n2n','sup']
     # sim_method = ['l2_global']
-    sim_type = ['b','c','n2n','sup']
-    # sim_method = ['l2_global']
-    # sim_type = ['sup','n2n']
+    sim_type = ['sup','n2n']
     # sim_type = ['n2n']
     # sim_type = ['sup']
 
@@ -127,7 +127,7 @@ def get_exp_cfgs(name):
         named_mesh.append(named_elem)
 
     # -- keep only pairs lists --
-    filters = [{'sim_method-sim_type':[['l2_global','c'],['l2_local','c'],['bs_local_v1','c'],['of','c'],['l2_global','n2n'],['l2_global','sup']]}]
+    filters = [{'sim_method-sim_type':[['l2_global','c'],['l2_local','c'],['bs_local_v2','c'],['of','c'],['l2_global','n2n'],['l2_global','sup']]}]
     named_mesh = apply_mesh_filters(named_mesh,filters)
 
     # -- format grids --

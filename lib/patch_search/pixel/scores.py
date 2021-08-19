@@ -68,6 +68,8 @@ def get_score_function(name):
         return bootstrapping_mod5
     elif name == "bootstrapping_mod6":
         return bootstrapping_mod6
+    elif name == "bootstrapping_limitB":
+        return bootstrapping_limitB
     elif name == "sim_trm":
         return sim_trm
     elif name == "ransac":
@@ -228,6 +230,23 @@ def bootstrapping_mod2(cfg,expanded):
     scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
 
     return scores,scores_t
+
+def bootstrapping_limitB(cfg,expanded,boot):
+    pass
+    
+#     # -- setup vars --
+#     R,B,E,T,C,H,W = expanded.shape
+#     nframes = T
+#     device = expanded.device
+#     samples = rearrange(expanded,'r b e t c h w -> c (r h w) t (b e)')
+#     samples = samples.contiguous() # speed up?
+#     ncolor,npix,nframes,nsamples = samples.shape
+#     t_ref = nframes//2
+#     nbatches,batchsize = 20,250
+#     nsubsets = nbatches*batchsize
+#     # rearrange(boot,'r b e ')
+    
+
 
 def bootstrapping_mod3(cfg,expanded):
 
@@ -1021,10 +1040,10 @@ def ave_score(cfg,expanded):
     delta = torch.mean(delta_t,dim=0)
 
     # -- append dim for T --
-    Tm1 = T-1
     delta_t = rearrange(delta_t,'t b e -> b e t')
     zeros = torch.zeros_like(delta_t[:,:,[0]])
-    delta_t = torch.cat([delta_t[:,:,:Tm1//2],zeros,delta_t[:,:,Tm1//2:]],dim=2)
+    delta_t = torch.cat([delta_t[:,:,:T//2],zeros,delta_t[:,:,T//2:]],dim=2)
+    # print("delta_t.shape",delta_t.shape)
 
     # -- repeat to include R --
     delta_t = repeat(delta_t,'b e t -> r b e t',r=R)

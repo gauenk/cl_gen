@@ -34,7 +34,6 @@ def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks,gpuid):
     batchsize = batch.shape[2]
     indexed = indexed[:,:,:,:batchsize]
     tokeep = tokeep[:batchsize]
-    # print(gpuid,indexed.device,tokeep.device)
     numba.cuda.select_device(gpuid)
     indexed_nba = cuda.as_cuda_array(indexed)
     batch_nba = cuda.as_cuda_array(batch)
@@ -163,51 +162,68 @@ def index_block_batches_deprecated(blocks,patches,indexing):
     block_patches = rearrange(block_patches,'b e t r c ph pw -> b r e t c ph pw')
     return block_patches
 
-def block_batch_update(samples,scores,blocks,K): # store as heap?
+def block_batch_update(samples,scores,scores_t,blocks,K,store_t=False): # store as heap?
 
-    # scores = scores.to('cuda:0',non_blocking=True)
-    # blocks = blocks.to('cuda:0',non_blocking=True)
-    # scores = torch.FloatTensor(samples.scores)
-    # blocks = torch.LongTensor(samples.blocks)
-
-    # scores = torch.FloatTensor(scores)
-    # blocks = torch.LongTensor(blocks)
-
+    # -- create/update current state --
     if len(samples.scores) == 0:
         samples.scores = scores
         samples.blocks = blocks
+        if store_t: samples.scores_t = scores_t
+        else: samples.scores_t = []
     else:
-        sscores = samples.scores
         sblocks = samples.blocks
+        sscores = samples.scores
+        sscores_t = samples.scores_t
         samples.scores = torch.cat([sscores,scores],dim=2)
+        if store_t: samples.scores_t = torch.cat([sscores_t,scores_t],dim=2)
         samples.blocks = torch.cat([sblocks,blocks],dim=2)
+
+    # -- return if no sorting necessary --
+    if K == -1: return 
+
+    # -- keep only topK at anytime --
+    scores,scores_t,blocks = get_topK_samples(samples,K)
+
+    # -- replace values --
+    samples.scores = scores
+    samples.scores_t = scores_t
+    samples.blocks = blocks
         
-def get_block_batch_topK(samples,K):
+def get_topK_samples(samples,K):
+
+    # -- bool determins if scores_t --
+    score_t = 'scores_t' in samples
+    score_t = score_t and (len(samples.scores_t) > 0 )
 
     # -- get samples --
     scores = samples.scores
-    blocks = samples.blocks
+    scores_t = samples.scores_t if score_t else None
+    blocks = samples.blocks    
+    if K == -1: return scores,scores_t,blocks
 
     # -- pick top K --
     nimages,nsegs,naligns = scores.shape
     if naligns < K: K = naligns
-    scores_topK,blocks_topK = [],[]
+    scores_topK,scores_t_topK,blocks_topK = [],[],[]
     for i in range(nimages):
         for s in range(nsegs):
             topK = torch.topk(scores[i,s],K,largest=False)
             scores_topK.append(scores[i,s,topK.indices])
+            if score_t: scores_t_topK.append(scores_t[i,s,topK.indices])
             blocks_topK.append(blocks[i,s,topK.indices])
 
     # -- stack em up! --
     scores_topK = torch.stack(scores_topK,dim=0)
+    if score_t: scores_t_topK = torch.stack(scores_t_topK,dim=0)
     blocks_topK = torch.stack(blocks_topK,dim=0)
 
     # -- shape em up! --
     scores_topK = rearrange(scores_topK,'(b s) k -> b s k',b=nimages)
+    if score_t: scores_t_topK = rearrange(scores_t_topK,'(b s) k t -> b s k t',b=nimages)
     blocks_topK = rearrange(blocks_topK,'(b s) k t -> b s k t',b=nimages)
 
     # -- to cpu --
-    scores_topK = scores_topK.cpu()
-    blocks_topK = blocks_topK.cpu()
+    # scores_topK = scores_topK.cpu()
+    # blocks_topK = blocks_topK.cpu()
 
-    return scores_topK,blocks_topK
+    return scores_topK,scores_t_topK,blocks_topK

@@ -2,6 +2,21 @@ import torch
 import numpy as np
 from einops import repeat,rearrange
 
+def get_boot_hyperparams(nframes,nblocks):
+    if nframes == 3:
+        K = nblocks**2
+        subsizes = [nframes]
+    elif nframes == 5:
+        K = 2*nblocks
+        subsizes = [nframes]
+    elif nframes <= 20:
+        K = 2*nblocks
+        subsizes = [2,]*nframes
+    else:
+        K = nblocks
+        subsizes = [2,]*nframes
+    return K,subsizes
+
 def get_ref_block(nblocks):
     return nblocks**2//2 + (nblocks//2)*(nblocks%2==0)
 

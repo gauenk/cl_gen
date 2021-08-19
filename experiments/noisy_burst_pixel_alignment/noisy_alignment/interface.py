@@ -34,6 +34,7 @@ import cache_io
 from noisy_alignment.experiments import picker
 from noisy_alignment._paths import EXP_PATH
 
+import noisy_alignment.experiments.check_boot_boost as check_boot_boost
 import noisy_alignment.experiments.compare_to_theory as compare_to_theory
 import noisy_alignment.experiments.compare_to_competitors as compare_to_competitors
 import noisy_alignment.experiments.stress_tests as stress_tests
@@ -42,7 +43,8 @@ import noisy_alignment.experiments.stress_tests as stress_tests
 def run():
     
     # exp_info = picker.run()
-    exp_info = compare_to_competitors.get_run_info()
+    # exp_info = compare_to_competitors.get_run_info()
+    exp_info = check_boot_boost.get_run_info()
     run_exp(exp_info)
 
 def run_all():
@@ -68,6 +70,7 @@ def run_exp(exp_info):
     # torch.cuda(device=cfg.gpuid)
 
     # -- Init Experiment Cache  --
+    # cache_name += "_v2"
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
     # cache.clear()
