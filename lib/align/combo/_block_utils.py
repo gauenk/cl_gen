@@ -29,16 +29,18 @@ def iter_block_batches(blocks,batchsize):
         batch = blocks[...,start:end,:]
         yield batch
 
-def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks,gpuid):
+def index_patches_T(indexed,tensor,batch,patchsize,nblocks,gpuid):
+    return index_block_batches_T(indexed,tensor,batch,patchsize,nblocks,gpuid)
+
+def index_block_batches_T(indexed,tensor,batch,patchsize,nblocks,gpuid):
+
     # -- prepare data --
     batchsize = batch.shape[2]
-    indexed = indexed[:,:,:,:batchsize]
-    tokeep = tokeep[:batchsize]
+    indexed = indexed[:,:,:batchsize]
     numba.cuda.select_device(gpuid)
     indexed_nba = cuda.as_cuda_array(indexed)
     batch_nba = cuda.as_cuda_array(batch)
     tensor_nba = cuda.as_cuda_array(tensor)
-    tokeep_nba = cuda.as_cuda_array(tokeep)
 
     # -- prepare cuda --
     npix = tensor.shape[1]
@@ -46,17 +48,12 @@ def index_block_batches(indexed,tensor,batch,tokeep,patchsize,nblocks,gpuid):
     blocks = npix//threads_per_block + 1
 
     # -- run cuda --
-    index_block_batches_cuda[blocks,threads_per_block](indexed_nba,tokeep_nba,tensor_nba,
-                                                       batch_nba,patchsize,nblocks)
-
-    # -- remove padding --
-    # batchsize = np.sum(tokeep,dim=2)
-    # indexed = indexed[:,:,:,:batchsize]
-    # index_block_batches_cuda[blocks,threads_per_block](indexed_nba,tokeep_nba)
+    index_block_batches_cuda_T[blocks,threads_per_block](indexed_nba,tensor_nba,
+                                                         batch_nba,patchsize,nblocks)
     return indexed
 
 @cuda.jit
-def index_block_batches_cuda(indexed,tokeep,tensor,batch,patchsize,nblocks):
+def index_block_batches_cuda_T(indexed,tensor,batch,patchsize,nblocks):
 
     nimages,nsegs,nframes = tensor.shape[:3]
     color,pH_buf,pW_buf = tensor.shape[3:]
@@ -64,30 +61,85 @@ def index_block_batches_cuda(indexed,tokeep,tensor,batch,patchsize,nblocks):
     ps = patchsize
 
     proc_idx = cuda.grid(1)
-    if proc_idx >= nsegs: return
-    s = proc_idx
+    if proc_idx < nsegs:
+        s = proc_idx
+    
+        for i in range(nimages):
+            for t in range(nframes):
+                tensor_ist = tensor[i][s][t]
+                for a in range(naligns):
+                    bindex = batch[i][s][a][t]
+                    # if bindex == -1: continue
+    
+                    hs = nblocks-(bindex // nblocks) -1
+                    ws = nblocks-(bindex % nblocks) - 1
+    
+                    he = hs + patchsize
+                    we = ws + patchsize
+                    for c in range(color):
+                        for y in range(patchsize):
+                            for x in range(patchsize):
+                                ty = hs + y
+                                tx = ws + x
+                                indexed[i,s,a,t,c,y,x] = tensor_ist[c,ty,tx]
+    
 
-    # indexed = np.zeros((nimages,nsegs,nframes,naligns,color,ps,ps))
+def index_patches(indexed,tensor,batch,patchsize,nblocks,gpuid):
+    return index_block_batches(indexed,tensor,batch,patchsize,nblocks,gpuid)
 
-    for i in range(nimages):
-        for t in range(nframes):
-            tensor_ist = tensor[i][s][t]
-            for a in range(naligns):
-                bindex = batch[i][s][a][t]
-                # if bindex == -1: continue
+def index_block_batches(indexed,tensor,batch,patchsize,nblocks,gpuid):
 
-                hs = nblocks-(bindex // nblocks) -1
-                ws = nblocks-(bindex % nblocks) - 1
+    # -- prepare data --
+    batchsize = batch.shape[2]
+    indexed = indexed[:,:,:,:batchsize]
+    numba.cuda.select_device(gpuid)
+    indexed_nba = cuda.as_cuda_array(indexed)
+    batch_nba = cuda.as_cuda_array(batch)
+    tensor_nba = cuda.as_cuda_array(tensor)
 
-                he = hs + patchsize
-                we = ws + patchsize
-                for c in range(color):
-                    for y in range(patchsize):
-                        for x in range(patchsize):
-                            ty = hs + y
-                            tx = ws + x
-                            indexed[i,s,t,a,c,y,x] = tensor_ist[c,ty,tx]
+    # -- prepare cuda --
+    npix = tensor.shape[1]
+    threads_per_block = 64
+    blocks = npix//threads_per_block + 1
 
+    # -- run cuda --
+    index_block_batches_cuda[blocks,threads_per_block](indexed_nba,tensor_nba,
+                                                       batch_nba,patchsize,nblocks)
+    return indexed
+
+@cuda.jit
+def index_block_batches_cuda(indexed,tensor,batch,patchsize,nblocks):
+
+    nimages,nsegs,nframes = tensor.shape[:3]
+    color,pH_buf,pW_buf = tensor.shape[3:]
+    nimages,nsegs,naligns,nframes = batch.shape
+    ps = patchsize
+
+    proc_idx = cuda.grid(1)
+    if proc_idx < nsegs:
+        s = proc_idx
+    
+        # indexed = np.zeros((nimages,nsegs,nframes,naligns,color,ps,ps))
+    
+        for i in range(nimages):
+            for t in range(nframes):
+                tensor_ist = tensor[i][s][t]
+                for a in range(naligns):
+                    bindex = batch[i][s][a][t]
+                    # if bindex == -1: continue
+    
+                    hs = nblocks-(bindex // nblocks) -1
+                    ws = nblocks-(bindex % nblocks) - 1
+    
+                    he = hs + patchsize
+                    we = ws + patchsize
+                    for c in range(color):
+                        for y in range(patchsize):
+                            for x in range(patchsize):
+                                ty = hs + y
+                                tx = ws + x
+                                indexed[i,s,t,a,c,y,x] = tensor_ist[c,ty,tx]
+    
 @jit(nopython=True)
 def index_block_batches_numba(indexed,tensor,batch,patchsize,nblocks):
 

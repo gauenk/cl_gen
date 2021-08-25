@@ -6,6 +6,10 @@ from einops import rearrange,repeat
 from easydict import EasyDict as edict
 from itertools import chain, combinations
 
+# -- numba imports --
+import numba
+from numba import jit,prange,cuda
+
 # -- pytorch imports --
 import torch
 import torch.nn.functional as F
@@ -18,6 +22,13 @@ from layers.ot_pytorch import sink_stabilized,pairwise_distances,dmat
 # -- [local] project imports --
 from ..utils import get_ref_block_index
 from .bootstrap_numba import compute_bootstrap,fill_weights,fill_weights_pix
+from ._indexing import index_along_frames
+
+def vprint(*args):
+    # vprint_emacs_search
+    verbose = False
+    if verbose:
+        print(*args)
 
 def get_score_functions(names):
     scores = edict()
@@ -91,12 +102,14 @@ def bootstrapping(cfg,expanded):
     ave = torch.mean(samples,dim=0)
 
     # -- compute ave diff between model and subsets --
+    scores = torch.zeros(B*E,device=device)
     scores_t = torch.zeros(T,B*E,device=device)
     counts_t = torch.zeros(T,1,device=device)
     # mask = torch.zeros(T,1,device=device)
-    nbatches,batch_size = 10,200
+    nbatches,batch_size = 3,1000
     subsets = torch.LongTensor(sample_subset_grids(nbatches*batch_size,T))
     subsets = rearrange(subsets,'(nb bs) t -> nb bs t',nb=nbatches)
+    # vprint("subsets.shape ",subsets.shape)
     # compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batch_size)
 
     for batch_idx in range(nbatches):
@@ -106,15 +119,20 @@ def bootstrapping(cfg,expanded):
             # mask[subset] = 1
             counts_t[subset] += 1
             subset_pix = samples[subset]
-            # vprint("subset.shape",subset_pix.shape)
+            vprint("batch_idx",batch_idx)
+            vprint("subsets.shape",subsets.shape)
+            vprint("subsets[batch_idx].shape",subsets[batch_idx].shape)
+            vprint("subset.shape",subset.shape)
+            vprint("subset_pix.shape",subset_pix.shape)
             subset_ave = torch.mean(subset_pix,dim=0)
             # vprint("subset_ave.shape",subset_ave.shape)
             loss = torch.mean( (subset_ave - ave)**2, dim=0)
             # vprint("loss.shape",loss.shape)
             scores_t[subset] += loss
+            scores += loss/(nbatches*batch_size)
 
     scores_t /= counts_t
-    scores = torch.mean(scores_t,dim=0)
+    # scores = torch.mean(scores_t,dim=0)
     scores_t = scores_t.T # (T,E) -> (E,T)
     vprint("scores.shape",scores.shape)
 
@@ -125,6 +143,33 @@ def bootstrapping(cfg,expanded):
     # -- add back patchsize for compat --
     scores = repeat(scores,'b e -> r b e',r=R)
     scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+
+    e = scores.shape[-1]
+    if True:#e == 1:
+        print("--> bootstrap original <--")
+        print("scores.shape ",scores.shape)
+        print("samples.shape ",samples.shape)
+        print(samples[:,30:40,10])
+        mse_scores,mse_scores_t = mse_score(cfg,expanded)
+        bs2_scores,bs2_scores_t = bootstrapping_mod2(cfg,expanded)
+        print("mse_scores.shape ",mse_scores.shape)
+        print("mse_scores_t.shape ",mse_scores_t.shape)
+        prop = scores[0,30:33].cpu().numpy()
+        gt = mse_scores[0,30:33].cpu().numpy()
+        bs2 = bs2_scores[0,30:33].cpu().numpy()
+        print("prop",prop)
+        print("mse",gt)
+        print("bs2",bs2)
+        print("abs [prop-gt]",np.abs(prop - gt))
+        print("abs [prop-bs2]",np.abs(prop - bs2))
+        print("abs [bs2-gt]",np.abs(bs2 - gt))
+        print("abs_nmlz [prop,gt]",np.abs(prop - gt)/gt)
+        print("abs_nmlz [bs2,prop]",np.abs(prop - bs2)/prop)
+        print("abs_nmlz [bs2,gt]",np.abs(bs2 - gt)/gt)
+        print("ratio: gt/prop",gt/prop)
+        print("ratio: gt/bs2",gt/bs2)
+        print("ratio: prop/bs2",prop/bs2)
+
 
     return scores,scores_t
 
@@ -183,7 +228,7 @@ def bootstrapping_mod2(cfg,expanded):
     samples = samples.contiguous() # speed up?
     t_ref = T//2
     # nbatches,batchsize = 80,25
-    nbatches,batchsize = 10,25
+    nbatches,batchsize = 50,500
     nsubsets = nbatches*batchsize
 
     scores = torch.zeros(B*E,device=device)
@@ -207,9 +252,9 @@ def bootstrapping_mod2(cfg,expanded):
         # print("wsamples2.shape ",wsamples2.shape)
         w_pix_ave = torch.mean(wsamples2,dim=0)
         w_pix_ave_nmlz = (counts.T @ w_pix_ave) / counts_t
-        scores_t += w_pix_ave_nmlz.T
+        scores_t += w_pix_ave_nmlz.T/nbatches
         # scores += torch.mean(w_pix_ave_nmlz,dim=0)
-        scores += torch.mean(w_pix_ave,dim=0)
+        scores += torch.mean(w_pix_ave,dim=0)/nbatches
 
         # -- cuda memory --
         # t = torch.cuda.get_device_properties(cfg.gpuid).total_memory
@@ -219,35 +264,291 @@ def bootstrapping_mod2(cfg,expanded):
         # print(f"gpu:{cfg.gpuid}",t,f)
     
         # torch.cuda.empty_cache()
-    scores_t /= nbatches
-    scores /= nbatches
 
     scores = rearrange(scores,'(b e) -> b e',b=B)
     scores_t = rearrange(scores_t,'(b e) t -> b e t',b=B)
 
-    # -- add back patchsize for compat --
+    # -- add back num of "same-motion" patches for compat --
     scores = repeat(scores,'b e -> r b e',r=R)
     scores_t = repeat(scores_t,'b e t -> r b e t',r=R)
+    e = scores.shape[2]
+    # if e == 1:
+    #     print("scores.shape ",scores.shape)
+    #     print("samples.shape ",samples.shape)
+    #     mse_scores,mse_scores_t = mse_score(cfg,expanded)
+    #     print("mse_scores.shape ",mse_scores.shape)
+    #     print("mse_scores_t.shape ",mse_scores_t.shape)
+    #     prop = scores[0,:3].cpu().numpy()
+    #     gt = mse_scores[0,:3].cpu().numpy()
+    #     print(prop)
+    #     print(gt)
+    #     print(np.abs(prop - gt))
+    #     print(np.abs(prop - gt)/gt)
+    #     print(gt/prop)
 
     return scores,scores_t
 
-def bootstrapping_limitB(cfg,expanded,boot):
-    pass
-    
-#     # -- setup vars --
-#     R,B,E,T,C,H,W = expanded.shape
-#     nframes = T
-#     device = expanded.device
-#     samples = rearrange(expanded,'r b e t c h w -> c (r h w) t (b e)')
-#     samples = samples.contiguous() # speed up?
-#     ncolor,npix,nframes,nsamples = samples.shape
-#     t_ref = nframes//2
-#     nbatches,batchsize = 20,250
-#     nsubsets = nbatches*batchsize
-#     # rearrange(boot,'r b e ')
+def bootstrapping_limitB(cfg,patches,prev_patches,prev_scores,dframes,patches_full):
+    if cfg.bs_type == "full":
+        return bootstrapping_mod2(cfg,patches,prev_patches,prev_scores,dframes,patches_full)
+    elif cfg.bs_type == "step":
+        return bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patches_full)
+    else:
+        raise ValueError(f"Uknown bootstrapping type {cfg.bs_type}")
+
+def bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patches_full):
+
+    # ------------------------
+    #   Setup Function Call
+    # ------------------------
+
+    # -- hyperparams --
+    nbatches,batchsize = 10,25
+    nsubsets = nbatches*batchsize
+    nframes = cfg.nframes
+
+    # -- reshaping --
+    # patches = rearrange(patches,'r b e c h w -> e b (r c h w)')
+    # patches = patches.contiguous() # speed up?
+    nimages,npatches,naligns,nftrs = patches.shape
+    # prev_patches = rearrange(prev_patches,'r b e c h w -> e b (r c h w)')
+    nimages,npatches,naligns_prev,nframes,nftrs = prev_patches.shape    
+    assert naligns_prev == 1, "Only one previous alignment is supported."
+    nimages,npatches,naligns_prev = prev_scores.shape
+    assert naligns_prev == 1, "Only one previous alignment is supported."
+
+    # -- create empty vars --
+    device = patches.device
+    dframes = dframes.to(device)
+    print("dframes.shape ",dframes.shape)
+    # prev_patches = prev_patches.to(device)
+    # patches = patches.to(device)
+    scores = torch.zeros(nimages,npatches,naligns,device=device)
+    scores_t = torch.zeros(nimages,npatches,naligns,nframes,device=device)
+
+    # --------------------------
+    #   Compute Delta(i,j,j') 
+    # --------------------------
+    # [shape (npatches,naligns)]
+
+    # -- average of prev patches RM dframes --
+    # consts = torch.mean(prev_patches,dim=3) # average over specificy frame alignment
+    print("-"*10 + " patches.")
+    pix_idx = 10
+    print("patches_full.shape ",patches_full.shape)
+    print(patches_full[0,pix_idx,:,:,:2])
+    print(prev_patches[0,pix_idx,0,:,:2])
+    print(patches_full[0,pix_idx,:,:,:2].shape)
+    print(prev_patches[0,pix_idx,0,:,:2].shape)
+    print("-"*10 + " means.")
+    consts = compute_mean_rm_dframes(prev_patches,dframes)
+    consts_other = compute_mean_rm_dframes_other(patches_full,dframes)
+    print("Diff should be zero: ",torch.sum(torch.abs(consts - consts_other)))
+    print(consts.shape)
+    print(consts[0,0,:,0])
+    print(consts_other[0,0,:,0])
+    print(consts[0,30,:,0])
+    print(consts_other[0,30,:,0])
+    print("patches_full.shape ",patches_full.shape)
+
+    # -- constants --
+    sq_coeff = 1./(nframes**2.) - 1./(nframes**3.)
+    lin_coeff = 2./nframes**3
+
+    # -- squared term --
+    j = [0]
+    sq_diff = torch.zeros(nimages,npatches,naligns,nftrs,device=device)
+    for p in range(npatches):
+        for a in range(naligns):
+            dframe = dframes[0,p,a]
+            # sq_diff[0,p,a] = patches[0,p,a]**2 - prev_patches[0,p,j[0],dframe]**2
+            sq_diff[0,p,a] = patches_full[0,p,a,dframe]**2 - prev_patches[0,p,j[0],dframe]**2
+    sq_diff = torch.mean(sq_diff,dim=-1)
+    print("sq_diff ",sq_diff[0,0].cpu().numpy())
+    sq_term = sq_coeff * sq_diff
+    print("sq_term ",sq_term[0,0].cpu().numpy())
+    print("sq_term @ 20 ",sq_term[0,20].cpu().numpy())
+    print("sq_term @ 30 ",sq_term[0,30].cpu().numpy())
+
+    # -- linear term --
+    lin_diff = torch.zeros(nimages,npatches,naligns,nftrs,device=device)
+    print("pre lin.")
+    print(consts[0,0,:,0])
+    print(dframes[0,0,:])
+    print(patches[0,0,:,0])
+    print(prev_patches[0,0,j[0],:,0])
+    # print(torch.sum(torch.abs(patches[0,0,:,:] - prev_patches[0,0,j[0],:,:])))
+    for p in range(npatches):
+        for a in range(naligns):
+            const = consts[0,p,a]
+            dframe = dframes[0,p,a]
+            #lin_diff[0,p,a] = const * (patches[0,p,a] - prev_patches[0,p,j[0],dframe])
+            lin_diff[0,p,a] = const * (patches_full[0,p,a,dframe] - prev_patches[0,p,j[0],dframe])
+    lin_diff = torch.mean(lin_diff,dim=-1)
+    print("lin_diff ",lin_diff[0,0].cpu().numpy())
+    lin_term = lin_coeff * lin_diff
+    print("lin_term ",lin_term[0,0].cpu().numpy())
+    print("lin_term @ 20 ",lin_term[0,20].cpu().numpy())
+    print("lin_term @ 30 ",lin_term[0,30].cpu().numpy())
+
+    Delta = sq_term + lin_term
+    print("Delta.shape ",Delta.shape)
+    print(Delta[0,1,:])
+    print(scores.shape)
+    print(prev_scores.shape)
+    # npatches,naligns,naligns_prev = Delta.shape
+
+    # ----------------------------------------------
+    #   Compute BS(i,j') = BS(i,j) + Delta(i,j,j')
+    # ----------------------------------------------
+    # [shape (npatches,naligns)]
+
+    scores = prev_scores - Delta
+    print("scores.shape ",scores.shape)
+
+    return scores,scores_t
     
 
+def compute_mean_rm_dframes_other(patches,dframes):
 
+    # -- shapes and alloc --
+    device = patches.device
+    print(patches.shape)
+    nimages,npatches,naligns = dframes.shape
+    nimages,npatches,naligns,nframes,nftrs = patches.shape
+    psd = torch.zeros(nimages,npatches,naligns,nframes-1,nftrs,device=device)
+
+    # -- to numba tensors --
+    patches_nba = cuda.as_cuda_array(patches)
+    psd_nba = cuda.as_cuda_array(psd)
+    dframes_nba = cuda.as_cuda_array(dframes)
+
+    # -- cuda kernel stats --
+    threads_per_block = (32,32)
+    tpb = threads_per_block
+    blocks_patches = npatches//tpb[0] + (npatches%tpb[0]!=0)
+    blocks_aligns = naligns//tpb[1] + (naligns%tpb[1]!=0)
+    blocks = (blocks_patches,blocks_aligns)
+
+    # -- launch each batch separately --
+    for i in range(nimages):
+        args = (psd_nba[i],patches_nba[i],dframes_nba[i])
+        index_along_frames_cuda_other[blocks,threads_per_block](*args)
+    aves = torch.sum(psd,dim=3)
+    return aves
+
+def compute_mean_rm_dframes(patches,dframes):
+
+    # -- shapes and alloc --
+    device = patches.device
+    nimages,npatches,naligns = dframes.shape
+    nimages,npatches,naligns_prev,nframes,nftrs = patches.shape
+    assert naligns_prev == 1,"Must be one."
+    patches = patches[:,:,0]
+    psd = torch.zeros(nimages,npatches,naligns,nframes-1,nftrs,device=device)
+
+    # -- to numba tensors --
+    patches_nba = cuda.as_cuda_array(patches)
+    psd_nba = cuda.as_cuda_array(psd)
+    dframes_nba = cuda.as_cuda_array(dframes)
+    # print(type(patches_nba))
+    # print(type(psd_nba))
+    # print(type(dframes_nba))
+    # print(psd.__cuda_array_interface__)
+    # print(psd_nba.__cuda_array_interface__)
+    # print(dframes.__cuda_array_interface__)
+    # print(dframes_nba.__cuda_array_interface__)
+
+
+    # -- cuda kernel stats --
+    threads_per_block = (32,32)
+    tpb = threads_per_block
+    blocks_patches = npatches//tpb[0] + (npatches%tpb[0]!=0)
+    blocks_aligns = naligns//tpb[1] + (naligns%tpb[1]!=0)
+    blocks = (blocks_patches,blocks_aligns)
+
+    # -- launch each batch separately --
+    for i in range(nimages):
+        args = (psd_nba[i],patches_nba[i],dframes_nba[i])
+        index_along_frames_cuda[blocks,threads_per_block](*args)
+        # args = (psd[i],patches[i],dframes[i])
+        # index_along_frames(*args)
+        
+    # pix_idx = 16*8+4
+    # print(psd[0,pix_idx,:,:,:2].shape)
+    # print(psd[0,pix_idx,:,:,:2])
+    # print(patches[0,pix_idx,:,:2].shape,patches.shape)
+    # print(patches[0,pix_idx,:,:2])
+    # print(dframes[0,pix_idx])
+    print("aves rm dframe")
+    print("-"*10)
+    print(dframes[0,0])
+    print(psd[0,0,:,:,0])
+    print(psd_nba[0,0,:,:,0])
+    print(torch.as_tensor(psd_nba)[0,0,:,:,0])
+    print(patches[0,0,:,0])
+    print(patches[0,0,:,:2])
+
+    print("-"*10)
+    print(dframes[0,20])
+    print(psd[0,20,:,:,0])
+    print(torch.as_tensor(psd_nba)[0,20,:,:,0])
+    print("-"*10)
+    print(patches[0,20,:,0])
+    print(patches[0,20,:,:5])
+    print(patches[0,21,:,:5])
+    print(patches[0,19,:,:5])
+
+    aves = torch.sum(psd,dim=3)
+
+    return aves
+
+def index_along_frames(psd,patches,dframes):
+
+    npatches,naligns,nframes_m1,nftrs = psd.shape
+    nframes = nframes_m1 + 1
+    for p_idx in range(npatches):
+        for a_idx in range(naligns):
+            t_idx = 0
+            for t in range(nframes):
+                if t == dframes[p_idx,a_idx]: continue
+                for f in range(nftrs):
+                    psd[p_idx,a_idx,t_idx,f] = patches[p_idx,t,f]
+                t_idx += 1
+        
+@cuda.jit
+def index_along_frames_cuda_other(psd,patches,dframes):
+    p_idx,a_idx = cuda.grid(2)
+    npatches,naligns,nframes_m1,nftrs = psd.shape
+    nframes = nframes_m1 + 1
+    if p_idx < npatches and a_idx < naligns:
+        t_idx = 0
+        for t in range(nframes):
+            if t == dframes[p_idx,a_idx]: continue
+            # if p_idx == 20: print(p_idx,a_idx,t_idx,t)
+            for f in range(nftrs):
+                # if p_idx == 20: print(patches[p_idx,0,t,f])
+                psd[p_idx,a_idx,t_idx,f] = patches[p_idx,a_idx,t,f]
+            t_idx += 1
+            # assert t_idx < nframes, "must be less than nframes."
+
+@cuda.jit
+def index_along_frames_cuda(psd,patches,dframes):
+    p_idx,a_idx = cuda.grid(2)
+    npatches,naligns,nframes_m1,nftrs = psd.shape
+    nframes = nframes_m1 + 1
+    # if p_idx > npatches or a_idx > naligns: return
+    if p_idx < npatches and a_idx < naligns:
+        t_idx = 0
+        for t in range(nframes):
+            if t == dframes[p_idx,a_idx]: continue
+            # if p_idx == 20: print(p_idx,a_idx,t_idx,t)
+            for f in range(nftrs):
+                # if p_idx == 20: print(patches[p_idx,0,t,f])
+                psd[p_idx,a_idx,t_idx,f] = patches[p_idx,t,f]
+            t_idx += 1
+            # assert t_idx < nframes, "must be less than nframes."
+    
 def bootstrapping_mod3(cfg,expanded):
 
     # -- setup vars --
@@ -851,12 +1152,6 @@ def ave_consistency(cfg,expanded):
 
     return scores,scores_t
 
-    
-def vprint(*args):
-    verbose = False
-    if verbose:
-        print(*args)
-
 def sim_trm(cfg,expanded):
     vprint("-> Print Time <-","\n\n\n")
     R,B,E,T,C,H,W = expanded.shape
@@ -1022,6 +1317,38 @@ def jackknife(cfg,expanded):
 
     return scores,scores_t
     
+def mse_score(cfg,expanded):
+    R,B,E,T,C,H,W = expanded.shape
+    """
+    R = different patches from same image
+    B = different images
+    E = differnet block regions around centered patch
+    T = burst of frames along a batch dimension
+    """
+    # -- R goes to CHW --
+    expanded = rearrange(expanded,'r b e t c h w -> t b e (r c h w)')
+    
+    ref = expanded[T//2]
+    neighbors = expanded
+    ave = torch.mean(expanded,dim=0)
+
+    delta = torch.mean( (ave-ref)**2, dim=-1) * (T-1)/T
+    
+    # var_term = (neighbors - ref)**2
+    # var_term = torch.mean(var_term,dim=(0,-1))
+
+    # bias_term = (torch.mean(ave - ref,dim=-1))**2
+    # bias_term = torch.mean(bias_term,dim=0)
+
+    # delta = var_term + bias_term
+
+    # -- repeat to include R --
+    delta_t = torch.zeros(B,E,T)
+    delta_t = repeat(delta_t,'b e t -> r b e t',r=R)
+    delta = repeat(delta,'b e -> r b e',r=R)
+
+    return delta,delta_t
+
 def ave_score(cfg,expanded):
     R,B,E,T,C,H,W = expanded.shape
     """
@@ -1033,17 +1360,23 @@ def ave_score(cfg,expanded):
     # -- R goes to CHW --
     expanded = rearrange(expanded,'r b e t c h w -> t b e (r c h w)')
     
-    ref = repeat(expanded[T//2],'b e d -> tile b e d',tile=T-1)
-    neighbors = torch.cat([expanded[:T//2],expanded[T//2+1:]],dim=0)
-    delta = F.mse_loss(ref,neighbors,reduction='none')
+    # ref = repeat(expanded[T//2],'b e d -> tile b e d',tile=T-1)
+    # neighbors = torch.cat([expanded[:T//2],expanded[T//2+1:]],dim=0)
+
+    ref = expanded[T//2]
+    neighbors = expanded
+
+    # delta = F.mse_loss(ref,neighbors,reduction='none')
+    delta = (ref - neighbors)**2 
     delta_t = torch.mean(delta,dim=3)
     delta = torch.mean(delta_t,dim=0)
 
     # -- append dim for T --
-    delta_t = rearrange(delta_t,'t b e -> b e t')
-    zeros = torch.zeros_like(delta_t[:,:,[0]])
-    delta_t = torch.cat([delta_t[:,:,:T//2],zeros,delta_t[:,:,T//2:]],dim=2)
-    # print("delta_t.shape",delta_t.shape)
+    if delta_t.shape[0] == T-1:
+        delta_t = rearrange(delta_t,'t b e -> b e t')
+        zeros = torch.zeros_like(delta_t[:,:,[0]])
+        delta_t = torch.cat([delta_t[:,:,:T//2],zeros,delta_t[:,:,T//2:]],dim=2)
+        # print("delta_t.shape",delta_t.shape)
 
     # -- repeat to include R --
     delta_t = repeat(delta_t,'b e t -> r b e t',r=R)

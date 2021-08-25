@@ -16,6 +16,51 @@ def compute_bootstrap(samples,scores_t,counts_t,ave,subsets,nbatches,batchsize):
     bootstrap_numba(samples,scores_t,counts_t,ave,subsets,nbatches,batchsize)
 
 @cuda.jit
+def create_weights_cuda_nosub(rng_states,nsubsets,nframes,weights,counts):
+    tx = cuda.threadIdx.x
+    ty = cuda.blockIdx.x
+    bw = cuda.blockDim.x
+    # cuda.gridDim
+    tidx = cuda.grid(1)
+    # tidx = tx + ty * bw
+    # tidx,t,t2,subsize = 0,0,0,0
+    to_add = False
+    subset = cuda.local.array(shape=51,dtype=numba.uint8)
+    # subset = cuda.local.array(shape=numba.int32(nframes),dtype=numba.float64)
+
+    if tidx < weights.shape[0]:
+
+        # -- init to zero --
+        for t in range(nframes):
+            subset[t] = 0
+
+        # -- sample choice from uniform --
+        for t in range(nframes):
+            rand_float = nframes*xoroshiro128p_uniform_float32(rng_states, tidx)
+            rand_t = 0
+            while rand_t < rand_float:
+                rand_t += 1
+            rand_t -= 1
+            subset[rand_t] = 1
+
+        # -- count unique --
+        nunique = 0
+        for t in range(nframes):
+            nunique += subset[t]
+
+        # -- init weights --
+        for t in range(nframes):
+            weights[tidx,t] = -1./nframes
+            counts[tidx,t] = 0
+
+        # -- sample uniform --
+        for t in range(nframes):
+            rand_t = subset[t]
+            if rand_t == 1:
+                weights[tidx,t] = 1./nunique
+                counts[tidx,t] += 1
+
+@cuda.jit
 def create_weights_cuda(rng_states,nsubsets,nframes,weights,counts):
     tx = cuda.threadIdx.x
     ty = cuda.blockIdx.x

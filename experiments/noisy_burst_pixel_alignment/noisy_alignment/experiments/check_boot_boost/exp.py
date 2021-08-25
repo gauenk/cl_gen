@@ -72,7 +72,9 @@ def execute_experiment(cfg):
     
     # -- get score function --
     score_fxn_ave = get_score_function("ave")
-    score_fxn_bs = get_score_function(cfg.score_fxn_name)
+    score_fxn_bs = get_score_function("bootstrapping")
+    # score_fxn_bs = get_score_function("bootstrapping_mod2")
+    # score_fxn_bs = get_score_function(cfg.score_fxn_name)
     score_fxn_bsl = get_score_function("bootstrapping_limitB")
 
     # -- some constants --
@@ -94,7 +96,7 @@ def execute_experiment(cfg):
     eval_ave = EvalBlockScores(score_fxn_ave,"ave",patchsize,block_batchsize,None)
 
     # -- create evaluator for bootstrapping --
-    block_batchsize = 64
+    block_batchsize = 81
     eval_plimb = EvalBootBlockScores(score_fxn_bsl,score_fxn_bs,"bsl",
                                      patchsize,block_batchsize,None)
     eval_prop = EvalBlockScores(score_fxn_bs,"bs",patchsize,block_batchsize,None)
@@ -121,6 +123,8 @@ def execute_experiment(cfg):
         rng_state = sample['rng_state']
         if cfg.noise_params.ntype == "pn":
             dyn_noisy = anscombe.forward(dyn_noisy)
+        # dyn_nosiy = dyn_clean
+        dyn_noisy = static_clean
 
         # -- shape info --
         T,B,C,H,W = dyn_noisy.shape
@@ -160,22 +164,31 @@ def execute_experiment(cfg):
         K,subsizes = get_boot_hyperparams(cfg.nframes,cfg.nblocks)
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flows.est = optim.run(dyn_noisy,patchsize,eval_prop,
-                             nblocks,iterations,subsizes,K)
-        # flows.est = flows.of.clone()
+        # flows.est = optim.run(dyn_noisy,patchsize,eval_prop,
+        #                      nblocks,iterations,subsizes,K)
+        flows.est = flows.of.clone()
         aligned.est = align_from_flow(dyn_clean,flows.est,patchsize,isize=isize)
         runtimes.est = time.perf_counter() - start_time
         
         # -- load adjacent blocks --
         nframes,nimages,ncolor,h,w = dyn_noisy.shape
-        nsegs = 64#h*w
+        nsegs = h*w
         brange = exh_block_range(nimages,nsegs,nframes,nblocks)
         ref_block = get_ref_block(nblocks)
         curr_blocks = init_optim_block(nimages,nsegs,nframes,nblocks)
-        curr_blocks = curr_blocks[:,:,None,:]
-        frames = repeat(np.arange(2),'t -> i s t',i=nimages,s=nsegs)
+        curr_blocks = curr_blocks[:,:,:,None] # nimages, nsegs, nframes, naligns
+        frames = np.r_[np.arange(nframes//2),np.arange(nframes//2+1,nframes)]
+        frames = repeat(frames,'t -> i s t',i=nimages,s=nsegs)
         search_blocks = get_search_blocks(frames,brange,curr_blocks,f'cuda:{cfg.gpuid}')
         print("search_blocks.shape ",search_blocks.shape)
+        init_blocks = rearrange(curr_blocks,'i s t a -> i s a t').to(dyn_noisy.device)
+        print("init_blocks.shape ",init_blocks.shape)
+        search_blocks = search_blocks[0,0]
+        init_blocks_ = init_blocks[0,0]
+        search_blocks = eval_plimb.filter_blocks_to_1skip_neighbors(search_blocks,
+                                                                    init_blocks_)
+        search_blocks = repeat(search_blocks,'a t -> i s a t',i=nimages,s=nsegs)
+        print("search_blocks.shape ",search_blocks.shape)        
         
         # -- compute bootstrapping for the batch --
         est = edict()
@@ -183,22 +196,50 @@ def execute_experiment(cfg):
 
         print("curr_blocks.shape ",curr_blocks.shape)
         eval_prop.score_fxn_name = ""
-        eval_prop.score_cfg.bs_type = "full"
-        scores,scores_t,blocks = eval_prop.score_burst_from_blocks(dyn_noisy,curr_blocks,
+        scores,scores_t,blocks = eval_prop.score_burst_from_blocks(dyn_noisy,
+                                                                   search_blocks,
                                                                    patchsize,nblocks)
         est.scores = scores
         est.scores_t = scores_t
         est.blocks = blocks
+        print("Done with est.")
 
         # -- compute bootstrapping for the batch --
+        print("Get init block from original bootstrap.")
+        print(init_blocks[0,0])
+        scores,scores_t,blocks = eval_prop.score_burst_from_blocks(dyn_noisy,init_blocks,
+                                                                   patchsize,nblocks)
+
+        print("Starting prop.")
         eval_prop.score_fxn_name = "bs"
         eval_prop.score_cfg.bs_type = ""
-        scores,scores_t,blocks = eval_plimb.score_burst_from_blocks(dyn_noisy,blocks,
+        state = edict({'scores':scores,'blocks':blocks})
+        scores,scores_t,blocks = eval_plimb.score_burst_from_blocks(dyn_noisy,
+                                                                    search_blocks,
+                                                                    state,
                                                                     patchsize,nblocks)
         plimb.scores = scores
         plimb.scores_t = scores_t
         plimb.blocks = blocks
 
+        print(est.scores.shape)
+        print(state.scores.shape)
+        print(plimb.scores.shape)
+
+        diff = plimb.scores[0] - est.scores[0]
+        perc_delta = torch.abs(plimb.scores[0] - est.scores[0]) / est.scores[0]
+        pix_idx_list = [0,20,30]#np.arange(h*w)
+        for p in pix_idx_list:
+            print("-"*10 + f" @ {p}")
+            print("est",est.scores[0,p].cpu().numpy())
+            print("state",state.scores[0,p].cpu().numpy())
+            print("plimb",plimb.scores[0,p].cpu().numpy())
+            print("plimb/est",plimb.scores[0,p]/est.scores[0,p])
+            print("plimb - est",plimb.scores[0,p] - est.scores[0,p])
+            print("%Delta",perc_delta[p])
+            print("Nmlz L2-Norm",torch.mean(diff[p]**2))
+        print("[Overall] %Delta: ",torch.mean(perc_delta).item())
+        print("[Overall] Nmlz L2-Norm: ",torch.mean(diff**2).item())
 
         # -- format results --
         pad = 3#2*(nframes-1)*ppf+4

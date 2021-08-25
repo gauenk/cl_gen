@@ -34,13 +34,12 @@ class EvalBlockScores(EvalTemplate):
         else:
             return self.compute_topK_tensor(patches,masks,blocks,nblocks,K,store_t)
 
-    def exec_batch(self,batch,block_patches,patches,tokeep,nblocks):
+    def exec_batch(self,batch,block_patches,patches,nblocks):
 
         # -- index search space  --
         batchsize = batch.shape[2]
         block_patches_i = block_utils.index_block_batches(block_patches,patches,
-                                                          batch,tokeep,
-                                                          self.patchsize,
+                                                          batch,self.patchsize,
                                                           nblocks,self.gpuid)
 
         # -- compute directly for sanity check --
@@ -89,7 +88,6 @@ class EvalBlockScores(EvalTemplate):
         block_masks = np.zeros((nimages,nsegs,nframes,batchsize,mcolor,ps,ps))
         block_patches = torch.FloatTensor(block_patches).to(device,non_blocking=True)
         block_masks = torch.FloatTensor(block_masks).to(device,non_blocking=True)
-        tokeep = torch.IntTensor(np.arange(naligns)).to(device,non_blocking=True)
         nomotion = torch.LongTensor([4,]*nframes).reshape(1,nframes).to(device)
         nomo = True
 
@@ -108,8 +106,7 @@ class EvalBlockScores(EvalTemplate):
             biter = BatchIter(naligns,self.block_batchsize) 
             for batch_indices in biter:
                 batch = block_gen_samples[:,:,batch_indices,:].to(device)
-                scores,scores_t = self.exec_batch(batch,block_patches,patches,
-                                                  tokeep,nblocks)
+                scores,scores_t = self.exec_batch(batch,block_patches,patches,nblocks)
                 block_utils.block_batch_update(self.samples,scores,
                                                scores_t,batch,K,store_t)
                 torch.cuda.empty_cache()
@@ -155,7 +152,6 @@ class EvalBlockScores(EvalTemplate):
         block_masks = np.zeros((nimages,nsegs,nframes,batchsize,mcolor,ps,ps))
         block_patches = torch.FloatTensor(block_patches).to(device,non_blocking=True)
         block_masks = torch.FloatTensor(block_masks).to(device,non_blocking=True)
-        tokeep = torch.IntTensor(np.arange(naligns)).to(device,non_blocking=True)
         nomotion = torch.LongTensor([4,]*nframes).reshape(1,nframes).to(device)
         nomo = True
 
@@ -166,8 +162,7 @@ class EvalBlockScores(EvalTemplate):
         # -- batch over blocks --
         for batch_indices in biter:
             batch = blocks[:,:,batch_indices,:].to(device)
-            scores,scores_t = self.exec_batch(batch,block_patches,patches,
-                                              tokeep,nblocks)
+            scores,scores_t = self.exec_batch(batch,block_patches,patches,nblocks)
             block_utils.block_batch_update(self.samples,scores,
                                            scores_t,batch,K,store_t)
             torch.cuda.empty_cache()
@@ -210,6 +205,7 @@ class EvalBlockScores(EvalTemplate):
         # -- get patches --
         pad = 2*(nblocks//2)
         patches = burst_to_patches(burst,patchsize+pad)
+        print("basic: patches.shape ",patches.shape)
 
         # -- shapes --
         device = patches.device

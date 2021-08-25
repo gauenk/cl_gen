@@ -61,7 +61,8 @@ def get_exp_cfgs(name):
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
-    noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
+    # noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
+    noise_types = ['g-2p0']
     # noise_types = ['g-75p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.,150.]
     std_ticks = [5.,25.,75.,150.]
@@ -73,7 +74,7 @@ def get_exp_cfgs(name):
     alpha_tickmarks_str = ["%d" % x for x in alpha_tickmarks]
 
     # -- create frame number grid --
-    nframes = [10,3] # [31]
+    nframes = [3] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]

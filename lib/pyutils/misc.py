@@ -2,6 +2,7 @@
 # python imports
 import numpy as np
 import numpy.random as npr
+import pandas as pd
 import pickle,sys,os,yaml,io
 from easydict import EasyDict as edict
 import torch
@@ -111,3 +112,25 @@ def ncr(n, r):
     numer = reduce(op.mul, range(n, n-r, -1), 1)
     denom = reduce(op.mul, range(1, r+1), 1)
     return numer // denom  # or / in Python 2
+
+
+def stats_by_unique(data,field_x,field_y):
+    """
+    Compute mean and std statistics of field_y
+    for each unique value of field_x
+    """
+
+    # -- average over groups, filterd by unique value of "group" --
+    unique_x = data[field_x].unique()
+    stats = {}
+    for x_value in unique_x:
+        filtered = data[data[field_x] == x_value]
+        mean = filtered[field_y].mean()
+        std = filtered[field_y].std()
+        stats.append({'mean':mean,'std':std,'field_x':x_value,'n':len(filtered)})
+    return pd.DataFrame(stats)
+        
+
+
+        
+

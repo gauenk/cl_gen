@@ -10,18 +10,52 @@ from pyplots.legend import add_legend,add_colorbar
 from pyplots.misc import add_jitter
 
 
+# def plot_fieldx_groupby_fieldy(data,info_x,info_y,title,fname,fmt,
+#                                logx=True,scatter=False,save_dir=None,input_ax=None):
+#     """
+#     For a dataframe "sims"
+#     we plot each unique value of "group"
+#     against the average and std of "yinfo.group"
+#     at that location
+#     with other plotinng options.
+#     """
+
+#     # -- defaults --
+#     if save_dir is None:
+#         save_dir = Path("./")
+#     if input_ax is None:
+#         fig,ax = plt.subplots(figsize=(8,4))
+#     else: ax = input_ax
+
+
+#     # -- scatter --
+#     if scatter:
+#         x = sims[f'{yinfo.group}_mean'].to_numpy()
+#         jit_std = 0.01
+#         ax.scatter(sims[group],add_jitter(x,jit_std),marker='x')
+
+
 def plot_single_sim_group(input_ax,sims,lgrids,title,fname,group,yinfo=None,
                           logx=True,scatter=False,save_dir=None):
+    """
+    For a dataframe "sims"
+    we plot each unique value of "group"
+    against the average and std of "yinfo.group"
+    at that location
+    with other plotinng options.
+    """
+
     if save_dir is None:
         save_dir = Path("./")
     
     # -- yaxis default--
     if yinfo is None:
-        yinfo = edict()
-        yinfo.group = "est"
-        yinfo.title = "Approx. Prob of Alignment"
+        raise ValueError("Needed yinfo to run. Optional argument is deprecated.")
+        # yinfo = edict()
+        # yinfo.group = "est"
+        # yinfo.title = "Approx. Prob of Alignment"
     
-    # -- average over groups --
+    # -- average over groups, filterd by unique value of "group" --
     ggrid = sims[group].unique()
     means,stds = [],[]
     for gvalue in ggrid:

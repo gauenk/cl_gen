@@ -20,12 +20,12 @@ def index_along_frames(patches,dframes):
     naligns,npatches = dframes.shape
     fpatches = torch.zeros((naligns,npatches,nftrs))
     fpatches = fpatches.to(device)
+    # print("naligns,npatches,nframes,nftrs",naligns,npatches,nframes,nftrs)
 
     # -- create numba cuda --
     dframes_nba = cuda.as_cuda_array(dframes)
     patches_nba = cuda.as_cuda_array(patches)
     fpatches_nba = cuda.as_cuda_array(fpatches)
-
 
     # -- exec indexing cuda-kernel --
     threads_per_block = (32,32)
@@ -40,10 +40,8 @@ def index_along_frames_cuda(fpatches,patches,dframes):
 
     a_idx,p_idx = cuda.grid(2)
     naligns,npatches,nframes,nftrs = patches.shape
-    if a_idx > naligns or p_idx < npatches: return
 
-    frame = dframes[a_idx,p_idx]
-    for f in range(nftrs):
-        fpatches[a_idx,p_idx,f] = patches[patches[a_idx,p_idx,frame],f]
-
-    return fpatches
+    if a_idx < naligns and p_idx < npatches:
+        frame = dframes[a_idx,p_idx]
+        for f in range(nftrs):
+            fpatches[a_idx,p_idx,f] = patches[a_idx,p_idx,frame,f]
