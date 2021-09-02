@@ -34,8 +34,8 @@ import noisy_alignment.experiments.stress_tests as stress_tests
 def run():
     
     # exp_info = picker.run()
-    # exp_info = compare_to_competitors.get_run_info()
-    exp_info = check_boot_boost.get_run_info()
+    exp_info = compare_to_competitors.get_run_info()
+    # exp_info = check_boot_boost.get_run_info()
     run_exp(exp_info)
 
 def run_all():

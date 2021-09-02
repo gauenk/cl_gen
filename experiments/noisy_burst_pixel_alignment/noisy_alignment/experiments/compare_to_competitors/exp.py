@@ -142,9 +142,9 @@ def execute_experiment(cfg):
         # optimal_scores.of = eval_ave.score_burst_from_flow(dyn_noisy,
         #                                                    flows.of,
         #                                                    patchsize,nblocks)[0]
-        print("post optimal scores of.")
 
         # -- compute nearest neighbor fields [global] --
+        print("NNF Global.")
         start_time = time.perf_counter()
         shape_str = 't b h w two -> b (h w) t two'
         nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean,ref_t,patchsize)
@@ -157,6 +157,7 @@ def execute_experiment(cfg):
         optimal_scores.nnf = np.zeros((nimages,npix,1,nframes)) # clean target is zero
 
         # -- compute nearest neighbor fields [local] --
+        print("NNF Local.")
         start_time = time.perf_counter()
         iterations,K,subsizes =0,1,[]
         optim = AlignOptimizer("v3")
@@ -169,6 +170,7 @@ def execute_experiment(cfg):
                                                                   flows.nnf_local,
                                                                   patchsize,nblocks)[1]
         optimal_scores.nnf_local = torch_to_numpy(optimal_scores.nnf_local)
+
 
         # -- compute proposed search of nnf --
         print("Global NNF Noisy")
@@ -400,7 +402,6 @@ def format_fields(mgrouped,index,rng_state):
 
     # -- optimal scores --
     scores = np.array(mgrouped['optimal_scores'])
-    print(scores.shape)
     scores = rearrange(scores,'m i p 1 t -> (m i) p t',i=batchsize)
     print("scores.shape: ",scores.shape)
     mgrouped['optimal_scores'] = scores

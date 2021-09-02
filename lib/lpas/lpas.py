@@ -45,7 +45,7 @@ def lpas_spoof(burst,motion,nblocks,mtype,acc):
     # print_tensor_stats("[lpas]: aligned[T/2] - burst[T/2]",aligned[T//2] - burst[T//2])
     return scores,aligned
 
-def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",,noise_info=None):
+def lpas_search(burst,ref_frame,nblocks,motion=None,method="simple",noise_info=None):
     return lpas_search_testing(burst,ref_frame,nblocks,
                                motion=motion,method=method,
                                to_align=None,noise_info=noise_info)

@@ -16,7 +16,7 @@ def get_cfg_defaults():
     cfg.nframes = 5
     cfg.use_anscombe = True
     cfg.frame_size = 64
-    cfg.nepochs = 1
+    cfg.nepochs = 10
     # cfg.nepochs = 3
     cfg.test_interval = 2
     cfg.save_interval = 5
@@ -47,8 +47,9 @@ def get_cfg_defaults():
     # -- combo config --
     cfg.nblocks = 3
     cfg.patchsize = 3
+    cfg.score_fxn_name = "bootstrapping_cf"
     # cfg.score_fxn_name = "bootstrapping"
-    cfg.score_fxn_name = "bootstrapping_mod2"
+    # cfg.score_fxn_name = "bootstrapping_mod2"
     
     return cfg
 
@@ -67,7 +68,7 @@ def get_exp_cfgs(name):
     #noise_types = ['g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.]
     # noise_types = ['g-15p','g-10p','g-5p0','g-1p0']
-    noise_types = ['g-15p','g-5p0']
+    noise_types = ['g-10p','g-5p0']
     std_ticks = [float(x.split("-")[1].replace("p",".")) for x in noise_types]
     std_tickmarks = std_ticks
     std_tickmarks_str = ["%d" % int(x) for x in std_tickmarks]
@@ -98,12 +99,11 @@ def get_exp_cfgs(name):
 
     # -- sim method --
     # sim_method = ['l2_global','l2_local','bs_local_v1','of']
-    # sim_type = ['a','n2n','sup']
-    # sim_method = ['l2_global','l2_local','bs_local_v2']
-    sim_method = ['l2_global']
-    # sim_type = ['c','n2n','sup']
+    sim_method = ['l2_global','l2_local','bs_local_v2']
     # sim_method = ['l2_global']
-    sim_type = ['sup','n2n']
+    sim_type = ['c','n2n','sup']
+    # sim_type = ['a','n2n','sup']
+    # sim_type = ['sup','n2n']
     # sim_type = ['n2n']
     # sim_type = ['sup']
 

@@ -61,7 +61,7 @@ def run_exp(exp_info):
     # -- Init Experiment Cache  --
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
-    # cache.clear()
+    cache.clear()
 
     # -- Load Experiment Mesh --
     experiments,order,exp_grids = get_exp_cfgs(config_name)

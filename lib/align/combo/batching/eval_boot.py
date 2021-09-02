@@ -53,12 +53,10 @@ class EvalBootBlockScores(EvalTemplate):
     def exec_batch(self,batch,init_block,block_patches,prev_patches,patches,
                    prev_scores,nblocks):
 
-        # -- get delta frames from "batch" of blocks --
-        print("batch.shape ",batch.shape)
+        # -- get frames that changed from previous to current "blocks" --
         dframes = self._get_dframes(batch,init_block)
-        print(batch[0,0])
 
-        # -- index search space  --
+        # -- fill a batch of "block_patches" with correct offsets --
         batchsize = batch.shape[2]
         print("batch.shape ",batch.shape)
         print("init_block.shape ",init_block.shape)
@@ -69,31 +67,21 @@ class EvalBootBlockScores(EvalTemplate):
         batch_patches = block_utils.index_patches_T(block_patches,patches,
                                                     batch,self.patchsize,
                                                     nblocks,self.gpuid)
-        print(batch_patches[0,0,:,:,0,0,0])
-        refT = batch_patches.shape[3]//2
-        print(batch_patches[0,0,:-1,refT,0,0,0] - batch_patches[0,0,1:,refT,0,0,0])
-        assert np.isclose(torch.sum(torch.abs(batch_patches[0,0,:-1,refT,0,0,0] - batch_patches[0,0,1:,refT,0,0,0])).item(),0),"Almost zero"
+        # nimages,npix,naligns,nframes,ncolors,psH,psW = batch_patches.shape
 
-        # print(batch_patches.shape)
-        # batch_prev_patches = prev_patches
+        # -- fill the previous patch "prev_patches" with correct offset --
         batch_prev_patches = block_utils.index_patches_T(prev_patches,
                                                          patches,init_block,
                                                          self.patchsize,
                                                          nblocks,self.gpuid)
-        # nimages,npix,naligns,nframes,ncolors,psH,psW = batch_patches.shape
-        # print("patches.shape ",patches.shape)
-        # print("batch_patches.shape ",batch_patches.shape)
-        # print("batch_prev_patches.shape ",batch_prev_patches.shape)
-        # print("dframes.shape ",dframes.shape)
+        # nimages,npix,naligns_prev,nframes,ncolors,psH,psW = batch_prev_patches.shape
 
-        # -- index patches along dframes --
+        # -- index only the frames that changing using "dframes" --
+        print("batch_patches.shape ",batch_patches.shape)
         nimages = batch_patches.shape[0]
         shape_str = 'i p a t c h w -> i a p t (c h w)'
         bp_to_index = rearrange(batch_patches,shape_str)
         dframes_rs = rearrange(dframes,'i p a -> i a p')
-        # print("dframes.shape ",dframes.shape)
-        # print("dframes_rs.shape ",dframes_rs.shape)
-        # print("bp_to_index.shape ",bp_to_index.shape)
         patches = index_along_frames(bp_to_index[0],dframes_rs[0])
         # print("patches.shape ",patches.shape)
         patches = rearrange(patches,'a p f -> p a f')[None,:]
@@ -293,6 +281,7 @@ class EvalBootBlockScores(EvalTemplate):
         # scores.shape = (nimages,nsegs,naligns)
         # scores_t.shape = (nimages,nsegs,naligns,nframes)
         # blocks.shape = (nimages,nsegs,naligns,nframes)
+        print("[eval boot]: scores_t.shape", scores_t.shape)
 
         return scores,scores_t,blocks
 

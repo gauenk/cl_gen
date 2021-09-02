@@ -64,6 +64,7 @@ def run(patches,masks,evaluator,
     curr_blocks = pick_top1_blocks(topK_blocks)
 
 
+
     # -- continued search using "search_fxn" --
     for iter_i in range(iterations):
 

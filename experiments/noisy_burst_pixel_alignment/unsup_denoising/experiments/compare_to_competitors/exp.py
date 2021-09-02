@@ -48,7 +48,7 @@ def check_parameters(nblocks,patchsize):
     if even_blocks or even_ps:
         print("Even number of blocks or patchsizes. We recommend odd so a center exists.")
 
-@nvtx.annotate("test_nnf", color="purple")
+@nvtx.annotate("exec_exp", color="purple")
 def execute_experiment(cfg):
 
     # -- reset sys.out if subprocess --

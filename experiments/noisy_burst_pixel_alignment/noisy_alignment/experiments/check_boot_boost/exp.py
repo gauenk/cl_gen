@@ -72,7 +72,9 @@ def execute_experiment(cfg):
     
     # -- get score function --
     score_fxn_ave = get_score_function("ave")
+    score_fxn_mse = get_score_function("mse")
     score_fxn_bs = get_score_function("bootstrapping")
+    score_fxn_bs_cf = get_score_function("bootstrapping_cf")
     # score_fxn_bs = get_score_function("bootstrapping_mod2")
     # score_fxn_bs = get_score_function(cfg.score_fxn_name)
     score_fxn_bsl = get_score_function("bootstrapping_limitB")
@@ -94,12 +96,17 @@ def execute_experiment(cfg):
     iterations,K = 1,1
     subsizes = []
     eval_ave = EvalBlockScores(score_fxn_ave,"ave",patchsize,block_batchsize,None)
+    eval_mse = EvalBlockScores(score_fxn_mse,"mse",patchsize,block_batchsize,None)
+
 
     # -- create evaluator for bootstrapping --
     block_batchsize = 81
     eval_plimb = EvalBootBlockScores(score_fxn_bsl,score_fxn_bs,"bsl",
                                      patchsize,block_batchsize,None)
-    eval_prop = EvalBlockScores(score_fxn_bs,"bs",patchsize,block_batchsize,None)
+    eval_prop = EvalBlockScores(score_fxn_bs,"bs",patchsize,
+                                block_batchsize,None)
+    eval_prop_cf = EvalBlockScores(score_fxn_bs_cf,"bs_cf",patchsize,
+                                   block_batchsize,None)
 
     # -- iterate over images --
     for image_bindex in range(NUM_BATCHES):
@@ -190,19 +197,29 @@ def execute_experiment(cfg):
         search_blocks = repeat(search_blocks,'a t -> i s a t',i=nimages,s=nsegs)
         print("search_blocks.shape ",search_blocks.shape)        
         
-        # -- compute bootstrapping for the batch --
+        # -- compute MSE for the batch --
         est = edict()
+        bscf = edict()
         plimb = edict()
 
         print("curr_blocks.shape ",curr_blocks.shape)
         eval_prop.score_fxn_name = ""
-        scores,scores_t,blocks = eval_prop.score_burst_from_blocks(dyn_noisy,
+        scores,scores_t,blocks = eval_mse.score_burst_from_blocks(dyn_noisy,
                                                                    search_blocks,
                                                                    patchsize,nblocks)
         est.scores = scores
         est.scores_t = scores_t
         est.blocks = blocks
         print("Done with est.")
+
+
+        # -- compute bootrapping in closed form --
+        scores,scores_t,blocks = eval_prop_cf.score_burst_from_blocks(dyn_noisy,
+                                                                   search_blocks,
+                                                                   patchsize,nblocks)
+        bscf.scores = scores
+        bscf.scores_t = scores_t
+        bscf.blocks = blocks
 
         # -- compute bootstrapping for the batch --
         print("Get init block from original bootstrap.")
@@ -223,23 +240,40 @@ def execute_experiment(cfg):
         plimb.blocks = blocks
 
         print(est.scores.shape)
+        print(bscf.scores.shape)
         print(state.scores.shape)
         print(plimb.scores.shape)
 
-        diff = plimb.scores[0] - est.scores[0]
-        perc_delta = torch.abs(plimb.scores[0] - est.scores[0]) / est.scores[0]
+        diff_plimb = plimb.scores[0] - est.scores[0]
+        perc_delta = torch.abs(diff_plimb) / est.scores[0]
+        diff_bscf = bscf.scores[0] - est.scores[0]
+        perc_delta_cf = torch.abs(diff_bscf) / est.scores[0]
+
         pix_idx_list = [0,20,30]#np.arange(h*w)
         for p in pix_idx_list:
             print("-"*10 + f" @ {p}")
             print("est",est.scores[0,p].cpu().numpy())
             print("state",state.scores[0,p].cpu().numpy())
+            print("bscf",bscf.scores[0,p].cpu().numpy())
             print("plimb",plimb.scores[0,p].cpu().numpy())
             print("plimb/est",plimb.scores[0,p]/est.scores[0,p])
             print("plimb - est",plimb.scores[0,p] - est.scores[0,p])
-            print("%Delta",perc_delta[p])
-            print("Nmlz L2-Norm",torch.mean(diff[p]**2))
-        print("[Overall] %Delta: ",torch.mean(perc_delta).item())
-        print("[Overall] Nmlz L2-Norm: ",torch.mean(diff**2).item())
+            print("plimb - bscf",plimb.scores[0,p] - bscf.scores[0,p])
+
+            print("%Delta [plimb]",perc_delta[p])
+            print("L2-Norm [plimb]",torch.sum(diff_plimb[p]**2))
+            print("Nmlz L2-Norm [plimb]",torch.mean(diff_plimb[p]**2))
+
+            print("%Delta [bscf]",perc_delta_cf[p])
+            print("L2-Norm [bscf]",torch.sum(diff_bscf[p]**2))
+            print("Nmlz L2-Norm [bscf]",torch.mean(diff_bscf[p]**2))
+
+        print("[Overall: plimb] %Delta: ",torch.mean(perc_delta).item())
+        print("[Overall: plimb] L2-Norm: ",torch.sum(diff_plimb**2).item())
+        print("[Overall: plimb] Nmlz L2-Norm: ",torch.mean(diff_plimb**2).item())
+        print("[Overall: bscf] %Delta: ",torch.mean(perc_delta_cf).item())
+        print("[Overall: bscf] L2-Norm: ",torch.sum(diff_bscf**2).item())
+        print("[Overall: bscf] Nmlz L2-Norm: ",torch.mean(diff_bscf**2).item())
 
         # -- format results --
         pad = 3#2*(nframes-1)*ppf+4

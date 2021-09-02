@@ -35,6 +35,10 @@ def index_patches_T(indexed,tensor,batch,patchsize,nblocks,gpuid):
 def index_block_batches_T(indexed,tensor,batch,patchsize,nblocks,gpuid):
 
     # -- prepare data --
+    print("indexed.shape ",indexed.shape)
+    print("tensor.shape ",tensor.shape)
+    print("batch.shape ",batch.shape)
+
     batchsize = batch.shape[2]
     indexed = indexed[:,:,:batchsize]
     numba.cuda.select_device(gpuid)

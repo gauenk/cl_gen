@@ -41,12 +41,7 @@ def create_weights_cuda_nosub(rng_states,nsubsets,nframes,weights,counts):
             while rand_t < rand_float:
                 rand_t += 1
             rand_t -= 1
-            subset[rand_t] = 1
-
-        # -- count unique --
-        nunique = 0
-        for t in range(nframes):
-            nunique += subset[t]
+            subset[rand_t] += 1
 
         # -- init weights --
         for t in range(nframes):
@@ -56,9 +51,8 @@ def create_weights_cuda_nosub(rng_states,nsubsets,nframes,weights,counts):
         # -- sample uniform --
         for t in range(nframes):
             rand_t = subset[t]
-            if rand_t == 1:
-                weights[tidx,t] = 1./nunique
-                counts[tidx,t] += 1
+            weights[tidx,t] = (rand_t-1)/nframes
+            counts[tidx,t] += 1
 
 @cuda.jit
 def create_weights_cuda(rng_states,nsubsets,nframes,weights,counts):
@@ -86,12 +80,12 @@ def create_weights_cuda(rng_states,nsubsets,nframes,weights,counts):
             while rand_t < rand_float:
                 rand_t += 1
             rand_t -= 1
-            subset[rand_t] = 1
+            subset[rand_t] += 1
 
-        # -- count unique --
-        nunique = 0
-        for t in range(nframes):
-            nunique += subset[t]
+        # # -- count unique --
+        # nunique = 0
+        # for t in range(nframes):
+        #     nunique += subset[t]
 
         # -- init weights --
         for t in range(nframes):
@@ -101,9 +95,8 @@ def create_weights_cuda(rng_states,nsubsets,nframes,weights,counts):
         # -- sample uniform --
         for t in range(nframes):
             rand_t = subset[t]
-            if rand_t == 1:
-                weights[tidx,t] = 1./nunique - 1./nframes
-                counts[tidx,t] += 1
+            weights[tidx,t] = (rand_t-1)/nframes
+            counts[tidx,t] += 1
         
 @cuda.jit
 def fill_weights_pix_cuda(rng_states,nsubsets,npix,nframes,weights,counts):

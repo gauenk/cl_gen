@@ -12,7 +12,7 @@ from easydict import EasyDict as edict
 from pyutils import numba_unique,numba_subset_mean_along_axis,numba_compute_muB
 
 # -- [local] project imports --
-from pretty_plots.stat_test_properties.cache import store_cache,load_cache,get_cache_name
+from pretty_plots.stat_test_properties.cache import store_cache,load_cache,get_cache_name,filter_complete_exps,filter_grid_field
 from pretty_plots.stat_test_properties.parallel import ProgressParallel
 
 def numba_mat_count_uniques_bs(mat,n_uniques):
@@ -36,7 +36,8 @@ def get_proposed_sims(pgrid,parallel=True,rerun=False):
     # cache_name = f"proposed_tmp"
     lsims = load_cache(cache_name)
     print(lsims['T'].unique())
-    f_pgrid = filter_complete_exps(pgrid,lsims)
+    # f_pgrid = filter_complete_exps(pgrid,lsims)
+    f_pgrid = []
     
     # rerun = True
     if rerun is False and len(f_pgrid) == 0: return lsims

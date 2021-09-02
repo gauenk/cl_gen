@@ -38,8 +38,9 @@ def get_cfg_defaults():
     # -- combo config --
     cfg.nblocks = 3
     cfg.patchsize = 3
+    cfg.score_fxn_name = "bootstrapping_cf"
     # cfg.score_fxn_name = "bootstrapping"
-    cfg.score_fxn_name = "bootstrapping_mod2"
+    # cfg.score_fxn_name = "bootstrapping_mod2"
     # cfg.score_fxn_name = "bootstrapping_mod3"
     # cfg.score_fxn_name = "bootstrapping_mod4"
 
@@ -74,12 +75,13 @@ def get_exp_cfgs(name):
 
     # -- create frame number grid --
     nframes = [15,10,3] # [31]
+    # nframes = [3,] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
 
     # -- bootstrapping name --
-    bsname = ['bootstrapping_mod2']
+    bsname = ['bootstrapping_cf']
 
     # -- create number of local regions grid --
     nblocks = [3]

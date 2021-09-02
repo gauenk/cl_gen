@@ -13,7 +13,8 @@ import matplotlib.pyplot as plt
 from matplotlib import cm as plt_cm
 
 # -- project imports --
-from pyutils import add_legend,create_named_meshgrid,np_log,create_list_pairs,add_colorbar
+from pyutils import create_named_meshgrid,np_log,create_list_pairs
+from pyplots import add_legend,add_colorbar
 
 # -- local imports --
 from .settings import FONTSIZE,MAX_LEN_XLABEL
@@ -374,8 +375,11 @@ def get_agg_mlevels_from_pairs(sims,pairs,xform):
 
 def remove_axes_labels(axes):
     for ax in axes:
-        ax.set_xlabel("")
-        ax.set_ylabel("")
+        if isinstance(ax,list) or isinstance(ax,np.ndarray):
+            remove_axes_labels(ax)
+        else:
+            ax.set_xlabel("")
+            ax.set_ylabel("")
 
 def subplot_titles(axes,titles):
     for ax,title in zip(axes,titles):
@@ -404,23 +408,62 @@ def save_pair_contours(axes,mlevels,fname,cs,postfix):
     if skip < 1: skip = 1
     skim_proxy = proxy[::skip]
     skim_fmt = mlevels_fmt[1::skip]
+    skim_ticks = mlevels[1::skip]
     if mlevels_fmt[-1] != skim_fmt[-1]:
         skim_proxy[-1] = proxy[-1]
         skim_fmt[-1] = mlevels_fmt[-1]
-    add_legend(axes[-1],"Approx. Prob.",skim_fmt,
-               skim_proxy,framealpha=0.,shrink_perc=1.0,
-               fontsize=FONTSIZE)
+        skim_ticks[-1] = mlevels[-1]
+    print(axes[-1])
+
+    zinfo = edict({'label':'Est. Prob.'})
+    # add_contour_legend([axes[-1]],None,cs,True,mlevels,zinfo,0.80)
+    # add_legend(axes[3],zinfo.label,skim_fmt,skim_proxy,
+    #            framealpha=0.,shrink_perc=1.)
+    legend_title = zinfo.label
+    legend_handles = skim_proxy
+    legend_str = skim_fmt
+    fontsize=15
+    ncol=1
+    framealpha=0.
+    leg =axes[3].legend(legend_handles,legend_str,
+                        title = legend_title,
+                        title_fontsize=fontsize,
+                        fontsize=fontsize,
+                        ncol=ncol,
+                        # loc='center left',
+                        bbox_to_anchor=(3.55, 2.35),
+                        framealpha=framealpha)
+
+
+    # -- shrink non-legend far right-bottom plot --
+    shrink = False
+    if shrink:
+        shrink_perc = .1
+        box = axes[-1].get_position()
+        sbox = [box.x0, box.y0, box.width * shrink_perc, box.height]
+        axes[-1].set_position(sbox)
+
+    # add_legend(axes[-1],"Approx. Prob.",skim_fmt,
+    #            skim_proxy,framealpha=0.,shrink_perc=.80,
+    #            fontsize=FONTSIZE)
+    # print(skim_proxy)
+    # print(skim_fmt)
+    # label = "Est. Prob."
+    # add_colorbar(axes,skim_fmt,skim_ticks,
+    #              scm=skim_proxy,shrink = True,fontsize=15,
+    #              framealpha=1.0,ncol=1,shrink_perc=.80)
 
     # -- create plots --
-    plt.subplots_adjust(right=.85)
+    # plt.subplots_adjust(right=.85)
     title = "Contour Maps of the Approximate Probability of Correct Alignment"
     # make_space_above(axes, topmargin=0.7)
-    # plt.suptitle(title,fontsize=18,y=1.0)
+    plt.suptitle(title,fontsize=18,y=0.98)
 
     DIR = Path("./output/pretty_plots")
     if not DIR.exists(): DIR.mkdir()
     fn =  DIR / f"./stat_test_properties_{fname}_contours-agg_{postfix}.png"
-    plt.savefig(fn,transparent=True,bbox_inches='tight',dpi=300)
+    # plt.savefig(fn,transparent=True,bbox_inches='tight',dpi=300)
+    plt.savefig(fn,transparent=True,dpi=300)
     plt.close('all')
     print(f"Wrote plot to [{fn}]")
 

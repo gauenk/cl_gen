@@ -39,6 +39,8 @@ def get_score_functions(names):
 def get_score_function(name):
     if name == "ave":
         return ave_score
+    elif name == "mse":
+        return mse_score
     elif name == "gaussian_ot":
         return gaussian_ot_score
     elif name == "emd":
@@ -81,6 +83,8 @@ def get_score_function(name):
         return bootstrapping_mod6
     elif name == "bootstrapping_limitB":
         return bootstrapping_limitB
+    elif name == "bootstrapping_cf":
+        return bootstrapping_cf
     elif name == "sim_trm":
         return sim_trm
     elif name == "ransac":
@@ -90,6 +94,29 @@ def get_score_function(name):
     else:
         raise ValueError(f"Uknown score function [{name}]")
 
+def bootstrapping_cf(cfg,expanded):
+
+    # -- setup vars --
+    R,B,E,T,C,H,W = expanded.shape
+    nframes = T
+    device = expanded.device
+    samples = rearrange(expanded,'r b e t c h w -> t (r c h w) b e')
+    samples = samples.contiguous() # speed up?
+
+    # -- compute closed form (cf) bootstrap --
+    term_1 = torch.sum(samples**2,dim=0)/nframes**2
+    term_2 = torch.mean(samples,dim=0)**2/nframes
+    boot_cf = torch.mean(term_1 - term_2,dim=0)
+
+
+    # -- add back patchsize for compat --
+    scores = boot_cf
+    scores = repeat(scores,'b e -> r b e',r=R)
+    scores_t = repeat(scores,'r b e -> r b e t',t=T)
+
+    return scores,scores_t
+
+    
 def bootstrapping(cfg,expanded):
 
     # -- setup vars --
@@ -334,12 +361,14 @@ def bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patch
     # -- average of prev patches RM dframes --
     # consts = torch.mean(prev_patches,dim=3) # average over specificy frame alignment
     print("-"*10 + " patches.")
-    pix_idx = 10
+    pix_idx = 30
+    frames = dframes[0,pix_idx]
     print("patches_full.shape ",patches_full.shape)
     print(patches_full[0,pix_idx,:,:,:2])
     print(prev_patches[0,pix_idx,0,:,:2])
     print(patches_full[0,pix_idx,:,:,:2].shape)
     print(prev_patches[0,pix_idx,0,:,:2].shape)
+    print(dframes[0,pix_idx])
     print("-"*10 + " means.")
     consts = compute_mean_rm_dframes(prev_patches,dframes)
     consts_other = compute_mean_rm_dframes_other(patches_full,dframes)
@@ -353,20 +382,26 @@ def bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patch
 
     # -- constants --
     sq_coeff = 1./(nframes**2.) - 1./(nframes**3.)
-    lin_coeff = 2./nframes**3
+    lin_coeff = -2./nframes**3
 
     # -- squared term --
     j = [0]
     sq_diff = torch.zeros(nimages,npatches,naligns,nftrs,device=device)
+    print("naligns ",naligns)
     for p in range(npatches):
         for a in range(naligns):
             dframe = dframes[0,p,a]
             # sq_diff[0,p,a] = patches[0,p,a]**2 - prev_patches[0,p,j[0],dframe]**2
-            sq_diff[0,p,a] = patches_full[0,p,a,dframe]**2 - prev_patches[0,p,j[0],dframe]**2
+            # if p == 30:
+            #     print(patches_full[0,p,a,dframe]**2,prev_patches[0,p,j[0],dframe]**2)
+            term1 = patches_full[0,p,a,dframe]**2
+            term2 = prev_patches[0,p,j[0],dframe]**2
+            sq_diff[0,p,a] = term1 - term2
+            
     sq_diff = torch.mean(sq_diff,dim=-1)
     print("sq_diff ",sq_diff[0,0].cpu().numpy())
     sq_term = sq_coeff * sq_diff
-    print("sq_term ",sq_term[0,0].cpu().numpy())
+    print("sq_term @ 0 ",sq_term[0,0].cpu().numpy())
     print("sq_term @ 20 ",sq_term[0,20].cpu().numpy())
     print("sq_term @ 30 ",sq_term[0,30].cpu().numpy())
 
@@ -387,7 +422,7 @@ def bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patch
     lin_diff = torch.mean(lin_diff,dim=-1)
     print("lin_diff ",lin_diff[0,0].cpu().numpy())
     lin_term = lin_coeff * lin_diff
-    print("lin_term ",lin_term[0,0].cpu().numpy())
+    print("lin_term @ 0 ",lin_term[0,0].cpu().numpy())
     print("lin_term @ 20 ",lin_term[0,20].cpu().numpy())
     print("lin_term @ 30 ",lin_term[0,30].cpu().numpy())
 
@@ -403,7 +438,7 @@ def bootstrapping_limitB_impl(cfg,patches,prev_patches,prev_scores,dframes,patch
     # ----------------------------------------------
     # [shape (npatches,naligns)]
 
-    scores = prev_scores - Delta
+    scores = prev_scores + Delta
     print("scores.shape ",scores.shape)
 
     return scores,scores_t
@@ -1377,6 +1412,8 @@ def ave_score(cfg,expanded):
         zeros = torch.zeros_like(delta_t[:,:,[0]])
         delta_t = torch.cat([delta_t[:,:,:T//2],zeros,delta_t[:,:,T//2:]],dim=2)
         # print("delta_t.shape",delta_t.shape)
+    else:
+        delta_t = rearrange(delta_t,'t b e -> b e t')
 
     # -- repeat to include R --
     delta_t = repeat(delta_t,'b e t -> r b e t',r=R)

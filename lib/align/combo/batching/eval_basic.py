@@ -205,7 +205,7 @@ class EvalBlockScores(EvalTemplate):
         # -- get patches --
         pad = 2*(nblocks//2)
         patches = burst_to_patches(burst,patchsize+pad)
-        print("basic: patches.shape ",patches.shape)
+        # print("basic: patches.shape ",patches.shape)
 
         # -- shapes --
         device = patches.device

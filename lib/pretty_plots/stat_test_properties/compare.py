@@ -78,7 +78,7 @@ def compare_D_std(s_sims,s_lgrids,p_sims,p_lgrids):
     N = len(Tgrid)
     fig,axes = plt.subplots(ncols=N,nrows=2,figsize=(4*N,3*2),
                             sharey=True,sharex=True)
-    fig.subplots_adjust(hspace=0.05,wspace=0.05)
+    fig.subplots_adjust(hspace=0.15,wspace=0.05)
     # axes = [[axes[i]] for i in range(2*N)] # comply with stratify_contour_plots indexing
 
     # -- stratify contour plots --
@@ -121,20 +121,26 @@ def compare_D_std(s_sims,s_lgrids,p_sims,p_lgrids):
     #                      title,fname,"D","std",zinfo)
     # cs_list.append(cs[0])
 
+    # -- add subplot titles --
+    xlabel = axes[0,0].get_xlabel()
+    remove_axes_labels(axes)
+    # titles = ["Standard"] + [f"\# of Frames: {T}" for T in Tgrid]
+    titles = [f"\# of Frames: {T}" for T in Tgrid]
+    subplot_titles(axes[0],titles)
+    row_labels = ["Standard","Proposed"]
+    for i,ax_row in enumerate(axes):
+        ax_row[0].set_ylabel(row_labels[i])
+
+    # -- unlist for compat. --
+    axes = [ax_j for ax_i in axes for ax_j in ax_i] 
+
     # -- save contour plots --
     fname = "compare"
-    axes = [ax[0] for ax in axes] # unlist for compat.
-    print(mlevels)
-    xlabel = axes[0].get_xlabel()
-    print(xlabel)
     axes[0].set_xlabel("")
     fig.add_subplot(111, frameon=False)
     plt.tick_params(labelcolor='none', which='both',
                     top=False, bottom=False, left=False, right=False)
     plt.xlabel(xlabel,fontsize=FONTSIZE)
-    remove_axes_labels(axes[1:])
-    titles = ["Standard"] + [f"\# of Frames: {T}" for T in Tgrid]
-    subplot_titles(axes,titles)
 
     save_pair_contours(axes,mlevels,fname,cs_list[-2],"D-std-strat-T")
 

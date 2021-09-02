@@ -30,13 +30,13 @@ def run():
     # -- run single experiment --
     # run_standard()
     # run_proposed()
-    run_hb_gaussian()
+    # run_hb_gaussian()
 
     # -- compare standard and proposed --
-    # pgrid,s_lgrids = create_standard_parameter_grid()
-    # s_sims = get_standard_sims(pgrid)
-    # pgrid,p_lgrids = create_proposed_parameter_grid()
-    # p_sims = get_proposed_sims(pgrid)
-    # run_compare_sims(s_sims,s_lgrids,p_sims,p_lgrids)
+    pgrid,s_lgrids = create_standard_parameter_grid()
+    s_sims = get_standard_sims(pgrid)
+    pgrid,p_lgrids = create_proposed_parameter_grid()
+    p_sims = get_proposed_sims(pgrid)
+    run_compare_sims(s_sims,s_lgrids,p_sims,p_lgrids)
 
 

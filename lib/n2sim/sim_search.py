@@ -39,6 +39,7 @@ def search_raw_array_pytorch(res, xb, xq, k, D=None, I=None,
     else:
         raise TypeError('matrix should be row or column-major')
 
+
     xq_ptr = swig_ptr_from_FloatTensor(xq)
 
     nb, d2 = xb.size()

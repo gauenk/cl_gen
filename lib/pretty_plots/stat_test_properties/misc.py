@@ -6,7 +6,8 @@ from easydict import EasyDict as edict
 import matplotlib.pyplot as plt
 
 # -- project imports --
-from pyutils import create_named_meshgrid,np_log,add_legend
+from pyutils import create_named_meshgrid,np_log
+from pyplots import add_legend,add_colorbar
 
 # -- local imports --
 from .settings import FONTSIZE,MAX_LEN_XLABEL
@@ -152,6 +153,7 @@ def compute_log_lists(grids,fields,logs):
     return grids
 
 def compute_stat_contour(sims,fgrid,grids,fields,zinfo):
+    compare_to_gt = False
     means = np.zeros((len(grids[1]),len(grids[0])))
     stds = np.zeros((len(grids[1]),len(grids[0])))
     for point in fgrid:
@@ -163,15 +165,16 @@ def compute_stat_contour(sims,fgrid,grids,fields,zinfo):
         est_mean = np.mean(np.stack(filter2[zinfo.mean].to_numpy()).flatten())
         est_std = np.std(np.stack(filter2[zinfo.std].to_numpy()).flatten())
 
-        std = np.unique(filter2['std'].to_numpy())
-        eps = np.unique(filter2['eps'].to_numpy())
-        T = np.unique(filter2['T'].to_numpy())
-        D = np.unique(filter2['D'].to_numpy())
-        gt = std**2 / T + eps**2 / T
-        error = (est_mean - gt)**2
-        #print("%2.3e"%(error),est_mean,gt,std,eps,T,D)
-        est_mean = error
-
+        if compare_to_gt:
+            std = np.unique(filter2['std'].to_numpy())
+            eps = np.unique(filter2['eps'].to_numpy())
+            T = np.unique(filter2['T'].to_numpy())
+            D = np.unique(filter2['D'].to_numpy())
+            gt = std**2 / T + eps**2 / T
+            error = (est_mean - gt)**2
+            #print("%2.3e"%(error),est_mean,gt,std,eps,T,D)
+            est_mean = error
+    
         # -- format samples for contour plot --
         f1_index = grids[0].index(point.f1)
         f2_index = grids[1].index(point.f2)
