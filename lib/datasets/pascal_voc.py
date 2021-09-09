@@ -120,13 +120,14 @@ class DynamicVOC(VOCDetection):
 
         img = Image.open(self.images[index]).convert("RGB")
         if self.bw: img = img.convert('1')
-        img_set,res_set,clean_target,flow = self.dynamic_trans(img)
+        img_set,res_set,clean_target,seq_flow,ref_flow = self.dynamic_trans(img)
         iid = self.noise_trans(clean_target)
 
         if self._return_type == "list":
-            return img_set, res_set, clean_target, flow
+            return img_set, res_set, clean_target, seq_flow, ref_flow
         elif self._return_type == "dict":
-            return {'burst':img_set, 'res':res_set, 'clean':clean_target, 'flow':flow, 'iid':iid, 'index':index}
+            return {'burst':img_set, 'res':res_set, 'clean':clean_target,
+                    'seq_flow':seq_flow, 'ref_flow':ref_flow, 'iid':iid, 'index':index}
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 class DynamicVOC_LMDB_All():

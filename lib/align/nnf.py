@@ -17,6 +17,7 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
     T,B,C,H,W = burst.shape
     npix = H*W
     ref_img = burst[ref_t]
+    from_image = ref_img
     vals,locs = [],[]
     for t in range(T):
         if t == ref_t:
@@ -26,14 +27,14 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
             indices = indices.reshape(H,W,2)
             locs_t = repeat(indices,'h w two -> 1 b h w k two',b=B,k=K)
         else:
-            img = burst[t]
-            vals_t,locs_t = compute_batch_nnf(ref_img,img,patchsize,K,gpuid)
+            to_image = burst[t]
+            vals_t,locs_t = compute_batch_nnf(from_image,to_image,patchsize,K,gpuid)
         vals.append(vals_t)
         locs.append(locs_t)
     vals = np.concatenate(vals,axis=0)
     locs = np.concatenate(locs,axis=0)
     locs[...,:] = locs[...,::-1] # (HERE) row,cols -> cols,rows
-    #print("burst_nnf.shape", locs.shape)
+    # print("burst_nnf.shape", locs.shape)
     return vals,locs
 
 def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):

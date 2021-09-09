@@ -30,7 +30,7 @@ def get_cfg_defaults():
     cfg.dynamic_info.mode = 'global'
     cfg.dynamic_info.frame_size = cfg.frame_size
     cfg.dynamic_info.nframes = cfg.nframes
-    cfg.dynamic_info.ppf = 0
+    cfg.dynamic_info.ppf = 1
     cfg.dynamic_info.textured = True
 
     cfg.random_seed = 0
@@ -50,9 +50,9 @@ def get_exp_cfgs(name):
     # ignore name for now.
 
     # -- create patchsize grid --
-    # patchsize = [3,5]
+    patchsize = [3]
     # patchsize = [3,5,7,15]
-    patchsize = [11]
+    # patchsize = [11]
     ps_ticks = patchsize
     ps_tickmarks = ps_ticks
     ps_tickmarks_str = ["%d" % x for x in ps_tickmarks]
@@ -62,10 +62,11 @@ def get_exp_cfgs(name):
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
-    noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
+    noise_types = ['g-5p0']
+    # noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
     # noise_types = ['g-75p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.,150.]
-    std_ticks = [5.,25.,75.,150.]
+    std_ticks = [float(nt.split('-')[1].split('p')[0]) for nt in noise_types]
     std_tickmarks = std_ticks
     std_tickmarks_str = ["%d" % x for x in std_tickmarks]
 
@@ -87,7 +88,7 @@ def get_exp_cfgs(name):
     nblocks = [3]
     
     # -- dynamics grid --
-    ppf = [0]
+    ppf = [1]
 
     # -- batch size --
     batch_size = [1]

@@ -18,10 +18,10 @@ def parse_inputs(nimages,isize,centers):
         centers = np.broadcast_to(centers,(nimages,) + centers.shape)
         return centers
 
-def flow_to_pix(flow,centers=None,isize=None):
+def flow_to_pix(flow,nframes,centers=None,isize=None):
 
     # -- check shapes --
-    nimages,npix,nframes_minus_1,two = flow.shape
+    nimages,npix,nframes_tilde,two = flow.shape
     centers = parse_inputs(nimages,isize,centers)
     centers = torch.LongTensor(centers).to(flow.device,non_blocking=True)
     c_nimages,c_npix,two = centers.shape
@@ -29,9 +29,14 @@ def flow_to_pix(flow,centers=None,isize=None):
     assert npix == c_npix,"num of pixels must be eq."
 
     # -- create blocks --
-    flow = rearrange(flow,'i p tm1 two -> (i p) tm1 two')
+    flow = rearrange(flow,'i p ttilde two -> (i p) ttilde two')
     centers = rearrange(centers,'i p two -> (i p) two')
-    pix = flow_to_pix_torch(flow,centers)
+    if nframes_tilde == nframes:
+        pix = ref_flow_to_pix_torch(flow,centers)
+    elif nframes_tilde == nframes - 1:
+        pix = seq_flow_to_pix_torch(flow,centers)
+    else:
+        raise ValueError(f"Uknown flow shape {flow.shape} for nframe {nframes}")
     pix = rearrange(pix,'(i p) t two -> i p t two',i=nimages)
 
     # -- to tensor --
@@ -39,7 +44,26 @@ def flow_to_pix(flow,centers=None,isize=None):
 
     return pix
 
-def flow_to_pix_torch(_flow,centers):
+def ref_flow_to_pix_torch(_flow,centers):
+    # -- copy --
+    pix = _flow.clone()
+
+    # -- compute deltas to ref --
+    nsamples,nframes,two = pix.shape
+    ref_frame = nframes // 2
+
+    # -- change from _spatial_ _object_ motion into _image coords_ _object_ motion
+    pix[...,1] = -pix[...,1] 
+    
+    # -- add locations --
+    centers = repeat(centers,'s two -> s t two',t=nframes)
+
+    # -- create pix --
+    pix += centers
+
+    return pix
+
+def seq_flow_to_pix_torch(_flow,centers):
 
     # -- copy --
     flow = _flow.clone()

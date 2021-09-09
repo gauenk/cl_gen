@@ -2,12 +2,10 @@
 import torch
 import numpy as np
 from einops import rearrange
-from pyutils import tile_patches
 import torch.nn.functional as F
-import torchvision.transforms.functional as tvF
-
-
+from pyutils import tile_patches
 from pyutils import images_to_psnrs
+import torchvision.transforms.functional as tvF
 
 def compute_aligned_psnr(aligned_a,aligned_b,csize):
     nframes = aligned_a.shape[0]

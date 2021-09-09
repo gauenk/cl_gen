@@ -20,7 +20,7 @@ from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
 # -- [align] package imports --
 from align import compute_epe,compute_aligned_psnr
 import align.nnf as nnf
-from align.combo.eval_scores import EvalBlockScores
+from align.combo.batching import EvalBlockScores
 from align.combo.optim import AlignOptimizer
 from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow,flow_to_blocks
 
@@ -55,7 +55,7 @@ def config():
     cfg.dynamic_info.mode = 'global'
     cfg.dynamic_info.frame_size = cfg.frame_size
     cfg.dynamic_info.nframes = cfg.nframes
-    cfg.dynamic_info.ppf = 0
+    cfg.dynamic_info.ppf = 1
     cfg.dynamic_info.textured = True
     cfg.random_seed = 234
 
@@ -136,7 +136,8 @@ def test_nnf():
         dyn_clean = sample['burst'] # dynamics and no noise
         static_noisy = sample['snoisy'] # no dynamics and noise
         static_clean = sample['sburst'] # no dynamics and no noise
-        flow_gt = sample['flow']
+        flow_gt = sample['ref_flow']
+        # flow_gt = sample['seq_flow']
         if cfg.noise_params.ntype == "pn":
             dyn_noisy = anscombe.forward(dyn_noisy)
 

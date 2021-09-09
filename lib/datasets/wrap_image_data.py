@@ -64,9 +64,10 @@ def transforms_from_cfg(cfg):
             pil_image = tvT.ToPILImage()(image).convert("RGB")
             results = dynamic_raw_xform(pil_image)
             burst = results[0]+0.5
-            flow = results[3]
-            tl_index = results[4]
-            return burst,flow,tl_index
+            seq_flow = results[3]
+            ref_flow = results[4]
+            tl_index = results[5]
+            return burst,seq_flow,ref_flow,tl_index
         return wrapped
     def nonoise(image): return image
 
@@ -106,7 +107,7 @@ class WrapperDataset():
 
         # -- get image + dynamics + noise --
         image = self.data[index][self.FULL_IMAGE_INDEX]
-        burst,flow,tl_index = self.dynamic_fxn(image)
+        burst,seq_flow,ref_flow,tl_index = self.dynamic_fxn(image)
         noisy = self.noise_fxn(burst)+0.5
 
         # -- auxillary vars --
@@ -116,9 +117,9 @@ class WrapperDataset():
         index_th = torch.IntTensor([index])
 
         sample = {'burst':burst,'noisy':noisy,
-                  'flow':flow,'index':index_th,
-                  'sburst':sburst,'snoisy':snoisy,
-                  'rng_state':rng_state,
+                  'ref_flow':ref_flow,'seq_flow':seq_flow,
+                  'index':index_th,'sburst':sburst,
+                  'snoisy':snoisy,'rng_state':rng_state,
                   'tl_index':tl_index}
         return sample
 

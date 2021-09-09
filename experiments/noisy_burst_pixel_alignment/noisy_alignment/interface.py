@@ -55,16 +55,16 @@ def run_exp(exp_info):
     setup_exp_cfg = exp_info['setup_exp_cfg']
 
     # -- Load Default Config --
-    cfg = get_cfg_defaults() # todo
+    cfg = get_cfg_defaults()
     cfg.gpuid = 0
     cfg.device = f"cuda:{cfg.gpuid}"
     # torch.cuda(device=cfg.gpuid)
 
     # -- Init Experiment Cache  --
-    # cache_name += "_v2"
+    cache_name += "_v3"
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
-    # cache.clear()
+    cache.clear()
 
     # -- Load Experiment Mesh --
     experiments,order,exp_grids = get_exp_cfgs(config_name)

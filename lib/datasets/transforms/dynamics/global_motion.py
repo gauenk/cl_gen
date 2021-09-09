@@ -167,15 +167,48 @@ class GlobalCameraMotionTransform():
         res = torch.stack(res)
         # print(clean_target.min(),clean_target.max(),clean_target.mean())
         if self.random_eraser_bool: pics[middle_index] = self.random_eraser(pics[middle_index])
-        flow = self._motion_dinit_to_flow(delta_list)
-        return pics,res,clean_target,flow,tl
+        seq_flow = self._motion_dinit_to_seq_flow(delta_list)
+        ref_flow = self._motion_dinit_to_ref_flow(delta_list,self.nframes//2)
+        return pics,res,clean_target,seq_flow,ref_flow,tl
 
-    def _motion_dinit_to_flow(self,delta):
+    def _motion_dinit_to_ref_flow(self,delta,ref_t):
+        """
+        Compute "ref flow" 
+        or 
+        flow from a reference image to a target image
+
+        E.g. For T frames 
+        flow[t] represents the flow from time ref_t to time t
+        """
+        T,D = delta.shape
+        delta = delta[ref_t] - delta
+        nd_delta = delta.numpy() # top-left deltas
+
+        # -- we want flow[i,:] = [dx, dy] --
+        ref_flow = np.zeros((T,D))
+        ref_flow[:,1] = nd_delta[:,0]
+        ref_flow[:,0] = nd_delta[:,1]
+
+        # -- flip yaxis --
+        ref_flow[:,1] *= -1
+
+        ref_flow = torch.IntTensor(ref_flow)
+        return ref_flow
+
+    def _motion_dinit_to_seq_flow(self,delta):
+        """
+        Compute "burst flow" or flow between 
+        each frame in an ordered sequence
+
+        E.g. For T frames 
+        flow[t] represents the flow from time t to time t+1
+        
+        """
         T,D = delta.shape
         ref_t = T//2
         # print("delta")
         # print(delta)
-        delta = delta[ref_t] - delta
+        # delta = delta[ref_t] - delta
         #print(delta)
         nd_delta = delta.numpy() # top-left deltas
         flow = np.zeros((T-1,D))
@@ -183,11 +216,14 @@ class GlobalCameraMotionTransform():
         flow[:,0] = np.ediff1d(nd_delta[:,1])
         # -- we want flow[i,:] = [dx, dy] --
         # -- convert to spatial and flip the dx --
-        flow[:,0] *= -1
+        # flow[:,0] *= -1
+
+        # -- convert to spatial and flip the dx --
+        flow[:,1] *= -1
+
         flow = torch.IntTensor(flow)
         #print(flow)
         return flow
-
         
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
         tl = tl_list[i]
