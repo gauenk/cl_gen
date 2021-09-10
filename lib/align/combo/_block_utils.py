@@ -11,6 +11,12 @@ from numba import jit,prange,cuda
 # -- pytorch imports --
 import torch
 
+from numba.types.errors import NumbaDeprecationWarning, NumbaPendingDeprecationWarning,NumbaPerformanceWarning
+import warnings
+warnings.simplefilter('ignore', category=NumbaDeprecationWarning)
+warnings.simplefilter('ignore', category=NumbaPendingDeprecationWarning)
+warnings.simplefilter('ignore', category=NumbaPerformanceWarning)
+
 
 def blocks_shape(blocks):
     nimage = len(blocks)
@@ -111,7 +117,7 @@ def index_block_batches(indexed,tensor,batch,patchsize,nblocks,gpuid):
                                                        batch_nba,patchsize,nblocks)
     return indexed
 
-@cuda.jit
+@cuda.jit()
 def index_block_batches_cuda(indexed,tensor,batch,patchsize,nblocks):
 
     nimages,nsegs,nframes = tensor.shape[:3]

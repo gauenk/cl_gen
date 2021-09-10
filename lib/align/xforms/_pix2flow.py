@@ -11,14 +11,19 @@ import torch
 # -- project imports --
 from pyutils import torch_to_numpy
 
-def pix_to_flow(pix):
+def pix_to_flow(pix,ftype="ref"):
 
     # -- check sizes --
     nimages,npix,nframes,two = pix.shape
 
     # -- create blocks --
     pix = rearrange(pix,'i p t two -> (i p) t two')
-    flow = pix_to_flow_main(pix)
+    if ftype == "ref":
+        flow = pix_to_flow_ref(pix)
+    elif ftype == "seq":
+        flow = pix_to_flow_seq(pix)
+    else:
+        raise ValueError(f"Unknown flow type [{ftype}]")
     flow = rearrange(flow,'(i p) tm1 two -> i p tm1 two',i=nimages)
 
     # -- to tensor --
@@ -26,7 +31,19 @@ def pix_to_flow(pix):
 
     return flow
 
-def pix_to_flow_main(pix):
+def pix_to_flow_ref(pix):
+
+    # -- compute deltas to ref --
+    nframes = pix.shape[-2]
+    ref_frame = nframes // 2
+    pix_ref = repeat(pix[:,ref_frame],'s two -> s t two',t=nframes)
+    delta = pix_ref - pix
+    delta[...,0] = -delta[...,0]
+    flow = delta.clone()
+
+    return flow
+
+def pix_to_flow_seq(pix):
 
     # -- compute deltas to ref --
     nframes = pix.shape[-2]

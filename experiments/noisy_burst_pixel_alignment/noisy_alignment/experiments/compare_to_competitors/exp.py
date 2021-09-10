@@ -22,6 +22,7 @@ import nvtx
 
 # -- [align] package imports --
 import align.nnf as nnf
+import align.nvof as nvof
 from align.combo import EvalBlockScores,EvalBootBlockScores
 from align.combo.optim import AlignOptimizer
 from align.xforms import align_from_pix,flow_to_pix,create_isize,pix_to_flow,align_from_flow,flow_to_blocks
@@ -109,7 +110,7 @@ def execute_experiment(cfg):
         dyn_clean = sample['burst'] # dynamics and no noise
         static_noisy = sample['snoisy'] # no dynamics and noise
         static_clean = sample['sburst'] # no dynamics and no noise
-        flow_gt = sample['flow']
+        flow_gt = sample['ref_flow']
         image_index = sample['index']
         tl_index = sample['tl_index']
         rng_state = sample['rng_state']
@@ -117,8 +118,10 @@ def execute_experiment(cfg):
             dyn_noisy = anscombe.forward(dyn_noisy)
 
         # -- shape info --
+        pad = cfg.nblocks//2+1
         T,B,C,H,W = dyn_noisy.shape
         isize = edict({'h':H,'w':W})
+        psize = edict({'h':H-2*pad,'w':W-2*pad})
         ref_t = nframes//2
         nimages,npix,nframes = B,H*W,T
 
@@ -135,7 +138,7 @@ def execute_experiment(cfg):
         blocks_gt = flow_to_blocks(flow_gt_rs,nblocks)
         flows.of = repeat(flow_gt,'i tm1 two -> i p tm1 two',p=npix)
         aligned.of = align_from_flow(dyn_clean,flows.of,nblocks,isize=isize)
-        pixs.of = flow_to_pix(flows.of.clone(),isize=isize)
+        pixs.of = flow_to_pix(flows.of.clone(),nframes,isize=isize)
         runtimes.of = 0. # given
         optimal_scores.of = np.zeros((nimages,npix,1,nframes)) # clean target is zero
         aligned.clean = static_clean
@@ -148,11 +151,10 @@ def execute_experiment(cfg):
         start_time = time.perf_counter()
         shape_str = 't b h w two -> b (h w) t two'
         nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean,ref_t,patchsize)
-        nnf_pix_best = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
-        nnf_pix_best = torch.LongTensor(nnf_pix_best)
-        pixs.nnf = nnf_pix_best.clone()
-        flows.nnf = pix_to_flow(nnf_pix_best)
-        aligned.nnf = align_from_pix(dyn_clean,nnf_pix_best,nblocks)
+        pixs.nnf = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
+        flows.nnf = pix_to_flow(pixs.nnf.clone())
+        aligned.nnf = align_from_pix(dyn_clean,pixs.nnf,nblocks)
+        # aligned.nnf = align_from_flow(dyn_clean,flows.nnf,nblocks,isize=isize)
         runtimes.nnf = time.perf_counter() - start_time
         optimal_scores.nnf = np.zeros((nimages,npix,1,nframes)) # clean target is zero
 
@@ -163,7 +165,8 @@ def execute_experiment(cfg):
         optim = AlignOptimizer("v3")
         flows.nnf_local = optim.run(dyn_clean,patchsize,eval_ave,
                                     nblocks,iterations,subsizes,K)
-        pixs.nnf_local = flow_to_pix(flows.nnf_local.clone(),isize=isize)
+        print("flows.nnf_local.shape ",flows.nnf_local.shape)
+        pixs.nnf_local = flow_to_pix(flows.nnf_local.clone(),nframes,isize=isize)
         aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf_local,nblocks)
         runtimes.nnf_local = time.perf_counter() - start_time
         optimal_scores.nnf_local = eval_ave.score_burst_from_flow(dyn_noisy,
@@ -196,10 +199,19 @@ def execute_experiment(cfg):
         flows.ave = optim.run(dyn_noisy,patchsize,eval_ave,
                              nblocks,iterations,subsizes,K)
         # flows.ave = flows.of.clone()
-        pixs.ave = flow_to_pix(flows.ave.clone(),isize=isize)
+        pixs.ave = flow_to_pix(flows.ave.clone(),nframes,isize=isize)
         aligned.ave = align_from_flow(dyn_clean,flows.ave,nblocks,isize=isize)
         runtimes.ave = time.perf_counter() - start_time
         optimal_scores.ave = optimal_scores.split # same "ave" function
+
+        # -- compute nvof flow --
+        print("NVOF")
+        start_time = time.perf_counter()
+        flows.nvof = nvof.nvof_burst(dyn_noisy)
+        pixs.nvof = flow_to_pix(flows.nvof.clone(),nframes,isize=isize)
+        aligned.nvof = align_from_flow(dyn_clean,flows.nvof,nblocks,isize=isize)
+        runtimes.nvof = time.perf_counter() - start_time
+        optimal_scores.nvof = optimal_scores.split # same "ave" function
 
         # -- compute simple ave --
         iterations,K = 0,1
@@ -210,7 +222,7 @@ def execute_experiment(cfg):
         # flows.ave_simp = optim.run(dyn_noisy,patchsize,eval_ave_simp,
         #                      nblocks,iterations,subsizes,K)
         flows.ave_simp = flows.ave.clone().cpu()
-        pixs.ave_simp = flow_to_pix(flows.ave_simp.clone(),isize=isize)
+        pixs.ave_simp = flow_to_pix(flows.ave_simp.clone(),nframes,isize=isize)
         aligned.ave_simp = align_from_flow(dyn_clean,flows.ave_simp,nblocks,isize=isize)
         runtimes.ave_simp = time.perf_counter() - start_time
         optimal_scores.ave_simp = optimal_scores.split # same "ave" function
@@ -245,7 +257,7 @@ def execute_experiment(cfg):
         flows.est = optim.run(dyn_noisy,patchsize,eval_prop,
                              nblocks,iterations,subsizes,K)
         # flows.est = flows.of.clone()
-        pixs.est = flow_to_pix(flows.est.clone(),isize=isize)
+        pixs.est = flow_to_pix(flows.est.clone(),nframes,isize=isize)
         aligned.est = align_from_flow(dyn_clean,flows.est,patchsize,isize=isize)
         runtimes.est = time.perf_counter() - start_time
         optimal_scores.est = eval_prop.score_burst_from_flow(dyn_noisy,flows.nnf_local,
@@ -257,8 +269,8 @@ def execute_experiment(cfg):
 
         # -- format results --
         #pad = 2*(nframes-1)*ppf+4
-        pad = 3#2*(nframes-1)*ppf+4
-        isize = edict({'h':H-pad,'w':W-pad})
+        # pad = 2*(cfg.nblocks//2)#2*(nframes-1)*ppf+4
+        # isize = edict({'h':H-pad,'w':W-pad})
 
         # -- flows to numpy --
         is_even = cfg.frame_size%2 == 0
@@ -276,7 +288,7 @@ def execute_experiment(cfg):
 
         # -- PSNRs --
         aligned = remove_frame_centers(aligned)
-        psnrs = compute_frames_psnr(aligned,isize)
+        psnrs = compute_frames_psnr(aligned,psize)
 
         # -- print report ---
         print("\n"*3) # banner

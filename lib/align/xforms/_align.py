@@ -20,7 +20,8 @@ from ._blocks2pix import blocks_to_pix
 
 
 def align_from_flow(burst,flow,nblocks,centers=None,isize=None):
-    pix = flow_to_pix(flow,centers,isize)
+    nframes = burst.shape[0]
+    pix = flow_to_pix(flow,nframes,centers,isize)
     return align_from_pix(burst,pix,nblocks)
 
 def align_from_blocks(burst,blocks,nblocks,centers=None,isize=None):
@@ -68,9 +69,8 @@ def verify_burst_pix_sizes(burst,pix):
     nsamples = pix.shape[0]
     assert nsamples % npix == 0,"Must be a multiple of number of pixels."
 
-# @jit(nopython=True)
+@jit(nopython=True)
 def align_from_pix_numba(aligned,burst,pix,nblocks):
-    print("not numba.")
     nframes,nimages,c,h_pad,w_pad = burst.shape
     pad = nblocks//2
     h = h_pad - 2*pad
@@ -88,8 +88,8 @@ def align_from_pix_numba(aligned,burst,pix,nblocks):
                 b_col,b_row = xy_xfer[0],xy_xfer[1]
                 # if 15 < r_row and r_row < 18 and 15 < r_col and r_col < 18:
                 #     print(r_row,r_col,b_row,b_col)
-                if 30 < r_row and r_row < 32 and 30 < r_col and r_col < 32:
-                    print(r_row,r_col,b_row,b_col)
+                # if 30 < r_row and r_row < 32 and 30 < r_col and r_col < 32:
+                #     print(r_row,r_col,b_row,b_col)
 
                 b_row,b_col = b_row+pad,b_col+pad
                 # r_row,r_col = r_row+pad,r_col+pad

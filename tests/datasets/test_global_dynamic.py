@@ -98,7 +98,35 @@ def convert_keys(sample):
         if field2 != field1: del sample[field1]
     return sample
 
+def warp_burst_flow(burst, flows):
+    nframes,nimages,ncolor,h,w = burst.shape
+    flows = rearrange(flows,'i (h w) tm1 two -> tm1 i h w two',h=h)
+    # flows = torch.flip(flows,(-1,))
+    burst = rearrange(burst,'t i c h w -> t i h w c')
+    wbatch = []
+    for i in range(nimages):
+        warped = []
+        for t in range(nframes):
+            if t == nframes//2:
+                warped.append(burst[t,i])
+                continue
+            if t > nframes//2: t_f = t
+            else: t_f = t
+            img,flow = burst[t,i].numpy(),flows[t_f,i].numpy()
+            img = img.astype(np.float32)
+            flow = flow.astype(np.float32)
+            # flow[...,1] = -flow[...,1]
+            wimg = warp_flow(img,-flow)
+            wimg = torch.FloatTensor(wimg)
+            warped.append(wimg)
+        warped = torch.stack(warped)
+        wbatch.append(warped)
+    wbatch = rearrange(torch.stack(wbatch),'i t h w c -> t i c h w')
+    return wbatch
+        
 def warp_flow(img, flow):
+    print("[warp_flow]: img.shape flow.shape ",img.shape,flow.shape)
+    print("[warp_flow]: img.dtype flow.dtype ",img.dtype,flow.dtype)
     h, w = flow.shape[:2]
     flow = -flow
     flow[:,:,0] += np.arange(w)
@@ -160,7 +188,7 @@ def test_global_dynamics():
 
         isize = edict({'h':h,'w':w})
         # pad = cfg.patchsize//2 if cfg.patchsize > 1 else 1
-        pad = cfg.patchsize//2+1
+        pad = cfg.nblocks//2+1
         psize = edict({'h':h-2*pad,'w':w-2*pad})
         flow_gt = repeat(flow,'i fm1 two -> i s fm1 two',s=h*w)
         pix_gt = flow_to_pix(flow_gt.clone(),nframes,isize=isize)
@@ -170,14 +198,14 @@ def test_global_dynamics():
         nnf_vals,nnf_pix = compute_burst_nnf(clean,nframes//2,cfg.patchsize)
         shape_str = 't b h w two -> b (h w) t two'
         pix_global = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
-
+        flow_global = pix_to_flow(pix_global.clone())
+        # aligned_gt = warp_burst_flow(clean, flow_global)
         aligned_gt = align_from_pix(clean,pix_gt,cfg.nblocks)
+        # isize = edict({'h':h,'w':w})
+        # aligned_gt = align_from_flow(clean,flow_global,cfg.nblocks,isize=isize)
         # psnr = compute_aligned_psnr(sclean[[nframes//2]],clean[[nframes//2]],psize)
         psnr = compute_aligned_psnr(sclean,aligned_gt,psize)
         print(f"[GT Alignment] PSNR: {psnr}")
-        print(pix_global[0,mid_pix])
-        print(pix_gt[0,mid_pix])
-        print(flow_gt[0,mid_pix])
 
 
         # -- compute with nvidia's opencv optical flow --
@@ -187,24 +215,41 @@ def test_global_dynamics():
         for t in range(nframes):
             if t == ref_t:
                 frames.append(nd_clean[t][None,:])
+                flows.append(torch.zeros(flows[-1].shape))
                 continue
             from_frame = 255.*cv2.cvtColor(nd_clean[ref_t],cv2.COLOR_RGB2GRAY)
             to_frame = 255.*cv2.cvtColor(nd_clean[t],cv2.COLOR_RGB2GRAY)
             _flow = cv2.calcOpticalFlowFarneback(to_frame,from_frame,None,
-                                                 0.5,1,3,10,5,1.2,0)
-            w_frame = warp_flow(nd_clean[t], _flow)
-            print("w_frame.shape ",w_frame.shape)
-            flows.append(_flow)
+                                                 0.5,3,3,10,5,1.2,0)
+            _flow = np.round(_flow).astype(np.float32) # not good for later
+            w_frame = warp_flow(nd_clean[t], -_flow)
+            _flow[...,0] = -_flow[...,0] # my OF is probably weird.
+            # print("w_frame.shape ",w_frame.shape)
+            flows.append(torch.FloatTensor(_flow))
             frames.append(torch.FloatTensor(w_frame[None,:]))
-        flows = np.stack(flows)
+        flows = torch.stack(flows)
+        flows = rearrange(flows,'t h w two -> 1 (h w) t two')
         frames = torch.FloatTensor(np.stack(frames))
         frames = rearrange(frames,'t i h w c -> t i c h w')
-        print("flows.shape ",flows.shape)
-        print("frames.shape ",frames.shape)
-        print("sclean.shape ",sclean.shape)
-        print(flows[:,16,16])
+        # print("flows.shape ",flows.shape)
+        # print("frames.shape ",frames.shape)
+        # print("sclean.shape ",sclean.shape)
         psnr = compute_aligned_psnr(sclean,frames,psize)
         print(f"[NVOF Alignment] PSNR: {psnr}")
+
+        pix_nvof = flow_to_pix(flows.clone(),nframes,isize=isize)
+        aligned_nvof = align_from_pix(clean,pix_nvof,cfg.nblocks)
+        psnr = compute_aligned_psnr(sclean,aligned_nvof,psize)
+        print(f"[NVOF Alignment v2] PSNR: {psnr}")
+
+        psnr = compute_aligned_psnr(frames,aligned_nvof,psize)
+        print(f"[NVOF Alignment Methods] PSNR: {psnr}")
+
+        print(pix_global[0,mid_pix])
+        print(pix_gt[0,mid_pix])
+        print(flow_global[0,mid_pix])
+        print(flow_gt[0,mid_pix])
+        print(flows[0,mid_pix])
 
 
         #
@@ -224,6 +269,7 @@ def test_global_dynamics():
         fn = image_dir / "aligned_gt.png"
         save_image(cc(aligned_gt),fn,normalize=True,vrange=None)
 
+        # return
 
         # -- NNF Global --
         nnf_vals,nnf_pix = compute_burst_nnf(clean,nframes//2,cfg.patchsize)

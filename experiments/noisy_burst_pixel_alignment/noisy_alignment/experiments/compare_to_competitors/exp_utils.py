@@ -49,6 +49,7 @@ def compute_flows_epe_wrt_ref(flows,ref):
     epes = edict()
     for field in flows.keys():
         if field in skip_fields: continue
+        print(field,ref,flows[field].shape,flows[ref].shape)
         epes[field] = compute_epe(flows[field],flows[ref])
     return epes
 
@@ -80,6 +81,7 @@ def print_runtimes(runtimes):
     print("[Ave [Simple]]: %2.3e" % runtimes.ave_simp)
     print("[Ave]: %2.3e" % runtimes.ave)
     print("[Proposed]: %2.3e" % runtimes.est)
+    print("[NVOF]: %2.3e" % runtimes.nvof)
 
 def print_verbose_epes(epes_of,epes_nnf):
     print("-"*50)
@@ -96,6 +98,8 @@ def print_verbose_epes(epes_of,epes_nnf):
     print(epes_of.ave)
     print("Proposed v.s. Optical Flow.")
     print(epes_of.est)
+    print("NVOF v.s. Optical Flow.")
+    print(epes_of.nvof)
 
     print("Split v.s. NNF")
     print(epes_nnf.split)
@@ -105,6 +109,8 @@ def print_verbose_epes(epes_of,epes_nnf):
     print(epes_nnf.ave)
     print("Proposed v.s. NNF")
     print(epes_nnf.est)
+    print("NVOF v.s. NNF")
+    print(epes_nnf.nvof)
 
 def print_summary_epes(epes_of,epes_nnf):
     print("-"*50)
@@ -115,10 +121,12 @@ def print_summary_epes(epes_of,epes_nnf):
     print("[Ave [Simple] v.s. Optical Flow]: %2.3f" % epes_of.ave_simp.mean().item())
     print("[Ave v.s. Optical Flow]: %2.3f" % epes_of.ave.mean().item())
     print("[Proposed v.s. Optical Flow]: %2.3f" % epes_of.est.mean().item())
+    print("[NVOF v.s. Optical Flow]: %2.3f" % epes_of.nvof.mean().item())
     print("[Split v.s. NNF]: %2.3f" % epes_nnf.split.mean().item())
     print("[Ave [Simple] v.s. NNF]: %2.3f" % epes_nnf.ave_simp.mean().item())
     print("[Ave v.s. NNF]: %2.3f" % epes_nnf.ave.mean().item())
     print("[Proposed v.s. NNF]: %2.3f" % epes_nnf.est.mean().item())
+    print("[NVOF v.s. NNF]: %2.3f" % epes_nnf.nvof.mean().item())
 
 def print_verbose_psnrs(psnrs):
     print("-"*50)
@@ -137,6 +145,8 @@ def print_verbose_psnrs(psnrs):
     print(psnrs.ave)
     print("Proposed [new method]")
     print(psnrs.est)
+    print("NVOF")
+    print(psnrs.nvof)
 
 def print_delta_summary_psnrs(psnrs):
     print("-"*50)
@@ -147,10 +157,12 @@ def print_delta_summary_psnrs(psnrs):
     delta_ave_simp = psnrs.nnf - psnrs.ave_simp
     delta_ave = psnrs.nnf - psnrs.ave
     delta_est = psnrs.nnf - psnrs.est
+    delta_nvof = psnrs.nnf - psnrs.nvof
     print("ave([NNF] - [Split]): %2.3f" % delta_split.mean().item())
     print("ave([NNF] - [Ave [Simple]]): %2.3f" % delta_ave_simp.mean().item())
     print("ave([NNF] - [Ave]): %2.3f" % delta_ave.mean().item())
     print("ave([NNF] - [Proposed]): %2.3f" % delta_est.mean().item())
+    print("ave([NNF] - [NVOF]): %2.3f" % delta_nvof.mean().item())
 
 def print_summary_psnrs(psnrs):
     print("-"*50)
@@ -163,7 +175,7 @@ def print_summary_psnrs(psnrs):
     print("[Ave [Simple]]: %2.3f" % psnrs.ave_simp.mean().item())
     print("[Ave]: %2.3f" % psnrs.ave.mean().item())
     print("[Proposed]: %2.3f" % psnrs.est.mean().item())
-
+    print("[NVOF]: %2.3f" % psnrs.nvof.mean().item())
 
 def print_nnf_acc(nnf_acc):
     print("-"*50)
@@ -178,6 +190,8 @@ def print_nnf_acc(nnf_acc):
     print(nnf_acc.ave)
     print("Proposed v.s. NNF")
     print(nnf_acc.est)
+    print("Proposed v.s. NNF")
+    print(nnf_acc.nvof)
 
 def print_nnf_local_acc(nnf_acc):
     print("-"*50)
@@ -192,5 +206,7 @@ def print_nnf_local_acc(nnf_acc):
     print(nnf_acc.ave)
     print("Proposed v.s. NNF")
     print(nnf_acc.est)
+    print("NVOF v.s. NNF")
+    print(nnf_acc.nvof)
 
 

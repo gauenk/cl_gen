@@ -52,7 +52,7 @@ def blocks_to_flow_serial(blocks,nblocks):
     flow = torch.LongTensor(flow)
     return flow
 
-def blocks_to_flow(blocks,nblocks):
+def blocks_to_flow(blocks,nblocks,ftype='ref'):
 
     # -- required dims --
     nimages,npix,nframes = blocks.shape
@@ -60,8 +60,13 @@ def blocks_to_flow(blocks,nblocks):
     # -- compute conversion --
     blocks = torch_to_numpy(blocks)
     blocks = rearrange(blocks,'i p t -> (i p) t')
-    flow = blocks_to_flow_numba(blocks,nblocks)
-    flow = rearrange(flow,'(i p) tm1 two -> i p tm1 two',i=nimages)
+    if ftype == 'ref':
+        flow = blocks_to_ref_flow_numba(blocks,nblocks)
+    elif ftype == 'seq':
+        flow = blocks_to_seq_flow_numba(blocks,nblocks)        
+    else:
+        raise ValueError(f"Uknown input {ftype}")
+    flow = rearrange(flow,'(i p) tprime two -> i p tprime two',i=nimages)
 
     # -- back to torch --
     flow = torch.LongTensor(flow)
@@ -69,7 +74,52 @@ def blocks_to_flow(blocks,nblocks):
     return flow
 
 @jit(nopython=True)
-def blocks_to_flow_numba(blocks,nblocks):
+def blocks_to_ref_flow_numba(blocks,nblocks):
+    r"""
+    flow 
+    """
+    B,T = blocks.shape[:2]
+    grid = np.arange(nblocks**2).reshape(nblocks,nblocks).astype(np.int64)
+    flow = np.zeros((B,T,2))
+    ref_t,ref_bl = T//2,nblocks//2
+    for b in range(B):
+        block_b = blocks[b]
+        coords = np.zeros((T,2),dtype=np.int64)
+        for t in range(T):
+
+            # -- not numba friendly --
+            # coord = np.r_[np.where(grid == block_b[t])]
+            # coords[t,:] = coord
+
+            # -- numba friendly --
+            coords_t = np.where(grid == block_b[t])            
+            coords[t,0] = coords_t[0][0]
+            coords[t,1] = coords_t[1][0]
+
+        # -- x <-> y swap -- rows are "y" and cols are "x" -- want (x,y)
+        coords = coords[:,::-1] 
+
+        # -- Top-Left_Matrix_coordinates -> Obj_Spatial_coordinates --
+        # coords[:,0] *= -1 
+
+        # -- compute the flow --
+        # coords[:,0] = np.ediff1d(coords[:,0],0)
+        # coords[:,1] = np.ediff1d(coords[:,1],0)
+
+        # -- remove the last one -- it's value is [0,0] --
+        # flow_b = coords[:-1] 
+        coords = coords[T//2] - coords
+        # -- flip yaxis --
+        coords[:,1] *= -1
+
+        flow[b] = coords
+
+    # flow = np.stack(flow)
+    # flow = torch.LongTensor(flow)
+    return flow
+
+@jit(nopython=True)
+def blocks_to_seq_flow_numba(blocks,nblocks):
     r"""
     flow 
     """
