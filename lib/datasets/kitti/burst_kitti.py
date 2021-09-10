@@ -11,7 +11,7 @@ import torch
 
 # -- project imports --
 from datasets.common import get_loader
-from datasets.kitti.burst_reader import read_dataset,read_dataset_testing
+from datasets.kitti.burst_reader import read_dataset_paths,read_dataset_testing,read_dataset_sample
 from datasets.transforms import get_noise_transform
 from datasets.kitti.paths import get_kitti_path
 
@@ -27,17 +27,17 @@ class BurstKITTI():
         self.noise_info = noise_info
         self.nnf_K = nnf_K
         self.nnf_ps = nnf_ps
-        read_resize = (370, 1224)
+        self.read_resize = (370, 1224)
         parts = self._get_split_parts_name(split)
-        self.dataset = self._read_dataset(paths,edition,parts,nframes,
-                                          read_resize,nnf_K,nnf_ps)
+        self.dataset = self._read_dataset_paths(paths,edition,parts,nframes,
+                                                self.read_resize,nnf_K,nnf_ps)
         self.noise_xform = get_noise_transform(noise_info)
 
-    def _read_dataset(self,paths,edition,parts,nframes,read_resize,nnf_K,nnf_ps):
+    def _read_dataset_paths(self,paths,edition,parts,nframes,read_resize,nnf_K,nnf_ps):
         if parts in ["train","val","mixed"]:
-            return read_dataset(paths,edition,parts,nframes,
-                                resize=read_resize,
-                                nnf_K = nnf_K, nnf_ps = nnf_ps)
+            return read_dataset_paths(paths,edition,parts,nframes,
+                                      resize=read_resize,
+                                      nnf_K = nnf_K, nnf_ps = nnf_ps)
         elif parts in ["test"]:
             ds = read_dataset_testing(paths,edition,nframes,
                                       resize=read_resize,
@@ -58,14 +58,23 @@ class BurstKITTI():
 
     def __getitem__(self,index):
         
-        # -- extract images --
-        ref_t = torch.FloatTensor(self.dataset['ref_t'][index])
-        burst = torch.FloatTensor(self.dataset['burst'][index])
-        ref_frame = torch.FloatTensor(self.dataset['ref_frame'][index])
-        flows = torch.FloatTensor(self.dataset['flows'][index])
-        occs = torch.FloatTensor(self.dataset['occs'][index])
-        nnf_vals = torch.FloatTensor(self.dataset['nnf_vals'][index])
-        nnf_locs = torch.FloatTensor(self.dataset['nnf_locs'][index])
+        # -- read sample --
+        burst_id = dataset['burst_id'][index]
+        ref_t = dataset['ref_t'][index]
+        nframes = dataset['nframes'][index]
+        edition = dataset['edition'][index]
+        data = read_dataset_sample(burst_id,ref_t,nframes,edition,
+                                   resize = self.read_resize,
+                                   nnf_K = self.nnf_K, nnf_ps = self.nnf_ps)
+
+        # -- extract data --
+        ref_t = torch.FloatTensor(data['ref_t'])
+        burst = torch.FloatTensor(data['burst'])
+        ref_frame = torch.FloatTensor(data['ref_frame'])
+        flows = torch.FloatTensor(data['flows'])
+        occs = torch.FloatTensor(data['occs'])
+        nnf_vals = torch.FloatTensor(data['nnf_vals'])
+        nnf_locs = torch.FloatTensor(data['nnf_locs'])
 
         # -- apply noise --
         nframes = len(burst)

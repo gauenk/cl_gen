@@ -125,9 +125,6 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
     dataset['burst_id'] = []
     dataset['edition'] = []
     dataset['ref_t'] = []
-    dataset['flow'] = []
-    dataset['occ'] = []
-    dataset['ref'] = []
 
     rs_nnf = 'default' if resize is None else '{:d}_{:d}'.format(*resize)
     nnf_mid_path = Path("%s_%d" % (rs_nnf,nnf_ps))
@@ -164,49 +161,11 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
             # -- extract reference frame from info --
             ref_t = int(burst_info.loc[burst_id]['ref_t'])
 
-            # -- 
+            # -- append dataset info --
             dataset['burst_id'].append(burst_id)
             dataset['edition'].append(edition)
             dataset['ref_t'].append(ref_t)
             dataset['nframes'].append(burst_nframes)
-
-            ref_path = os.path.join(path_images, '%s_%02d.png' % (burst_id, ref_t))
-            ref_frame = tvF.to_tensor(Image.open(ref_path).convert("RGB"))
-            frame_ids = np.arange(ref_t-nframes//2,ref_t+math.ceil(nframes/2))            
-
-            # -- loop over frames --            
-            for t in range(nframes):
-
-                # -- load image and compute nnf --
-                fid = '%02d' % frame_ids[t]
-                
-                # -- load frame burst info --
-                inputs = [burst_id,ref_t,fid,paths,crop,resize,nnf_K]
-                info = read_frame_info(*inputs)
-                frame,nnf_loc,nnf_val,flow,occ = info
-
-                # -- append to frame burst sample --
-                burst.append(frame)
-                nnf_locs.append(nnf_loc)
-                nnf_vals.append(nnf_val)
-                flows.append(flow)
-                occs.append(occ)
-
-            # -- concat results --
-            burst = np.stack(burst)
-            nnf_locs = np.stack(nnf_loc)
-            nnf_vals = np.stack(nnf_vals)
-            flows = np.stack(flows)
-            occs = np.stack(occs)
-
-            # -- append to dataset --
-            dataset['burst'].append(burst)
-            dataset['nnf_locs'].append(nnf_locs)
-            dataset['nnf_vals'].append(nnf_vals)
-            dataset['flow'].append(flows)
-            dataset['occ'].append(occs)
-            dataset['ref'].append(ref_frame)
-            dataset['ref_t'].append(ref_t)
 
     return dataset
 
