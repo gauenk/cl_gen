@@ -209,4 +209,27 @@ def print_nnf_local_acc(nnf_acc):
     print("NVOF v.s. NNF")
     print(nnf_acc.nvof)
 
+def is_converted(sample,translate):
+    for key1,key2 in translate.items():
+        if not(key2 in sample): return False
+    return True
+
+def convert_keys(sample):
+
+    translate = {'noisy':'dyn_noisy',
+                 'burst':'dyn_clean',
+                 'snoisy':'static_noisy',
+                 'sburst':'static_clean',
+                 'ref_flow':'flow_gt',
+                 'seq_flow':'seq_flow',
+                 'index':'image_index'}
+
+    if is_converted(sample,translate): return sample
+    for field1,field2 in translate.items():
+        if not(field1 in sample): continue
+        sample[field2] = sample[field1]
+        if field2 != field1: del sample[field1]
+    return sample
+
+
 

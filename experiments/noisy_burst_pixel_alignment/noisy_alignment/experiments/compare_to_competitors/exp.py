@@ -105,13 +105,15 @@ def execute_experiment(cfg):
         # -- sample & unpack batch --
         sample = next(image_iter)
         sample_to_cuda(sample)
+        convert_keys(sample)
+        
 
-        dyn_noisy = sample['noisy'] # dynamics and noise
-        dyn_clean = sample['burst'] # dynamics and no noise
-        static_noisy = sample['snoisy'] # no dynamics and noise
-        static_clean = sample['sburst'] # no dynamics and no noise
-        flow_gt = sample['ref_flow']
-        image_index = sample['index']
+        dyn_noisy = sample['dyn_noisy'] # dynamics and noise
+        dyn_clean = sample['dyn_clean'] # dynamics and no noise
+        static_noisy = sample['static_noisy'] # no dynamics and noise
+        static_clean = sample['static_burst'] # no dynamics and no noise
+        nnf = sample['nnf']
+        image_index = sample['image_index']
         tl_index = sample['tl_index']
         rng_state = sample['rng_state']
         if cfg.noise_params.ntype == "pn":

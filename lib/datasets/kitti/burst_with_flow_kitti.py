@@ -5,21 +5,20 @@ import numpy as np
 import numpy.random as npr
 from pathlib import Path
 from easydict import EasyDict as edict
-import tqdm
 
 # -- pytorch imports --
 import torch
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from datasets.common import get_loader,return_optional
-from datasets.kitti.burst_reader import read_dataset_paths,read_dataset_testing,read_dataset_sample
+from datasets.common import get_loader
+from datasets.kitti.burst_with_flow_reader import read_dataset_paths,read_dataset_testing,read_dataset_sample
 from datasets.transforms import get_noise_transform
 from datasets.kitti.paths import get_kitti_path
 
-class BurstKITTI():
+class BurstWithFlowKITTI():
 
-    def __init__(self,root,split,edition,nframes,noise_info,nnf_K,nnf_ps,nnf_exists=True):
+    def __init__(self,root,split,edition,nframes,noise_info,nnf_K,nnf_ps):
         self.root = root
         paths = get_kitti_path(root)
         self.edition = edition
@@ -30,25 +29,21 @@ class BurstKITTI():
         self.noise_info = noise_info
         self.nnf_K = nnf_K
         self.nnf_ps = nnf_ps
-        self.nnf_exists = nnf_exists
         self.read_resize = (370, 1224)
         parts = self._get_split_parts_name(split)
         self.dataset = self._read_dataset_paths(paths,edition,parts,nframes,
-                                                self.read_resize,nnf_K,nnf_ps,nnf_exists)
+                                                self.read_resize,nnf_K,nnf_ps)
         self.noise_xform = get_noise_transform(noise_info,use_to_tensor=False)
 
-    def _read_dataset_paths(self,paths,edition,parts,nframes,
-                            read_resize,nnf_K,nnf_ps,nnf_exists=True):
+    def _read_dataset_paths(self,paths,edition,parts,nframes,read_resize,nnf_K,nnf_ps):
         if parts in ["train","val","mixed"]:
             return read_dataset_paths(paths,edition,parts,nframes,
                                       resize=read_resize,
-                                      nnf_K = nnf_K, nnf_ps = nnf_ps,
-                                      nnf_exists=nnf_exists)
+                                      nnf_K = nnf_K, nnf_ps = nnf_ps)
         elif parts in ["test"]:
             return read_dataset_testing(paths,edition,nframes,
                                         resize=read_resize,
-                                        nnf_K = nnf_K, nnf_ps = nnf_ps,
-                                        nnf_exists=nnf_exists)
+                                        nnf_K = nnf_K, nnf_ps = nnf_ps)
         else: raise ValueError(f"[KITTI: read_dataset] Uknown part [{parts}]")
             
     def _get_split_parts_name(self,split):
@@ -59,35 +54,25 @@ class BurstKITTI():
         else: raise ValueError(f"[KITTI: get_split_parts_name] Uknown split [{split}]")
         return parts
         
-    def _set_random_state(self,rng_state):
-        torch.set_rng_state(rng_state['th'])
-        np.random.set_state(rng_state['np'])
-
-    def _get_random_state(self):
-        th_rng_state = torch.get_rng_state()
-        np_rng_state = np.random.get_state()
-        rng_state = edict({'th':th_rng_state,'np':np_rng_state})
-        return rng_state
-
     def __len__(self):
         return len(self.dataset['burst_id'])
 
     def __getitem__(self,index):
         
-        # -- get random state --
-        rng_state = self._get_random_state()
-
         # -- read sample --
         burst_id = self.dataset['burst_id'][index]
+        ref_t = self.dataset['ref_t'][index]
         edition = self.dataset['edition'][index]
-        fstart = self.dataset['fstart'][index]
-        data = read_dataset_sample(burst_id,self.nframes,edition,fstart,
+        data = read_dataset_sample(burst_id,ref_t,self.nframes,edition,
                                    self.istest,path=self.paths,
                                    resize = self.read_resize,
                                    nnf_K = self.nnf_K, nnf_ps = self.nnf_ps)
 
         # -- extract data --
         burst = torch.FloatTensor(data['burst'])
+        ref_frame = tvF.to_tensor(data['ref_frame'])
+        flows = torch.FloatTensor(data['flows'])
+        occs = torch.FloatTensor(data['occs'])
         nnf_vals = torch.FloatTensor(data['nnf_vals'])
         nnf_locs = torch.FloatTensor(data['nnf_locs'])
 
@@ -100,31 +85,16 @@ class BurstKITTI():
         noisy = torch.stack(noisy,dim=0)
 
         # -- create static iid noisy samples --
-        sclean = repeat(clean[nframes//2],'c h w -> t c h w',t=nframes)
-        snoisy = [self.noise_xform(burst[nframes//2]) for l in range(nframes)]
-        snoisy = torch.stack(snoisy,dim=0)
+        iid = [self.noise_xform(ref_frame) for l in range(nframes)]
+        iid = torch.stack(iid,dim=0)
 
         # -- create sample --
-        sample = {'dyn_clean':clean,'dyn_noisy':noisy,
-                  'static_clean':static_clean,
-                  'static_noisy':static_noisy,
-                  'nnf_vals':nnf_vals,'nnf':nnf_locs,
-                  'nnf_locs':nnf_locs,'image_index':index,
-                  'flow':None,'rng_state':rng_state}
+        sample = {'clean':clean,'noisy':noisy,'flows':flows,
+                  'occs':occs,'iid':iid,'nnf_vals':nnf_vals,
+                  'nnf_locs':nnf_locs,'index':index}
         return sample
 
-def write_burst_kitti_nnf(cfg):
-    cfg.dataset.nnf_exists = False
-    data,loader = get_burst_kitti_dataset(cfg,"dynamic")
-    # -- iterating through dataset will write the nnf --
-    for split in data.keys():
-        print(split)
-        if not(split == "te"): continue
-        for i in tqdm.tqdm(range(len(data[split]))):
-            data[split][i] # this will write the missing nnfs 
-            del data[split][i]
-
-def get_burst_kitti_dataset(cfg,mode):
+def get_burst_with_flow_kitti_dataset(cfg,mode):
     root = cfg.dataset.root
     root = Path(root)/Path("kitti")
     data = edict()
@@ -132,17 +102,13 @@ def get_burst_kitti_dataset(cfg,mode):
     rtype = 'dict' if cfg.dataset.dict_loader else 'list'
     nnf_K = 3
     nnf_ps = 3
-    nnf_exists = return_optional(cfg.dataset,'nnf_exists',True)
     if mode == "dynamic":
         edition = "2015"
         nframes = cfg.nframes
         noise_info = cfg.noise_params
-        data.tr = BurstKITTI(root,"train",edition,nframes,noise_info,
-                             nnf_K,nnf_ps,nnf_exists)
-        data.val = BurstKITTI(root,"val",edition,nframes,noise_info,
-                              nnf_K,nnf_ps,nnf_exists)
-        data.te = BurstKITTI(root,"test",edition,nframes,noise_info,
-                             nnf_K,nnf_ps,nnf_exists)
+        data.tr = BurstWithFlowKITTI(root,"train",edition,nframes,noise_info,nnf_K,nnf_ps)
+        data.val = BurstWithFlowKITTI(root,"val",edition,nframes,noise_info,nnf_K,nnf_ps)
+        data.te = BurstWithFlowKITTI(root,"test",edition,nframes,noise_info,nnf_K,nnf_ps)
     else: raise ValueError(f"Unknown KITTI mode {mode}")
 
     loader = get_loader(cfg,data,batch_size,mode)

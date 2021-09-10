@@ -139,10 +139,15 @@ class WrapperDataset():
 
         return sample
 
-class ResampleWrapperDataset():
 
-    def __init__(self,wrapper_data,records):
-        self.wrapper_dataset = wrapper_data
+class ResampleDataset():
+    """
+    Resample the exact same dataset with the 
+        --> Same Random Numbers <--
+    """
+
+    def __init__(self,dataset,records):
+        self.dataset = dataset
         self.records = records
 
     def __len__(self):
@@ -170,15 +175,16 @@ class ResampleWrapperDataset():
         self._set_random_state(info['rng_state'])
 
         # -- get sample --
-        sample = self.wrapper_dataset[info['image_index']]
+        sample = self.dataset[info['image_index']]
 
         # -- restore original random state --
         self._set_random_state(rng_state)
 
         return sample
 
-
-        
+class ResampleWrapperDataset(ResampleDataset):
+    def __init__(self,wrapper_data,records):
+        self.super().__init__(wrapper_data,records)
 
 def sample_to_cuda(sample):
     for key in sample.keys():

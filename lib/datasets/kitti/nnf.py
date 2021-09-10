@@ -26,6 +26,7 @@ from pyutils import tile_patches,flow_to_color,save_image
 from align.nnf import compute_nnf
 from datasets.kitti.paths import get_kitti_path
 from datasets.kitti.burst_reader import dir_to_burst_info
+from datasets.kitti.nnf_io import write_nnf
 
 def check_nnf_dataset_exists(path_nnf):
     if not path_nnf.exists(): path_nnf.mkdir(parents=True)
@@ -60,6 +61,7 @@ def check_frame_nnf_exists(path_nnf,burst_id,fid,ref_t,K):
 
 def create_nnf_dataset(path, patchsize, resize, K=10,
                        editions = 'mixed', parts = 'mixed'):
+    nnf_K = K
     ps = patchsize
     rs_nnf = 'default' if resize is None else '{:d}_{:d}'.format(*resize)
     nnf_mid_path = Path("%s_%d" % (rs_nnf,ps))
@@ -70,6 +72,7 @@ def create_nnf_dataset(path, patchsize, resize, K=10,
         path_nnf = Path(path[edition + 'nnf']) / nnf_mid_path
         if check_nnf_dataset_exists(path_nnf): continue
         num_files = len(os.listdir(path_images)) - 1
+        paths = edict({'images':path_images,'flows':path_flows,'nnf':path_nnf})
         
         # -- loop over burst images --
         burst_ids = burst_info.index.to_list()
@@ -78,6 +81,7 @@ def create_nnf_dataset(path, patchsize, resize, K=10,
             # -- load burst reference --
             nframes = int(burst_info.loc[burst_id]['nframes'])
             ref_t = int(burst_info.loc[burst_id]['ref_t'])
+            ref_fid = '%02d' % ref_t
             frame_ids = np.arange(ref_t-nframes//2,ref_t+math.ceil(nframes/2))
             ref_path = os.path.join(path_images, '%s_%02d.png' % (burst_id, ref_t))
             ref_img  = tvF.to_tensor(Image.open(ref_path).convert("RGB"))
@@ -95,18 +99,7 @@ def create_nnf_dataset(path, patchsize, resize, K=10,
                 frame_path = os.path.join(path_images, '%s_%s.png' % (burst_id, fid))
                 img = tvF.to_tensor(Image.open(frame_path).convert("RGB"))
                 vals,locs = compute_nnf(ref_img,img,patchsize)
-                # fn = "./test_nnf_vis.png"
-                # visualize_nnf(fn,vals,locs)
-
-                # -- path for nnf --
-                for k in range(K):
-                    loc_str = "loc_%s_%02d_%s_%02d.pt" % (burst_id,ref_t,fid,k)
-                    val_str = "val_%s_%02d_%s_%02d.pt" % (burst_id,ref_t,fid,k)
-                    path_nnf_loc = path_nnf / loc_str
-                    path_nnf_val = path_nnf / val_str
-                    vals_k,locs_k = vals[:,:,k],locs[:,:,k]
-                    torch.save(vals_k,path_nnf_val)
-                    torch.save(locs_k,path_nnf_loc)
+                write_nnf(vols,locs,burst_id,ref_fid,fid,paths.nnf,nnf_K)
 
 def create_kitti_nnf(root,patchsize,resize,K):
     path = get_kitti_path(root)
