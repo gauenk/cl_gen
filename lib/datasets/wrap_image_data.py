@@ -12,7 +12,7 @@ import torchvision.transforms as tvT
 # -- project --
 from pyutils import print_tensor_stats
 from datasets import load_dataset
-from datasets.common import get_loader
+from datasets.common import get_loader,sample_to_cuda,dict_to_device,return_optional
 from datasets.transforms import get_noise_transform,get_dynamic_transform
 
 def load_image_dataset(cfg):
@@ -33,7 +33,7 @@ def load_image_dataset(cfg):
     wloader = get_loader(cfg,wdata,cfg.batch_size,None)
     return wdata,wloader
 
-def load_resample_dataset(cfg,records):
+def load_resample_dataset(cfg,records,use_wrapper=True):
 
     # -- sims from cfg --
     noise_fxn,dynamic_fxn = transforms_from_cfg(cfg)
@@ -42,12 +42,16 @@ def load_resample_dataset(cfg,records):
     cfg_copy = copy.deepcopy(cfg)
     cfg_copy.noise_params.ntype = 'none'
     cfg_copy.noise_params['none'] = {}
-    data,loader = load_dataset(cfg_copy,'denoising')
+    data,loader = load_dataset(cfg_copy,cfg_copy.dataset.mode)
+    full_image_index = return_optional(cfg_copy.dataset,'full_image_index',2)
 
     # -- wrapped --
     wdata = edict({})
     for key,value in data.items():
-        wrapper = WrapperDataset(value,noise_fxn,dynamic_fxn)
+        if use_wrapper:
+            wrapper = WrapperDataset(value,noise_fxn,dynamic_fxn,full_image_index)
+        else:
+            wrapper = value
         wdata[key] = ResampleWrapperDataset(wrapper,records[key])
     wloader = get_loader(cfg,wdata,cfg.batch_size,None)
     return wdata,wloader
@@ -80,11 +84,12 @@ def transforms_from_cfg(cfg):
 
 class WrapperDataset():
 
-    def __init__(self,data,noise_fxn,dynamic_fxn):
+    def __init__(self,data,noise_fxn,dynamic_fxn,full_image_index=2):
         self.data = data
         self.noise_fxn = noise_fxn
         self.dynamic_fxn = dynamic_fxn
-        self.FULL_IMAGE_INDEX = 2 # from dataset object "data" such as PascalVoc
+        # from dataset object "data" such as PascalVoc
+        self.FULL_IMAGE_INDEX = full_image_index
         self.cuda = True
 
     def __len__(self):
@@ -184,16 +189,6 @@ class ResampleDataset():
 
 class ResampleWrapperDataset(ResampleDataset):
     def __init__(self,wrapper_data,records):
-        self.super().__init__(wrapper_data,records)
-
-def sample_to_cuda(sample):
-    for key in sample.keys():
-        if torch.is_tensor(sample[key]):
-            sample[key] = sample[key].cuda(non_blocking=True)
-
-def dict_to_device(sample,device):
-    for key in sample.keys():
-        if torch.is_tensor(sample[key]):
-            sample[key] = sample[key].to(device,non_blocking=True)
+        super(ResampleWrapperDataset, self).__init__(wrapper_data,records)
 
 

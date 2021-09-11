@@ -95,12 +95,12 @@ def run_exp(exp_info):
     compute_field_means(records,fields)
     
     # frecords = records[records['methods'].isin(['ave','est','split'])]
-    frecords = records[records['methods'].isin(['est','ave'])]
-    for img_index,igroup in frecords.groupby('image_index'):
-        print(img_index)
-        for nframes,fgroup in igroup.groupby('nframes'):
-            print(nframes)
-            print(fgroup[['std','patchsize','psnrs_mean','methods','random_seed']])
+    # frecords = records[records['methods'].isin(['est','ave'])]
+    # for img_index,igroup in frecords.groupby('image_index'):
+    #     print(img_index)
+    #     for nframes,fgroup in igroup.groupby('nframes'):
+    #         print(nframes)
+    #         print(fgroup[['std','patchsize','psnrs_mean','methods','random_seed']])
 
     # for elem in records[['std','bsname','psnrs_mean']].iterrows():
     #     print(elem)

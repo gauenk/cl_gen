@@ -101,6 +101,8 @@ def collate_dict(batch):
 
     # -- shape tensors --
     dim1 = ['burst','noisy','res','clean_burst','sburst','snoisy']
+    dim1 += ['dyn_clean','dyn_noisy','static_clean','static_noisy']
+    dim1 += ['nnf','nnf_locs','nnf_vals']
     for key,elem in fbatch.items():
         if key in dim1:
             fbatch[key] = torch.stack(elem,dim=1)
@@ -128,4 +130,13 @@ def set_torch_seed(worker_id):
     torch.manual_seed(torch.initial_seed() + worker_id)
     torch.cuda.manual_seed(torch.initial_seed() + worker_id)
 
+def sample_to_cuda(sample):
+    for key in sample.keys():
+        if torch.is_tensor(sample[key]):
+            sample[key] = sample[key].cuda(non_blocking=True)
+
+def dict_to_device(sample,device):
+    for key in sample.keys():
+        if torch.is_tensor(sample[key]):
+            sample[key] = sample[key].to(device,non_blocking=True)
 

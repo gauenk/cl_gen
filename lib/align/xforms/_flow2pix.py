@@ -24,9 +24,10 @@ def flow_to_pix(flow,nframes,centers=None,isize=None):
     nimages,npix,nframes_tilde,two = flow.shape
     centers = parse_inputs(nimages,isize,centers)
     centers = torch.LongTensor(centers).to(flow.device,non_blocking=True)
+    print(centers.shape,isize)
     c_nimages,c_npix,two = centers.shape
     assert nimages == c_nimages,"num of images must be eq."
-    assert npix == c_npix,"num of pixels must be eq."
+    assert npix == c_npix,f"num of pixels must be eq. [{npix} v.s. {c_npix}]"
 
     # -- create blocks --
     flow = rearrange(flow,'i p ttilde two -> (i p) ttilde two')

@@ -23,6 +23,7 @@ from pyplots.legend import add_legend
 # -- local imports --
 from .example_images import plot_example_images
 from .quality_v_noise import create_quality_v_noise_plot,create_ideal_v_noise_plot
+from .quality_v_runtime import create_quality_v_runtime_plot
 
 def plot_experiment(records,egrids,exp_cfgs):
     """
@@ -53,7 +54,8 @@ def plot_experiment(records,egrids,exp_cfgs):
 
     # -- quality v noise --
     # create_quality_v_noise_plot(records,egrids,exp_cfgs)
-    create_ideal_v_noise_plot(records,egrids,exp_cfgs)
+    # create_ideal_v_noise_plot(records,egrids,exp_cfgs)
+    create_quality_v_runtime_plot(records,egrids,exp_cfgs)
 
     # -- plot accuracy of methods  --
     import numpy as np
@@ -86,10 +88,8 @@ def plot_experiment(records,egrids,exp_cfgs):
         fn =  save_dir / f"./psnr_v_noise_{nframes}.png"
         plt.savefig(fn,transparent=True,bbox_inches='tight',dpi=300)
         plt.close('all')
-    
 
     print(records)
-
     print(records['methods'])
     sims = records[records['methods'].isin(['ave','est'])]
     sims = sims[sims['patchsize'].isin([7])]

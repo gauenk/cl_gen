@@ -9,6 +9,7 @@ from .yiheng import get_eccv2020_dataset
 from .rebel2021 import get_rebel2021_dataset
 from .rots import get_rots_dataset
 from .kitti import get_kitti_dataset,get_burst_kitti_dataset,get_burst_with_flow_kitti_dataset
+from .common import sample_to_cuda,dict_to_device
 
 def load_dataset(cfg,cfg_type):
     return get_dataset(cfg,cfg_type)

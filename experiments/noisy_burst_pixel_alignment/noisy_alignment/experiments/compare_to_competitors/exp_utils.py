@@ -82,6 +82,7 @@ def print_runtimes(runtimes):
     print("[Ave]: %2.3e" % runtimes.ave)
     print("[Proposed]: %2.3e" % runtimes.est)
     print("[NVOF]: %2.3e" % runtimes.nvof)
+    print("[FlowNetv2]: %2.3e" % runtimes.flownet)
 
 def print_verbose_epes(epes_of,epes_nnf):
     print("-"*50)
@@ -100,6 +101,8 @@ def print_verbose_epes(epes_of,epes_nnf):
     print(epes_of.est)
     print("NVOF v.s. Optical Flow.")
     print(epes_of.nvof)
+    print("FlowNetv2 v.s. Optical Flow.")
+    print(epes_of.flownet)
 
     print("Split v.s. NNF")
     print(epes_nnf.split)
@@ -111,6 +114,8 @@ def print_verbose_epes(epes_of,epes_nnf):
     print(epes_nnf.est)
     print("NVOF v.s. NNF")
     print(epes_nnf.nvof)
+    print("FlowNetv2 v.s. NNF")
+    print(epes_nnf.flownet)
 
 def print_summary_epes(epes_of,epes_nnf):
     print("-"*50)
@@ -127,6 +132,8 @@ def print_summary_epes(epes_of,epes_nnf):
     print("[Ave v.s. NNF]: %2.3f" % epes_nnf.ave.mean().item())
     print("[Proposed v.s. NNF]: %2.3f" % epes_nnf.est.mean().item())
     print("[NVOF v.s. NNF]: %2.3f" % epes_nnf.nvof.mean().item())
+    print("[FlowNetv2 v.s. NNF]: %2.ef" % epes_nnf.flownet.mean().item())
+
 
 def print_verbose_psnrs(psnrs):
     print("-"*50)
@@ -147,6 +154,8 @@ def print_verbose_psnrs(psnrs):
     print(psnrs.est)
     print("NVOF")
     print(psnrs.nvof)
+    print("FlowNetv2")
+    print(psnrs.flownet)
 
 def print_delta_summary_psnrs(psnrs):
     print("-"*50)
@@ -158,11 +167,13 @@ def print_delta_summary_psnrs(psnrs):
     delta_ave = psnrs.nnf - psnrs.ave
     delta_est = psnrs.nnf - psnrs.est
     delta_nvof = psnrs.nnf - psnrs.nvof
+    delta_flownet = psnrs.nnf - psnrs.flownet
     print("ave([NNF] - [Split]): %2.3f" % delta_split.mean().item())
     print("ave([NNF] - [Ave [Simple]]): %2.3f" % delta_ave_simp.mean().item())
     print("ave([NNF] - [Ave]): %2.3f" % delta_ave.mean().item())
     print("ave([NNF] - [Proposed]): %2.3f" % delta_est.mean().item())
     print("ave([NNF] - [NVOF]): %2.3f" % delta_nvof.mean().item())
+    print("ave([NNF] - [FlowNet]): %2.3f" % delta_flownet.mean().item())
 
 def print_summary_psnrs(psnrs):
     print("-"*50)
@@ -176,6 +187,7 @@ def print_summary_psnrs(psnrs):
     print("[Ave]: %2.3f" % psnrs.ave.mean().item())
     print("[Proposed]: %2.3f" % psnrs.est.mean().item())
     print("[NVOF]: %2.3f" % psnrs.nvof.mean().item())
+    print("[FlowNet]: %2.3f" % psnrs.flownet.mean().item())
 
 def print_nnf_acc(nnf_acc):
     print("-"*50)
@@ -192,6 +204,8 @@ def print_nnf_acc(nnf_acc):
     print(nnf_acc.est)
     print("Proposed v.s. NNF")
     print(nnf_acc.nvof)
+    print("Proposed v.s. FlowNet")
+    print(nnf_acc.flownet)
 
 def print_nnf_local_acc(nnf_acc):
     print("-"*50)
@@ -208,6 +222,8 @@ def print_nnf_local_acc(nnf_acc):
     print(nnf_acc.est)
     print("NVOF v.s. NNF")
     print(nnf_acc.nvof)
+    print("FLOWNET v.s. NNF")
+    print(nnf_acc.flownet)
 
 def is_converted(sample,translate):
     for key1,key2 in translate.items():

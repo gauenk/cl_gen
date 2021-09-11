@@ -1,6 +1,7 @@
 # -- python imports --
 import numpy as np
 from easydict import EasyDict as edict
+from einops import rearrange
 
 # -- plotting imports --
 import matplotlib
@@ -9,6 +10,7 @@ from matplotlib import pyplot as plt
 
 # -- project imports --
 from datasets.wrap_image_data import load_resample_dataset,sample_to_cuda
+# from datasets import load_dataset,load_resample_dataset,sample_to_cuda
 
 def info_from_records(records):
     image_index = records['image_index']
@@ -40,23 +42,47 @@ def plot_example_images_experiment(cfg,records):
     info = info_from_records(records)
     named_info = edict({'tr':info,'val':info,'te':info})
     cfg.shuffle_dataset = False
-    data,loaders = load_resample_dataset(cfg,named_info)
+    cfg.frame_size = [256,256]
+    data,loaders = load_resample_dataset(cfg,named_info,use_wrapper=False)
     nsamples = len(records['image_index'])
 
     # -- loop over samples --
     for sindex in range(nsamples):
-        sample = data.tr[sindex]
+        sample = data.tr[sindex] # we use "data" so no batch dimension
 
-        record = get_record_from_iindex(records,sample['index'])
+        # -- get image index --
+        if 'index' in sample: index = sample['index']
+        elif 'image_index' in sample: index = sample['image_index']
+        else: raise KeyError("Where is the image index key??")
+        record = get_record_from_iindex(records,index)
         print(list(record.keys()))
         
-        # -- get images -
-        noisy = sample['noisy']
-        nframes = noisy.shape[0]
+        # -- get clean images --
+        if 'clean' in sample: clean = sample['clean']
+        elif 'dyn_clean' in sample: clean = sample['dyn_clean']
+        else: raise KeyError("Where is the clean burst key??")
+
+        # -- get noisy images --
+        if 'noisy' in sample: noisy = sample['noisy']
+        elif 'dyn_noisy' in sample: noisy = sample['dyn_noisy']
+        else: raise KeyError("Where is the noisy burst key??")
         
-        # -- create figure --
-        fig,ax = plt.subplots(1,nframes,figsize=(8,8))
-        for t in range(nframes):
-            ax[t].imshow(noisy[t][0])
-        plt.savefig("./sample.png",transparent=True,dpi=300)
+        # -- create figures --
+        plot_image_burst(noisy,"noisy")
+        plot_image_burst(clean,"clean")
+
         break
+
+def plot_image_burst(burst,name):
+    nframes = burst.shape[0]
+    fig,ax = plt.subplots(1,nframes,figsize=(8,8))
+    burst = rearrange(burst,'t c h w -> t h w c')
+    for t in range(nframes):
+        ax[t].imshow(burst[t])
+    fn = f"./example_sample_{name}.png"
+    plt.savefig(fn,transparent=True,dpi=300)
+    print(f"Saved example sample image at location [{fn}]")
+    plt.clf()
+    plt.cla()
+    plt.close("all")
+    

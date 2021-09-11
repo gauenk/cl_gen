@@ -25,11 +25,12 @@ from datasets.wrap_image_data import load_image_dataset,sample_to_cuda
 import nvtx
 
 # -- [align] package imports --
+from align.interface import get_align_method
+from sim.interface import get_sim_method
 
 # -- [local] package imports --
 from .exp_utils import *
 from .learn import train_model,test_model
-from ._sim_methods import get_sim_method
 from ._nn_archs import get_nn_model
 
 def set_seed(seed):
@@ -84,7 +85,8 @@ def execute_experiment(cfg):
     model,loss_fxn,optim,sched_fxn = get_nn_model(cfg,cfg.nn_arch)
 
     # -- get sim method --
-    sim_fxn = get_sim_method(cfg,cfg.sim_method)
+    aligned_fxn = get_align_method(cfg,method_name)
+    sim_fxn = get_sim_method(cfg,cfg.sim_method,aligned_fxn)
     
     # -- some constants --
     nframes,nblocks = cfg.nframes,cfg.nblocks 

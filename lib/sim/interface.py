@@ -1,16 +1,18 @@
+# -- python --
+import numpy as np
+from einops import rearrange,repeat
+
+# -- pytorch --
 import torch
+
+# -- numba --
 import numba
 from numba import cuda
 from numba.typed import List
 from numba.cuda.random import create_xoroshiro128p_states,xoroshiro128p_uniform_float32
-from einops import rearrange,repeat
 
-# -- python --
-import numpy as np
-from ._aligned_methods import get_align_method
     
-def get_sim_method(cfg,method_name):
-    aligned_fxn = get_align_method(cfg,method_name)
+def get_sim_method(cfg,method_name,aligned_fxn):
     def sim_fxn(burst,sim_type,db=None,gt_info=None):
         aligned,flow = None,None
         if sim_type == "a":

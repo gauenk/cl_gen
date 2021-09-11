@@ -13,7 +13,6 @@ We only care about Nearest Neighbor Fields!
 
 """
 
-
 # -- python imports --
 import os,cv2,glob,re,math
 import numpy as np
@@ -26,29 +25,15 @@ import torch
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from datasets.kitti.nnf_io import read_nnf,write_nnf,check_nnf,get_nnf
+from datasets.kitti.nnf_io import get_nnf,check_valid_burst_nnf
 from .utils import *    
+
+CHECK_NNF_DATA = True
         
-def check_valid_burst_nnf(burst_id,fstart,nframes,path_nnf,nnf_K):
-    ref_fid = '%02d' % int(fstart+nframes//2)
-    frame_ids = np.arange(fstart,fstart+nframes)
-    for t in range(nframes):
-        fid = '%02d' % frame_ids[t]
-        if check_nnf(burst_id,ref_fid,fid,path_nnf,nnf_K) is False:
-            return False
-    return True
-
-def read_frame(paths,burst_id,fid):
-    frame_path = Path(os.path.join(paths.images, '%s_%s.png' % (burst_id, fid)))
-    if not frame_path.exists():
-        raise IndexError(f"Frame {str(frame_path)} does not exist.")
-    img = cv2.cvtColor(cv2.imread(str(frame_path)),cv2.COLOR_BGR2RGB)
-    return img
-
 def read_frame_info(burst_id,ref_fid,fid,paths,crop,resize,ref_frame,nnf_ps,nnf_K):
     
     # -- load image --
-    img = read_frame(paths,burst_id,fid)
+    img = read_frame(paths.images,burst_id,fid)
 
     # -- get that nnf --
     nnf_vals,nnf_locs = get_nnf(ref_frame,img,burst_id,ref_fid,
@@ -70,8 +55,13 @@ def read_frame_info(burst_id,ref_fid,fid,paths,crop,resize,ref_frame,nnf_ps,nnf_
 def read_dataset_sample(burst_id,nframes,edition,fstart,istest,
                         path = None, crop = None, resize = None,
                         nnf_K = 1, nnf_ps = 3):
+
+    # -- input validation --
     if path is None:
         path = kitti_path
+    if nframes is None or nframes <= 0:
+        raise ValueError("nframes must be a positive int.")
+
     
     # -- setup paths --
     if istest:
@@ -131,7 +121,7 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
 
     if path is None:
         path = kitti_path
-    if nframes is None:
+    if nframes is None or nframes <= 0:
         raise ValueError("nframes must be a positive int.")
 
     dataset = dict()
@@ -175,7 +165,8 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
             for fstart in range(burst_nframes-nframes+1):
 
                 # -- check if valid burst for nnf --
-                if not check_valid_burst_nnf(burst_id,fstart,nframes,paths.nnf,nnf_K):
+                if not check_valid_burst_nnf(burst_id,fstart,nframes,
+                                             paths,nnf_K,CHECK_NNF_DATA):
                     if nnf_exists: continue # require the nnf must exist
 
                 # -- append --
@@ -191,8 +182,7 @@ def read_dataset_testing(path = None, editions = 'mixed',
                          nframes = None, crop = None, resize = None,
                          nnf_K = 1, nnf_ps = 3, nnf_exists = True,
                          samples = None):
-
-    if nframes is None:
+    if nframes is None or nframes <= 0:
         raise ValueError("nframes must be a positive int.")
 
     dataset = dict()
@@ -209,6 +199,7 @@ def read_dataset_testing(path = None, editions = 'mixed',
         path_nnf = Path(path[edition + 'nnf' + 'test']) / nnf_mid_path
         num_files = (len(os.listdir(path_images)) - 10) // 21
         burst_info = dir_to_burst_info(path_images)
+        paths = edict({'images':path_images,'nnf':path_nnf})
         
         # -- loop over burst images --
         burst_ids = burst_info.index.to_list()
@@ -224,7 +215,8 @@ def read_dataset_testing(path = None, editions = 'mixed',
             for fstart in range(burst_nframes-nframes+1):
 
                 # -- check if valid burst for nnf --
-                if not check_valid_burst_nnf(burst_id,fstart,nframes,path_nnf,nnf_K):
+                if not check_valid_burst_nnf(burst_id,fstart,
+                                             nframes,paths,nnf_K,CHECK_NNF_DATA):
                     if nnf_exists: continue # require the nnf must exist
 
                 dataset['burst_id'].append(burst_id)

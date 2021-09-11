@@ -1,9 +1,10 @@
-import re,glob
+import os,re,glob,cv2
 from pathlib import Path
 import pandas as pd
 import numpy as np
 import torch
-
+from PIL import Image
+from einops import rearrange
 
 VALIDATE_INDICES = dict()
 VALIDATE_INDICES['2012'] = [0, 12, 15, 16, 17, 18, 24, 30, 38, 39, 42, 50, 54, 59, 60, 61, 77, 78, 81, 89, 97, 101, 107, 121, 124, 142, 145, 146, 152, 154, 155, 158, 159, 160, 164, 182, 183, 184, 190]
@@ -12,6 +13,20 @@ VALIDATE_INDICES['2015'] = [10, 11, 12, 25, 26, 30, 31, 40, 41, 42, 46, 52, 53, 
 # ======== PLEASE MODIFY ========
 kitti_root = r"/srv/disk3tb/home/gauenk/data/kitti/"
 VERBOSE = True
+
+
+def read_frame(path_images,burst_id,fid):
+    frame_path = Path(os.path.join(path_images, '%s_%s.png' % (burst_id, fid)))
+    if not frame_path.exists():
+        raise IndexError(f"Frame {str(frame_path)} does not exist.")
+    img = cv2.cvtColor(cv2.imread(str(frame_path)),cv2.COLOR_BGR2RGB) # (h, w, c)
+    return img
+
+def read_ishape(path_images,burst_id,fid):
+    frame_path = Path(os.path.join(path_images, '%s_%s.png' % (burst_id, fid)))
+    w,h = Image.open(frame_path).size
+    ishape = (h,w,3)
+    return ishape
 
 def vprint(*args,**kwargs):
     if VERBOSE:

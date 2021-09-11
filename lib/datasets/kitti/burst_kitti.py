@@ -1,11 +1,10 @@
 # -- python imports --
-import os
-import cv2
+import os,cv2,tqdm
 import numpy as np
 import numpy.random as npr
 from pathlib import Path
 from easydict import EasyDict as edict
-import tqdm
+from einops import repeat,rearrange
 
 # -- pytorch imports --
 import torch
@@ -93,10 +92,10 @@ class BurstKITTI():
 
         # -- rename clean frames --
         nframes = len(burst)
-        clean = burst
+        clean = rearrange(burst,'t h w c -> t c h w')
 
         # -- create noisy sample --
-        noisy = [self.noise_xform(img) for img in burst]
+        noisy = [self.noise_xform(img) for img in clean]
         noisy = torch.stack(noisy,dim=0)
 
         # -- create static iid noisy samples --
@@ -106,11 +105,10 @@ class BurstKITTI():
 
         # -- create sample --
         sample = {'dyn_clean':clean,'dyn_noisy':noisy,
-                  'static_clean':static_clean,
-                  'static_noisy':static_noisy,
+                  'static_clean':sclean,'static_noisy':snoisy,
                   'nnf_vals':nnf_vals,'nnf':nnf_locs,
                   'nnf_locs':nnf_locs,'image_index':index,
-                  'flow':None,'rng_state':rng_state}
+                  'flows':None,'occs':None,'rng_state':rng_state}
         return sample
 
 def write_burst_kitti_nnf(cfg):
@@ -118,11 +116,8 @@ def write_burst_kitti_nnf(cfg):
     data,loader = get_burst_kitti_dataset(cfg,"dynamic")
     # -- iterating through dataset will write the nnf --
     for split in data.keys():
-        print(split)
-        if not(split == "te"): continue
         for i in tqdm.tqdm(range(len(data[split]))):
             data[split][i] # this will write the missing nnfs 
-            del data[split][i]
 
 def get_burst_kitti_dataset(cfg,mode):
     root = cfg.dataset.root

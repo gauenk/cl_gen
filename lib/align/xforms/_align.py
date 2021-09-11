@@ -20,6 +20,7 @@ from ._blocks2pix import blocks_to_pix
 
 
 def align_from_flow(burst,flow,nblocks,centers=None,isize=None):
+    # nimages,npix,nframes_tilde,two = flow.shape
     nframes = burst.shape[0]
     pix = flow_to_pix(flow,nframes,centers,isize)
     return align_from_pix(burst,pix,nblocks)

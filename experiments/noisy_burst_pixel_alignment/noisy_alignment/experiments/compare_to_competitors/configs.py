@@ -14,12 +14,14 @@ def get_cfg_defaults():
 
     # -- frame info --
     cfg.nframes = 10
-    cfg.frame_size = 32
+    cfg.frame_size = (32,32)
+    cfg.use_anscombe = False
 
     # -- data config --
     cfg.dataset = edict()
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
-    cfg.dataset.name = "voc"
+    cfg.dataset.name = "burst_with_flow_kitti"
+    cfg.dataset.mode = "dynamic"
     cfg.dataset.dict_loader = True
     cfg.dataset.num_workers = 2
     cfg.batch_size = 1
@@ -36,7 +38,7 @@ def get_cfg_defaults():
     cfg.random_seed = 0
 
     # -- combo config --
-    cfg.nblocks = 3
+    cfg.nblocks = 5
     cfg.patchsize = 3
     cfg.score_fxn_name = "bootstrapping_cf"
     # cfg.score_fxn_name = "bootstrapping"
@@ -60,9 +62,8 @@ def get_exp_cfgs(name):
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
-    # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
+    noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
-    noise_types = ['g-1p0']
     # noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
     # noise_types = ['g-75p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.,150.]
@@ -84,6 +85,10 @@ def get_exp_cfgs(name):
     # -- bootstrapping name --
     bsname = ['bootstrapping_cf']
 
+    # -- frame size --
+    # frame_size = ['128_128']#,'128_128']
+    frame_size = ['64_64']
+
     # -- create number of local regions grid --
     nblocks = [3]
     
@@ -98,9 +103,9 @@ def get_exp_cfgs(name):
 
     # -- create a list of arrays to mesh --
     lists = [patchsize,noise_types,nframes,nblocks,
-             bsname,ppf,batch_size,random_seed]
+             bsname,ppf,batch_size,frame_size,random_seed]
     order = ['patchsize','noise_type','nframes','nblocks',
-             'bsname','ppf','batch_size','random_seed']
+             'bsname','ppf','batch_size','frame_size','random_seed']
     named_params = edict({o:l for o,l in zip(order,lists)})
 
 
@@ -143,6 +148,10 @@ def setup_exp_cfg(base_cfg,exp):
     # -- random seed --
     cfg.random_seed = exp.random_seed
 
+    # -- set frame size
+    cfg.frame_size = frame_size_from_str(exp.frame_size)
+    cfg.dynamic_info.frame_size = cfg.frame_size
+
     # -- number of frames --
     cfg.nframes = int(exp.nframes)
 
@@ -168,3 +177,8 @@ def setup_exp_cfg(base_cfg,exp):
 
     return cfg
 
+def frame_size_from_str(frame_size):
+    left,right = frame_size.split("_")
+    left = int(left)
+    right = int(right)
+    return (left,right)
