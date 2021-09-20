@@ -107,7 +107,17 @@ class DynamicVOC(VOCDetection):
         # -- create transforms --
         noise_trans = get_noise_transform(noise_info,noise_only=True)
         self.noise_trans = get_noise_transform(noise_info,use_to_tensor=False)
-        self.dynamic_trans = get_dynamic_transform(dynamic_info,noise_trans,load_res)
+        self.dynamic_trans = get_dynamic_transform(dynamic_info,None,load_res)
+
+    def _set_random_state(self,rng_state):
+        torch.set_rng_state(rng_state['th'])
+        np.random.set_state(rng_state['np'])
+
+    def _get_random_state(self):
+        th_rng_state = torch.get_rng_state()
+        np_rng_state = np.random.get_state()
+        rng_state = edict({'th':th_rng_state,'np':np_rng_state})
+        return rng_state
 
     def __getitem__(self, index):
         """
@@ -118,16 +128,32 @@ class DynamicVOC(VOCDetection):
             tuple: (image, target) where target is index of the target class.
         """
 
+        # -- get random state --
+        rng_state = self._get_random_state()
+
+        # -- image --
         img = Image.open(self.images[index]).convert("RGB")
         if self.bw: img = img.convert('1')
-        img_set,res_set,clean_target,seq_flow,ref_flow = self.dynamic_trans(img)
-        iid = self.noise_trans(clean_target)
-
+        dyn_clean,res_set,_,seq_flow,ref_flow,tl = self.dynamic_trans(img)
+        dyn_noisy = self.noise_trans(dyn_clean)+0.5
+        nframes,c,h,w = dyn_noisy.shape
+        static_clean = repeat(dyn_clean[nframes//2],'c h w -> t c h w',t=nframes)
+        static_noisy = self.noise_trans(static_clean)+0.5
+        # print(static_clean.min(),static_clean.max())
+        # print(dyn_clean.min(),dyn_clean.max())
+        # print(dyn_noisy.min(),dyn_noisy.max())        
+        # print(ref_flow.shape,dyn_noisy.shape)
+        ref_flow = repeat(ref_flow ,'t two -> t h w two',h=h,w=w)
+        index_th = torch.IntTensor([index])
         if self._return_type == "list":
-            return img_set, res_set, clean_target, seq_flow, ref_flow
+            return dyn_noisy, res_set, clean_target, seq_flow, ref_flow
         elif self._return_type == "dict":
-            return {'burst':img_set, 'res':res_set, 'clean':clean_target,
-                    'seq_flow':seq_flow, 'ref_flow':ref_flow, 'iid':iid, 'index':index}
+            return {'dyn_noisy':dyn_noisy,
+                    'dyn_clean':dyn_clean,
+                    'static_noisy':static_noisy,
+                    'static_clean':static_clean,'nnf':ref_flow,
+                    'seq_flow':seq_flow, 'ref_flow':ref_flow,
+                    'flow':ref_flow,'index':index_th,'rng_state':rng_state}
         else: raise ValueError("How did this happend? Invalid return type [{self._return_type}].")
 
 class DynamicVOC_LMDB_All():
@@ -354,10 +380,11 @@ def get_voc_dataset(cfg,mode):
         batch_size = cfg.batch_size
         N = cfg.nframes
         load_res = return_optional(cfg.dataset,"load_residual",False)
+        noise_type = cfg.noise_params.ntype
         noise_params = cfg.noise_params[noise_type]
         noise_info = cfg.noise_params
         dynamic_info = cfg.dynamic_info
-        bw = cfg.dataset.bw
+        bw = False#cfg.dataset.bw
         data.tr = DynamicVOC(root,"2012","trainval",N,noise_info,dynamic_info,load_res,bw,rtype)
         D = -1
         if D > 0:

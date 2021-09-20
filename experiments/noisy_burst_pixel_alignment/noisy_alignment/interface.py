@@ -30,7 +30,6 @@ import noisy_alignment.experiments.compare_to_theory as compare_to_theory
 import noisy_alignment.experiments.compare_to_competitors as compare_to_competitors
 import noisy_alignment.experiments.stress_tests as stress_tests
 
-
 def run():
     
     # exp_info = picker.run()
@@ -58,10 +57,10 @@ def run_exp(exp_info):
     cfg = get_cfg_defaults()
     cfg.gpuid = 0
     cfg.device = f"cuda:{cfg.gpuid}"
-    # torch.cuda(device=cfg.gpuid)
+    torch.cuda.set_device(device=cfg.gpuid)
 
     # -- Init Experiment Cache  --
-    cache_name += "_v3"
+    cache_name += "_v4"
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
     cache.clear()

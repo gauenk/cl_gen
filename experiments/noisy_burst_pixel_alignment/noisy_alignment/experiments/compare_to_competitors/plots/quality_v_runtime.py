@@ -18,24 +18,34 @@ from datasets.wrap_image_data import load_resample_dataset,sample_to_cuda
 
 def method_names(method):
     if method == "nnf":
-        return "L2-Global"
+        return "L2-Global (Clean)"
     elif method == "nnf_local":
-        return "L2-Local"
+        return "L2-Local (Clean)"
     elif method == "nvof":
         return "NVOF"
     elif method == "split":
-        return "L2-Global (Noisy)"
+        return "L2-Global"
     elif method == "ave_simp":
-        return "L2-Local (Noisy)"
+        return "L2-Local"
     elif method == "est":
-        return "Ours (Noisy)"
+        return "Ours"
+    elif method == "flownet":
+        return "FlowNetv2"
     else:
         return method.replace("_","-")
 
-def create_quality_v_runtime_plot(records,egrids,exp_cfgs):
+def dataset_names(dsname):
+    if dsname in ["voc"]:
+        return "VOC with Global Motion @ 1 PPF"
+    elif dsname in ["burst_with_flow_kitti","burst_kitti","kitti"]:
+        return "KITTI 2015"
+    return dsname
+
+def create_quality_v_runtime_plot(records,egrids,exp_cfgs,dsname):
 
     # -- get relevant data --
-    data = extract_formatted_data(records,egrids,exp_cfgs)
+    data = extract_formatted_data(records,egrids,exp_cfgs,dsname)
+    print(data)
 
     # -- create scatter plot --
     fig,ax = plt.subplots(figsize=(8,8))
@@ -47,22 +57,14 @@ def create_quality_v_runtime_plot(records,egrids,exp_cfgs):
                           marker='o',
                           s=120)
     ax.set_xlabel("Performance (miliseconds)",fontsize=20,labelpad=10)
-    ax.set_ylabel("Denoiser Quality (PSNR)",fontsize=20,labelpad=10)
+    ax.set_ylabel("Alignment Quality (PSNR)",fontsize=20,labelpad=10)
 
-    # -- set xticks --
-    # maj_fmt,maj_loc,min_loc = get_matplotlib_formatters()
-    # ax.xaxis.set_major_formatter(maj_fmt)
-    # ax.xaxis.set_major_locator(maj_loc)
-    # ax.xaxis.set_minor_locator(min_loc)
 
-    # -- set xlims --
-    # xmin = data['ave_runtime'].min()
-    # xlim_min = xmin - .1
-    # xlim_max = ax.get_xlim()[1] + 100.
-    # ax.set_xlim((xlim_min,xlim_max))
+    #
+    # -- get text coordiantes --
+    #
 
-    # -- get scatter plot sample coordiantes --
-    offset = .15
+    offset = .08
     text_len = 1.10
     axis_lims = (ax.get_xlim(),ax.get_ylim())
     xvalues = data['ave_log_runtime'].to_numpy()
@@ -70,26 +72,22 @@ def create_quality_v_runtime_plot(records,egrids,exp_cfgs):
     log_xvalues = data['ave_log_runtime'].to_numpy()
     yvalues = data['ave_psnr'].to_numpy()
     for idx, method in enumerate(data['method']):
-        # print(method)
-        # print(data['ave_psnr'][idx],data['ave_runtime'][idx],data['method'][idx])
-        # x = data['ave_log_runtime'][idx]+offset
-        # x = data['ave_runtime'][idx]+offset
-        # y = data['ave_psnr'][idx]+offset
-        if len(method) < 7:
-            text_len = 0.4
-        elif len(method) < 10:
-            text_len = 0.8
-        else:
-            text_len = 1.1
-        logx,x,y = log_xvalues[idx],xvalues[idx],yvalues[idx]
-        xoffset,yoffset = get_text_offset(logx,10**x,y,offset,text_len,axis_lims)
-        text_x = xoffset
-        ax.text(text_x,y+yoffset,method,fontsize=25)
+        logx = log_xvalues[idx]
+        x = xvalues[idx]
+        y = yvalues[idx]
+        offset = 0
+        # yoffset = 0
+        text_x,text_y = get_text_xy_v2(logx,x,y,method)
+        ax.text(text_x,text_y,method,fontsize=25)
 
-    # ax.set_xscale('log')
 
-    ax.set_title("Quality and Performance Trade-off",fontsize=30)
-    fn = "./psnr_vs_runtime.png"
+    #
+    # -- save plot to file --
+    #
+    
+    ds_title = dataset_names(dsname)
+    ax.set_title(f"{ds_title}",fontsize=25)
+    fn = f"./psnr_vs_runtime_{dsname}.png"
     plt.savefig(fn,dpi=300,bbox_inches='tight')
     print(f"Wrote [quality_v_runtime] plot at {fn}")
 
@@ -97,39 +95,64 @@ def create_quality_v_runtime_plot(records,egrids,exp_cfgs):
     plt.cla()
     plt.close("all")
 
-def get_text_offset(logx,x,y,offset,text_len,axis_lims):
-
-    # -- init and unpack --
-    xlims = np.array(axis_lims[0])
-    ylims = np.array(axis_lims[1])
-
-    # -- select quandrant --
-    left_right = np.argmin(np.abs(logx - np.log10(xlims)))
-    bottom_top = np.argmin(np.abs(y - ylims))
-
-    # -- modify xtext --
-    xoffset = 0
-    if left_right == 0: # closest to left
-        xoffset = offset
-    else: # right
-        xoffset = -(offset + text_len)
-
-    # -- from standard to log offset --
-    xoffset = 10**(logx + xoffset)
-
-    # -- modify ytext --
-    yoffset = 0
-    if bottom_top == 0: # closest to bottom
-        yoffset = 2*offset
-    else: # top
-        yoffset = -5*offset
+def get_text_xy_v2(logx,x,y,method):
+    if "Ours" == method :
+        xoffset = 10**(logx)
+        yoffset = y
+    elif "L2-Local (Clean)" == method:
+        xoffset = 10**(logx)
+        yoffset = y
+    elif "L2-Global (Clean)" == method:
+        xoffset = 10**(logx+.1)
+        yoffset = y-.15
+    elif "L2-Local" == method:
+        yoffset = y-.4
+        xoffset = 10**(logx-.2)
+    elif "L2-Global" == method:
+        xoffset = 10**(logx)
+        yoffset = y+.15
+    elif "NVOF" == method:
+        xoffset = 10**(logx)
+        yoffset = y+0.15
+    elif "FlowNetv2" == method:
+        xoffset = 10**(logx)
+        yoffset = y+.15
+    else:
+        xoffset = 0
+        yoffset = 0
 
     return xoffset,yoffset
 
-def extract_formatted_data(records,egrids,exp_cfgs):
+def get_text_xy_v1(logx,x,y,method):
+    if "Ours" == method :
+        yoffset = -1.0
+        xoffset = 10**(logx - 0.3)
+    elif "L2-Local (Clean)" == method:
+        xoffset = 10**(logx-.5)
+        yoffset = .6
+    elif "L2-Global (Clean)" == method:
+        xoffset = 10**(logx-0.4)
+        yoffset = -1.2
+    elif "L2-Local" == method:
+        yoffset = 0.5
+        xoffset = 10**(logx - 0.3)
+    elif "L2-Global" == method:
+        xoffset = 10**(logx - 0.25)
+        yoffset = .5
+    elif "NVOF" == method:
+        xoffset = 10**(logx-0.2)
+        yoffset = .5
+    else:
+        xoffset = 0
+        yoffset = 0
+
+    return xoffset,yoffset
+
+def extract_formatted_data(records,egrids,exp_cfgs,dsname):
     # -- plot accuracy of methods  --
     fmt_data = []
     skip_methods = ["of","ave"]
+    if dsname in ["voc"]: skip_methods += ["nnf","nnf_local"]
     for method,mgroup in records.groupby('methods'):
         if method in skip_methods: continue
         smethod = method_names(method)

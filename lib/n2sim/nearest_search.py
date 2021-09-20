@@ -7,7 +7,7 @@
 import numpy as np
 import unittest
 import faiss
-import faiss_mod
+import faiss as faiss_mod
 import torch
 
 

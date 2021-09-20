@@ -59,10 +59,10 @@ def flow_to_blocks_serial(_flow,nblocks):
     indices = rearrange(indices,'(b t) -> b t',b=B)
     return indices
 
-def flow_to_blocks(flow,nblocks):
+def flow_to_blocks(flow,nblocks,ftype="ref"):
 
     # -- check shapes --
-    nimages,npix,nframes_minus_1,two = flow.shape
+    nimages,npix,nframes_prime,two = flow.shape
 
     # -- ensure int64 ndarray --
     flow = torch_to_numpy(flow)
@@ -70,13 +70,71 @@ def flow_to_blocks(flow,nblocks):
 
     # -- create blocks --
     flow = rearrange(flow,'i p tm1 two -> (i p) tm1 two')
-    blocks = flow_to_blocks_numba(flow,nblocks)
+    if ftype == "ref":
+        blocks = ref_flow_to_blocks_numba(flow,nblocks)
+    elif ftype == "seq":
+        blocks = seq_flow_to_blocks_numba(flow,nblocks)        
+    else:
+        raise ValueError(f"Uknown flow type [{ftype}]")
     blocks = rearrange(blocks,'(i p) t -> i p t',i=nimages)
 
     # -- to tensor --
     blocks = torch.LongTensor(blocks)
 
     return blocks
+
+@jit(nopython=True)
+def ref_flow_to_blocks_numba(_flow,nblocks):
+    r"""
+    flow.shape = (nsamples,nframes,2)
+
+    "flow" is a integer direction of motion between two frames
+       flow[b,t] is a vector of direction [dx, dy] wrt previous frame
+    x goes left to right and y goes top to bottom
+
+    b = image batch
+    t = \delta frame index
+    t_reference = T // 2
+
+    "nblocks" is the maximum number of pixels changed between adj. frames
+    "indices" are the 
+       indices[b,t] is the integer index representing the specific
+       neighbor for a given flow
+
+    Returns:
+    indices (ndarray): (nimages, nframes)
+    """
+
+    # def np_2dcumsum(array2d):
+    #     x = array2d[:,0].cumsum()
+    #     y = array2d[:,1].cumsum()
+    #     stack = np.stack((x,y)).T
+    #     return stack
+
+    # def np_rcumsum(tensor,dim=0):
+    #     return np.flipud(np_2dcumsum(np.flipud(tensor)))
+
+    flow = _flow.copy()
+    B,T = flow.shape[:2]
+    grid = np.arange(nblocks**2).reshape(nblocks,nblocks).astype(np.int64)
+    ref_t,ref_bl = T//2,nblocks//2
+
+    indices = np.zeros((B,T),dtype=np.int64)
+    for b in prange(B):
+        flow_b = flow[b]
+        # convert the 
+        #       _spatial_  _object_ motion
+        # into
+        #      _image coordinate_ of _top-left frame_ 
+        # (dx flips, dy same) <==> (dx flips for _object_ to _top-left_) (dy flips twice)
+        flow_b[:,0] *= -1 
+        coords = ref_bl - flow_b
+        assert np.all(coords >= 0), "all coordinates are non-negative."
+        for t in range(T):
+            x,y = int(coords[t][0]),int(coords[t][1])
+            index = grid[y,x] # up&down == rows, left&right == cols
+            indices[b,t] = index
+    return indices
 
 @overload(np.flipud)
 def np_flip_ud(a):
@@ -85,7 +143,7 @@ def np_flip_ud(a):
     return impl    
 
 @jit(nopython=True)
-def flow_to_blocks_numba(_flow,nblocks):
+def seq_flow_to_blocks_numba(_flow,nblocks):
     r"""
     flow.shape = (nsamples,nframes-1,2)
 

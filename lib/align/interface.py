@@ -8,7 +8,7 @@ from einops import rearrange,repeat
 import torch
 
 # -- project deps --
-from pyutils.vst import anscombe
+# from pyutils.vst import anscombe
 from patch_search import get_score_function
 
 # -- self deps --
@@ -43,10 +43,10 @@ def get_align_flownetv2(cfg,comp_align=True):
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
         search = burst
-        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-            search = anscombe.forward(burst)
-            search -= search.min()
-            search /= search.max()
+        # if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+        #     search = anscombe.forward(burst)
+        #     search -= search.min()
+        #     search /= search.max()
         burst = burst.to(gpuid,non_blocking=True)
         flow = flownet.burst2flow(burst).cpu()
         flow = rearrange(flow,'t i h w two -> i (h w) t two')
@@ -66,10 +66,10 @@ def get_align_l2_global(cfg):
         # burst = inputs['burst']
         # isize = inputs['isize']
         search = burst
-        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-            search = anscombe.forward(burst)
-            search -= search.min()
-            search /= search.max()
+        # if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+        #     search = anscombe.forward(burst)
+        #     search -= search.min()
+        #     search /= search.max()
         nnf_vals,nnf_pix = nnf.compute_burst_nnf(search,ref_t,cfg.patchsize,K=1)
         shape_str = 't b h w two -> b (h w) t two'
         nnf_pix_best = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
@@ -90,10 +90,10 @@ def get_align_l2_local(cfg):
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
         search = burst
-        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-            search = anscombe.forward(burst)
-            search -= search.min()
-            search /= search.max()
+        # if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+        #     search = anscombe.forward(burst)
+        #     search -= search.min()
+        #     search /= search.max()
         flow = optim.run(search,cfg.patchsize,eval_block,
                         cfg.nblocks,iterations,subsizes,K)
         aligned = align_from_flow(burst,flow,cfg.nblocks,isize=isize)
@@ -114,10 +114,10 @@ def get_align_bs_local(cfg,version):
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
         search = burst
-        if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-            search = anscombe.forward(burst)
-            search -= search.min()
-            search /= search.max()
+        # if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
+        #     search = anscombe.forward(burst)
+        #     search -= search.min()
+        #     search /= search.max()
         flow = optim.run(search,cfg.patchsize,eval_prop,
                          cfg.nblocks,iterations,subsizes,K)
         aligned = align_from_flow(burst,flow,cfg.nblocks,isize=isize)

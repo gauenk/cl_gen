@@ -3,7 +3,10 @@ import torchvision
 import torch.nn as nn
 from torchvision.models.resnet import Bottleneck, ResNet
 
-def get_resnet(name, dataset, activation_hooks = False, pretrained=True):
+def get_resnet(name, dataset,
+               activation_hooks = False,
+               pretrained=True,
+               version="v1"):
     resnets = {
         "resnet18": torchvision.models.resnet18(pretrained=pretrained),
         "resnet50": torchvision.models.resnet50(pretrained=pretrained),
@@ -11,7 +14,9 @@ def get_resnet(name, dataset, activation_hooks = False, pretrained=True):
     if name not in resnets.keys():
         raise KeyError(f"{name} is not a valid ResNet version")
     model = modify_resnet_model(
-        resnets[name], cifar_stem=dataset.lower().startswith("cifar"), v1=True
+        resnets[name],
+        cifar_stem=dataset.lower().startswith("cifar"),
+        version=version
     )
     # if activation_hooks:
     #     add_activation_hooks(model)
@@ -26,7 +31,7 @@ def add_activation_hooks(model):
     #         activation[name] = output.detach()
     #     return hook
 
-def modify_resnet_model(model, *, cifar_stem=True, v1=True):
+def modify_resnet_model(model, *, cifar_stem=True, version="v1"):
     """Modifies some layers of a given torchvision resnet model to
     match the one used for the CIFAR-10 experiments in the SimCLR paper.
     Parameters
@@ -53,7 +58,17 @@ def modify_resnet_model(model, *, cifar_stem=True, v1=True):
         model.conv1 = conv1
         model.maxpool = nn.Identity()
         model.fc = nn.Identity()
-    if v1:
+    if version == "v1":
+        for l in range(2, 5):
+            layer = getattr(model, "layer{}".format(l))
+            block = list(layer.children())[0]
+            if isinstance(block, Bottleneck):
+                assert block.conv1.kernel_size == (1, 1) and block.conv1.stride == (1, 1)
+                assert block.conv2.kernel_size == (3, 3) and block.conv2.stride == (2, 2)
+                assert block.conv2.dilation == (1, 1), "Currently, only models with dilation=1 are supported"
+                block.conv1.stride = (2, 2)
+                block.conv2.stride = (1, 1)
+    elif version == "v2":
         for l in range(2, 5):
             layer = getattr(model, "layer{}".format(l))
             block = list(layer.children())[0]

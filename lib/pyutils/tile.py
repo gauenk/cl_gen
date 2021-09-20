@@ -32,15 +32,19 @@ def zero_out_of_bounds_pix(tile,patchsize,nblocks):
     raise NotImplemented("")
     
 
-def tile_patches(burst,patchsize):
+def tile_patches(burst,patchsize,pxform=None):
     """
     prepares a sequence of patches centered at each pixel location
 
     burst.shape = (T,B,C,H,W)
+
+    pxform: 
+    - a transformation to be applied to each patch
+    - expects input of form: (npatches,c,h,w)
     """
     
     # -- backward compat --
-    pix_only = not isinstance(burst,edict)
+    pix_only = (not isinstance(burst,edict))
     burst = convert_edict(burst)
 
     # -- init --
@@ -53,19 +57,24 @@ def tile_patches(burst,patchsize):
     pix_pad = rearrange(burst.pix,'t b c h w -> (b t) c h w')
     pix_pad = F.pad(pix_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
     patches.pix = unfold(pix_pad)
+    shape_str = '(b t) (c ps1 ps2) r -> b t r (ps1 ps2 c)'
+    patches.pix = rearrange(patches.pix,shape_str,t=T,ps1=ps,ps2=ps)
 
     # -- tile feature patches --
-    if pix_only:
-        shape_str = '(b t) (c ps1 ps2) r -> b t r (ps1 ps2 c)'
-        patches.pix = rearrange(patches.pix,shape_str,t=T,ps1=ps,ps2=ps)
-        patches.ftr = patches.pix
-    else:
+    if 'ftr' in burst:
         ftr_pad = rearrange(burst.ftr,'t b c h w -> (b t) c h w')
         ftr_pad = F.pad(ftr_pad,(ps//2,ps//2,ps//2,ps//2),mode='reflect')
         patches.ftr = unfold(ftr_pad)
-        shape_str = '(b t) (c ps1 ps2) r -> b t r (ps1 ps2 c)'
-        patches.pix = rearrange(patches.pix,shape_str,b=B,ps1=ps,ps2=ps)
         patches.ftr = rearrange(patches.ftr,shape_str,b=B,ps1=ps,ps2=ps)
+    else:
+        if pix_only and (pxform is None):
+            patches.ftr = patches.pix
+        else:
+            _,_,R,_ = patches.pix.shape
+            shape_str = 'b t r (ps1 ps2 c) -> (b t r) c ps1 ps2'
+            pxform_inputs = rearrange(patches.pix,shape_str,ps1=ps,ps2=ps)
+            features = pxform(pxform_inputs) # (b t r) nftrs 
+            patches.ftr = rearrange(patches.ftr,'(b t r) f -> b t r f',b=B,t=T)
 
     # -- contiguous for faiss --
     patches.pix = patches.pix.contiguous()

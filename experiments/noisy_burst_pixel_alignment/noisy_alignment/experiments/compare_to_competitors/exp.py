@@ -1,6 +1,6 @@
 
 # -- python imports --
-import time,os,copy
+import time,os,copy,sys
 import numpy as np
 import pandas as pd
 from einops import rearrange,repeat
@@ -8,6 +8,11 @@ from easydict import EasyDict as edict
 
 # -- pytorch imports --
 import torch
+
+# -- faiss imports --
+import faiss
+sys.path.append("/home/gauenk/Documents/faiss/contrib/")
+import nnf_utils as nnf_utils
 
 # -- project imports --
 import settings
@@ -31,6 +36,7 @@ from align.interface import get_align_method
 
 
 # -- [local] package imports --
+from ._image_xforms import get_image_xform
 from .exp_utils import *
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
@@ -102,6 +108,10 @@ def execute_experiment(cfg):
     cfg.gpuid = 1 - cfg.gpuid # flip. flop.
     flownet_align = get_align_method(cfg,"flownet_v2",False)
     cfg.gpuid = 1 - cfg.gpuid # flippity flop.
+
+    # -- get an image transform --
+    image_xform = get_image_xform(cfg.image_xform,cfg.gpuid,cfg.frame_size)
+    blockLabels,_ = nnf_utils.getBlockLabels(None,nblocks,np.int32,cfg.device,True)
     
     # -- iterate over images --
     for image_bindex in range(NUM_BATCHES):
@@ -116,26 +126,34 @@ def execute_experiment(cfg):
         sample_to_cuda(sample)
         convert_keys(sample)
         torch.cuda.synchronize()
-        for key,val in sample.items():
-            print(key,type(val))
-            if torch.is_tensor(val):
-                print(key,val.device)
+        # for key,val in sample.items():
+        #     print(key,type(val))
+        #     if torch.is_tensor(val):
+        #         print(key,val.device)
 
         dyn_noisy = sample['dyn_noisy'] # dynamics and noise
         dyn_clean = sample['dyn_clean'] # dynamics and no noise
         static_noisy = sample['static_noisy'] # no dynamics and noise
         static_clean = sample['static_clean'] # no dynamics and no noise
         nnf_gt = sample['nnf']
-        nnf_gt = nnf_gt[:,:,0] # pick top 1 out of K
+        if nnf_gt.ndim == 6:
+            nnf_gt = nnf_gt[:,:,0] # pick top 1 out of K
         pix_gt = nnf_gt.type(torch.float)
         image_index = sample['image_index']
         rng_state = sample['rng_state']
-        if cfg.noise_params.ntype == "pn":
-            dyn_noisy = anscombe.forward(dyn_noisy)
-        print("SHAPES")
-        print(dyn_noisy.shape)
-        print(dyn_clean.shape)
-        print(nnf_gt.shape)
+
+        # TODO: anscombe is a type of image transform
+        if not(image_xform is None):
+            dyn_clean_ftrs = image_xform(dyn_clean)
+            dyn_noisy_ftrs = image_xform(dyn_noisy)
+        else:
+            dyn_clean_ftrs = dyn_clean
+            dyn_noisy_ftrs = dyn_noisy
+
+        # print("SHAPES")
+        # print(dyn_noisy.shape)
+        # print(dyn_clean.shape)
+        # print(nnf_gt.shape)
 
         # -- shape info --
         pad = cfg.nblocks//2+1
@@ -160,7 +178,7 @@ def execute_experiment(cfg):
         if pix_gt.ndim == 5:
             pix_gt = rearrange(pix_gt,'t i h w two -> i (h w) t two')
         pix_gt = torch.LongTensor(pix_gt.cpu().numpy().copy())
-        flows.of = pix_to_flow(pix_gt.clone())
+        flows.of = torch.zeros_like(pix_gt)#pix_to_flow(pix_gt.clone())
         aligned.of = align_from_flow(dyn_clean,flows.of,nblocks,isize=isize)
         pixs.of = flow_to_pix(flows.of.clone(),nframes,isize=isize)
         runtimes.of = 0. # given
@@ -174,7 +192,7 @@ def execute_experiment(cfg):
         print("NNF Global.")
         start_time = time.perf_counter()
         shape_str = 't b h w two -> b (h w) t two'
-        nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean,ref_t,patchsize)
+        nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean_ftrs,ref_t,patchsize)
         runtimes.nnf = time.perf_counter() - start_time
         pixs.nnf = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
         flows.nnf = pix_to_flow(pixs.nnf.clone())
@@ -185,24 +203,53 @@ def execute_experiment(cfg):
         # -- compute nearest neighbor fields [local] --
         print("NNF Local.")
         start_time = time.perf_counter()
-        iterations,K,subsizes =0,1,[]
-        optim = AlignOptimizer("v3")
-        flows.nnf_local = optim.run(dyn_clean,patchsize,eval_ave,
-                                    nblocks,iterations,subsizes,K)
-        print("flows.nnf_local.shape ",flows.nnf_local.shape)
+        local_vals,local_locs = nnf_vals,nnf_pix
+        # local_vals,local_locs = nnf_utils.runNnfBurst(dyn_clean_ftrs,
+        #                                                   patchsize, nblocks,
+        #                                                   1, valMean = 0.,
+        #                                                   blockLabels=blockLabels)
         runtimes.nnf_local = time.perf_counter() - start_time
-        pixs.nnf_local = flow_to_pix(flows.nnf_local.clone(),nframes,isize=isize)
-        aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf_local,nblocks)
+        # pixs.nnf_local = rearrange(local_locs[...,0,:],'t i h w two -> i (h w) t two')
+        # pixs.nnf_local = torch.LongTensor(pixs.nnf_local)
+        # pixs.nnf_local = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
+        pixs.nnf_local = pixs.nnf.clone()
+        flows.nnf_local = pix_to_flow(pixs.nnf_local.clone())
+        print("flows.nnf_local.shape ",flows.nnf_local.shape)
+        print(flows.nnf_local.min(),flows.nnf_local.max())
+
+
+        # aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf_local,nblocks)
+        # optimal_scores.nnf_local = eval_ave.score_burst_from_flow(dyn_noisy,
+        #                                                           flows.nnf_local,
+        #                                                           patchsize,nblocks)[1]
+        aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf,nblocks)
         optimal_scores.nnf_local = eval_ave.score_burst_from_flow(dyn_noisy,
-                                                                  flows.nnf_local,
+                                                                  flows.nnf,
                                                                   patchsize,nblocks)[1]
         optimal_scores.nnf_local = torch_to_numpy(optimal_scores.nnf_local)
+
+        # -----------------------------------
+        #
+        # -- old way to compute NNF local --
+        # 
+        # -----------------------------------
+
+        # pixs.nnf = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
+        # flows.nnf = pix_to_flow(pixs.nnf.clone())
+        # aligned.nnf = align_from_pix(dyn_clean,pixs.nnf,nblocks)
+        # aligned.nnf = align_from_flow(dyn_clean,flows.nnf,nblocks,isize=isize)
+
+        # flows.nnf_local = optim.run(dyn_clean_ftrs,patchsize,eval_ave,
+        #                             nblocks,iterations,subsizes,K)
+
+        # -----------------------------------
+        # -----------------------------------
 
 
         # -- compute proposed search of nnf --
         print("Global NNF Noisy")
         start_time = time.perf_counter()
-        split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy,ref_t,patchsize)
+        split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy_ftrs,ref_t,patchsize)
         runtimes.split = time.perf_counter() - start_time
         # split_pix = np.copy(nnf_pix)
         split_pix_best = torch.LongTensor(rearrange(split_pix[...,0,:],shape_str))
@@ -220,7 +267,7 @@ def execute_experiment(cfg):
         print("[complex] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flows.ave = optim.run(dyn_noisy,patchsize,eval_ave,
+        flows.ave = optim.run(dyn_noisy_ftrs,patchsize,eval_ave,
                              nblocks,iterations,subsizes,K)
         # flows.ave = flows.of.clone()
         runtimes.ave = time.perf_counter() - start_time
@@ -231,7 +278,7 @@ def execute_experiment(cfg):
         # -- compute nvof flow --
         print("NVOF")
         start_time = time.perf_counter()
-        flows.nvof = nvof.nvof_burst(dyn_noisy)
+        flows.nvof = nvof.nvof_burst(dyn_noisy_ftrs)
         runtimes.nvof = time.perf_counter() - start_time
         pixs.nvof = flow_to_pix(flows.nvof.clone(),nframes,isize=isize)
         aligned.nvof = align_from_flow(dyn_clean,flows.nvof,nblocks,isize=isize)
@@ -240,7 +287,7 @@ def execute_experiment(cfg):
         # -- compute flownet --
         print("FlowNetv2")
         start_time = time.perf_counter()
-        _,flows.flownet = flownet_align(dyn_noisy)
+        _,flows.flownet = flownet_align(dyn_noisy_ftrs)
         runtimes.flownet = time.perf_counter() - start_time
         pixs.flownet = flow_to_pix(flows.flownet.clone(),nframes,isize=isize)
         aligned.flownet = align_from_flow(dyn_clean,flows.flownet,nblocks,isize=isize)
@@ -275,7 +322,7 @@ def execute_experiment(cfg):
             subsizes = [cfg.nframes]
         elif cfg.nframes <= 20:
             K = 2*nblocks
-            subsizes = [2,]*cfg.nframes
+            subsizes = [2,]*cfg.nframes*3
         else:
             K = nblocks
             subsizes = [2,]*cfg.nframes
@@ -287,9 +334,9 @@ def execute_experiment(cfg):
         print("[Bootstrap] loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
-        flows.est = optim.run(dyn_noisy,patchsize,eval_prop,
-                             nblocks,iterations,subsizes,K)
-        # flows.est = flows.of.clone()
+        # flows.est = optim.run(dyn_noisy_ftrs,patchsize,eval_prop,
+        #                      nblocks,iterations,subsizes,K)
+        flows.est = flows.of.clone()
         pixs.est = flow_to_pix(flows.est.clone(),nframes,isize=isize)
         aligned.est = align_from_flow(dyn_clean,flows.est,patchsize,isize=isize)
         runtimes.est = time.perf_counter() - start_time

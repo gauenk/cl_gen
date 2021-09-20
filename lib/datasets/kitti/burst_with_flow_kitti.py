@@ -164,8 +164,8 @@ def get_burst_with_flow_kitti_dataset(cfg,mode):
         data.te = BurstWithFlowKITTI(root,"test",edition,nframes,noise_info,
                                      crop,resizes,nnf_K,nnf_ps,nnf_exists)
     else: raise ValueError(f"Unknown KITTI mode {mode}")
-    for split in data:
-        print(split,len(data[split]))
+    # for split in data:
+    #     print(split,len(data[split]))
 
     loader = get_loader(cfg,data,batch_size,mode)
     return data,loader

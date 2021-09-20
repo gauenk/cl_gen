@@ -44,6 +44,9 @@ class GlobalCameraMotionTransform():
         self.nframes = info['nframes']
         self.ppf = info['ppf']
         self.frame_size = info['frame_size']
+        if isinstance(self.frame_size,int):
+            self.frame_size = (self.frame_size,self.frame_size)
+        self.min_frame_size = np.min(self.frame_size)
         self.load_res = load_res
 
         # -- optional --
@@ -65,7 +68,7 @@ class GlobalCameraMotionTransform():
         clean_target = None
         middle_index = self.nframes // 2
         w,h = pic.size
-        out_frame_size = (self.frame_size,self.frame_size)
+        out_frame_size = self.frame_size            
         # tl_init = tl.clone()
 
         # -- compute ppf rate given fixed frames --
@@ -110,11 +113,11 @@ class GlobalCameraMotionTransform():
             h_new,w_new = int(h/raw_ppf)+1,int(w/raw_ppf)+1
             tl = torch.IntTensor([int(x.item()/raw_ppf) for x in tl])
             pic = tvF.resize(pic,(h_new,w_new))
-            crop_frame_size = int(self.frame_size/raw_ppf)+1
+            crop_frame_size = int(self.min_frame_size/raw_ppf)+1
             ppf = 1
         else:
             ppf = raw_ppf
-            crop_frame_size = self.frame_size
+            crop_frame_size = self.min_frame_size
         # print(f"ppf: {ppf}")
 
         # -- create list of indices -- 
@@ -241,7 +244,7 @@ class GlobalCameraMotionTransform():
                 res_i = noisy_pic_i - pic_nmlz
             pic_i = noisy_pic_i
         else:
-            pic_i = self.szm(self.to_tensor(pic_i))
+            pic_i = self.to_tensor(pic_i)
         return pic_i,res_i
 
     def sample_direction(self):
@@ -282,11 +285,12 @@ class GlobalCameraMotionTransform():
         if quandrant == 1:
             init = [0,0]
         elif quandrant == 2:
-            init = [h - self.frame_size, 0]# bottom-left to top-left
+            init = [h - self.frame_size[0], 0]# bottom-left to top-left
         elif quandrant == 3:
-            init = [h - self.frame_size, w - self.frame_size] # bottom-right to top-left
+            # bottom-right  to  top-left
+            init = [h - self.frame_size[0], w - self.frame_size[1]]
         elif quandrant == 4:
-            init = [0,w - self.frame_size] # top-right to top-left
+            init = [0,w - self.frame_size[1]] # top-right to top-left
         else:
             raise ValueError("What happened here?")
         # print(direction,odd,quandrant)

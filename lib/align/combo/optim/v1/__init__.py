@@ -7,9 +7,9 @@ from easydict import EasyDict as edict
 from einops import rearrange, repeat, reduce
 
 # -- faiss imports --
-import faiss_mod
+import faiss as faiss_mod
 import faiss
-import faiss.contrib.torch_utils
+# import faiss.contrib.torch_utils
 
 # -- pytorch imports --
 import torch

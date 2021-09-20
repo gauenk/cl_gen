@@ -15,7 +15,6 @@ def get_cfg_defaults():
     # -- frame info --
     cfg.nframes = 10
     cfg.frame_size = (32,32)
-    cfg.use_anscombe = False
 
     # -- data config --
     cfg.dataset = edict()
@@ -39,8 +38,9 @@ def get_cfg_defaults():
 
     # -- combo config --
     cfg.nblocks = 5
-    cfg.patchsize = 3
+    cfg.patchsize = 9
     cfg.score_fxn_name = "bootstrapping_cf"
+    cfg.image_xform = None
     # cfg.score_fxn_name = "bootstrapping"
     # cfg.score_fxn_name = "bootstrapping_mod2"
     # cfg.score_fxn_name = "bootstrapping_mod3"
@@ -52,7 +52,7 @@ def get_exp_cfgs(name):
     # ignore name for now.
 
     # -- create patchsize grid --
-    patchsize = [3]
+    patchsize = [5]
     # patchsize = [3,5,7,15]
     # patchsize = [11]
     ps_ticks = patchsize
@@ -62,9 +62,10 @@ def get_exp_cfgs(name):
     # -- create noise level grid --
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
-    noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
+    # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
     # noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
+    noise_types = ['g-10p0',]
     # noise_types = ['g-75p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.,150.]
     std_ticks = [float(nt.split('-')[1].split('p')[0]) for nt in noise_types]
@@ -77,6 +78,7 @@ def get_exp_cfgs(name):
 
     # -- create frame number grid --
     # nframes = [15,10,3] # [31]
+    # nframes = [3,] # [31]
     nframes = [3,] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
@@ -84,6 +86,10 @@ def get_exp_cfgs(name):
 
     # -- bootstrapping name --
     bsname = ['bootstrapping_cf']
+
+    # -- dataset name --
+    # dataset = ["voc","burst_with_flow_kitti"]
+    dataset = ["voc"]
 
     # -- frame size --
     # frame_size = ['128_128']#,'128_128']
@@ -98,16 +104,25 @@ def get_exp_cfgs(name):
     # -- batch size --
     batch_size = [1]
 
+    # -- batch size --
+    # image_xform = ['resnet-50','anscombe']
+    # image_xform = ['resnet-50']#,None]
+    # image_xform = ['none','resnet-50']
+    image_xform = ['none']
+
     # -- random seed --
     random_seed = [234,345,456]
 
     # -- create a list of arrays to mesh --
-    lists = [patchsize,noise_types,nframes,nblocks,
-             bsname,ppf,batch_size,frame_size,random_seed]
-    order = ['patchsize','noise_type','nframes','nblocks',
-             'bsname','ppf','batch_size','frame_size','random_seed']
+    lists = [patchsize,noise_types,
+             nframes,nblocks,dataset,
+             image_xform,bsname,ppf,
+             batch_size,frame_size,random_seed]
+    order = ['patchsize','noise_type',
+             'nframes','nblocks','dataset',
+             'image_xform','bsname','ppf',
+             'batch_size','frame_size','random_seed']
     named_params = edict({o:l for o,l in zip(order,lists)})
-
 
     # -- create mesh --
     mesh = create_meshgrid(lists)
@@ -151,6 +166,12 @@ def setup_exp_cfg(base_cfg,exp):
     # -- set frame size
     cfg.frame_size = frame_size_from_str(exp.frame_size)
     cfg.dynamic_info.frame_size = cfg.frame_size
+
+    # -- fix dataset --
+    cfg.dataset.name = exp.dataset
+
+    # -- number of frames --
+    cfg.image_xform = exp.image_xform
 
     # -- number of frames --
     cfg.nframes = int(exp.nframes)

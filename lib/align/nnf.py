@@ -13,7 +13,7 @@ import faiss
 # -- project imports --
 from pyutils import tile_patches
 
-def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
+def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0,pxform=None):
     T,B,C,H,W = burst.shape
     npix = H*W
     ref_img = burst[ref_t]
@@ -28,7 +28,8 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
             locs_t = repeat(indices,'h w two -> 1 b h w k two',b=B,k=K)
         else:
             to_image = burst[t]
-            vals_t,locs_t = compute_batch_nnf(from_image,to_image,patchsize,K,gpuid)
+            vals_t,locs_t = compute_batch_nnf(from_image,to_image,
+                                              patchsize,K,gpuid,pxform)
         vals.append(vals_t)
         locs.append(locs_t)
     vals = np.concatenate(vals,axis=0)
@@ -37,13 +38,14 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0):
     # print("burst_nnf.shape", locs.shape)
     return vals,locs
 
-def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
+def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0,pxform=None):
     B = ref_img.shape[0]
     locs,vals = [],[]
     for b in range(B):
         ref_img_b = ref_img[b]
         prop_img_b = prop_img[b]
-        vals_b,locs_b = compute_nnf(ref_img_b,prop_img_b,patchsize,K,gpuid)
+        vals_b,locs_b = compute_nnf(ref_img_b,prop_img_b,
+                                    patchsize,K,gpuid,pxform)
         vals.append(vals_b)
         locs.append(locs_b)
     vals = np.concatenate(vals,axis=1)
@@ -51,7 +53,7 @@ def compute_batch_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
     return vals,locs
 
 @nvtx.annotate("compute_nnf", color="green")
-def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
+def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0,pxform=None):
     """
     Compute the Nearest Neighbor Field for Optical Flow
     """
@@ -60,12 +62,12 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0):
 
     # -- tile patches --
     query = repeat(ref_img,'c h w -> 1 1 c h w')
-    q_patches = tile_patches(query,patchsize).pix.cpu().numpy()
+    q_patches = tile_patches(query,patchsize,pxform).pix.cpu().numpy()
     B,N,R,ND = q_patches.shape
     query = rearrange(q_patches,'b t r nd -> (b t r) nd')
 
     db = repeat(prop_img,'c h w -> 1 1 c h w')
-    db_patches = tile_patches(db,patchsize).pix.cpu().numpy()
+    db_patches = tile_patches(db,patchsize,pxform).pix.cpu().numpy()
     Bd,Nd,Rd,NDd = db_patches.shape
     database = rearrange(db_patches,'b t r nd -> (b t r) nd')
 

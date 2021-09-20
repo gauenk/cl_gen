@@ -55,7 +55,14 @@ def plot_experiment(records,egrids,exp_cfgs):
     # -- quality v noise --
     # create_quality_v_noise_plot(records,egrids,exp_cfgs)
     # create_ideal_v_noise_plot(records,egrids,exp_cfgs)
-    create_quality_v_runtime_plot(records,egrids,exp_cfgs)
+    # frecords = records[records['image_xform'].isin(['none'])]
+    print(records['image_xform'])
+    frecords = records[records['image_xform'].isin(['resnet-50'])]
+    for std,std_group in frecords.groupby('std'):
+        print(std)
+        if not(std == 15.): continue
+        for dsname,ds_group in std_group.groupby('dataset'):
+            create_quality_v_runtime_plot(ds_group,egrids,exp_cfgs,dsname)
 
     # -- plot accuracy of methods  --
     import numpy as np
