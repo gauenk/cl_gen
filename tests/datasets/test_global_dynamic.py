@@ -9,6 +9,11 @@ from pathlib import Path
 from easydict import EasyDict as edict
 from einops import rearrange,repeat
 
+# -- our faiss func --
+import faiss,sys
+sys.path.append("/home/gauenk/Documents/faiss/contrib/")
+import nnf_utils as nnf_utils
+
 # -- pytorch --
 import torch
 import torch.nn.functional as F
@@ -281,7 +286,7 @@ def test_global_dynamics():
         psnr = compute_aligned_psnr(sclean,aligned_global,psize)
         print(f"[NNF Global] PSNR: {psnr}")
 
-        # -- NNF Local --
+        # -- NNF Local (old) --
         iterations,K,subsizes =0,1,[]
         optim = AlignOptimizer("v3")
         score_fxn_ave = get_score_function("ave")
@@ -290,10 +295,22 @@ def test_global_dynamics():
                               cfg.nblocks,iterations,subsizes,K)
         pix_local = flow_to_pix(flow_local.clone(),nframes,isize=isize)
         # aligned_local = align_from_flow(clean,flow_gt,cfg.nblocks)
-        aligned_local = align_from_pix(clean,pix_gt,cfg.nblocks)
+        aligned_local = align_from_pix(clean,pix_local,cfg.nblocks)
         psnr = compute_aligned_psnr(sclean,aligned_local,psize)
-        print(f"[NNF Local] PSNR: {psnr}")
+        print(f"[NNF Local (Old)] PSNR: {psnr}")
 
+        # -- NNF Local (new) --
+        _,pix_local = nnf_utils.runNnfBurst(clean,
+                                            cfg.patchsize,
+                                            cfg.nblocks,1,
+                                            valMean = 0.,
+                                            blockLabels=None)
+        pix_local = rearrange(pix_local,'t i h w 1 two -> i (h w) t two')
+        flow_local = pix_to_flow(pix_local.clone())
+        # aligned_local = align_from_flow(clean,flow_gt,cfg.nblocks)
+        aligned_local = align_from_pix(clean,pix_local,cfg.nblocks)
+        psnr = compute_aligned_psnr(sclean,aligned_local,psize)
+        print(f"[NNF Local (New)] PSNR: {psnr}")
         
         # -- remove boundary from pix --
         pixes = {'gt':pix_gt,'global':pix_global,'local':pix_local}

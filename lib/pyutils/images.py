@@ -88,7 +88,7 @@ def save_image(images,fn,normalize=True,vrange=None):
     if isinstance(images,str): # fix it: input are swapped of string and image
         tmp = images
         images = fn
-        fn = images
+        fn = tmp
     if len(images.shape) > 4:
         C,H,W = images.shape[-3:]
         images = images.reshape(-1,C,H,W)

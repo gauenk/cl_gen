@@ -39,6 +39,49 @@ def pix_to_flow_ref(pix):
     pix_ref = repeat(pix[:,ref_frame],'s two -> s t two',t=nframes)
     delta = pix_ref - pix
     delta[...,0] = -delta[...,0]
+
+    # print(pix[:,1])
+    # print(pix[230:240,0])
+    # print(pix[230:240,1])
+    # print(pix[:,1] - pix[:,0])
+    # print(pix[230:240,1] - pix[230:240,0])
+
+    # delta_tmp = (pix[:,1] - pix[:,2]).numpy()
+
+
+    # print(torch.max(pix[:,0,:]))
+    # print(torch.max(pix[:,2,:]))
+    # print(torch.min(pix[:,0,:]))
+    # print(torch.min(pix[:,2,:]))
+
+    # print(torch.topk(pix[:,0,1],10))
+    # print(torch.topk(pix[:,0,1],10,largest=False))
+    # print(torch.topk(pix[:,2,1],10))
+    # print(torch.topk(pix[:,2,1],10,largest=False))
+
+    # print(torch.topk(pix[:,0,0],10))
+    # print(torch.topk(pix[:,0,0],10,largest=False))
+    # print(torch.topk(pix[:,2,0],10))
+    # print(torch.topk(pix[:,2,0],10,largest=False))
+
+    # print("\n\n\n\n\n\n DELTA\n\n\n\n\n\n\n")
+
+
+    # print(torch.max(delta[:,0,:]))
+    # print(torch.max(delta[:,2,:]))
+    # print(torch.min(delta[:,0,:]))
+    # print(torch.min(delta[:,2,:]))
+
+    # print(torch.topk(delta[:,0,1],10))
+    # print(torch.topk(delta[:,0,1],10,largest=False))
+    # print(torch.topk(delta[:,2,1],10))
+    # print(torch.topk(delta[:,2,1],10,largest=False))
+
+    # print(torch.topk(delta[:,0,0],10))
+    # print(torch.topk(delta[:,0,0],10,largest=False))
+    # print(torch.topk(delta[:,2,0],10))
+    # print(torch.topk(delta[:,2,0],10,largest=False))
+
     flow = delta.clone()
 
     return flow

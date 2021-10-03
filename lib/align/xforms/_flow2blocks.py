@@ -129,7 +129,10 @@ def ref_flow_to_blocks_numba(_flow,nblocks):
         # (dx flips, dy same) <==> (dx flips for _object_ to _top-left_) (dy flips twice)
         flow_b[:,0] *= -1 
         coords = ref_bl - flow_b
-        assert np.all(coords >= 0), "all coordinates are non-negative."
+        coords += nblocks//2
+        coords = np.clip(coords,0,nblocks) # clip to boundary.
+        # coords = torch.clip(coords,-nblocks//2,nblocks//2) # clip to boundary.
+        # assert np.all((coords+ref_bl) >= 0), "all coordinates are non-negative."
         for t in range(T):
             x,y = int(coords[t][0]),int(coords[t][1])
             index = grid[y,x] # up&down == rows, left&right == cols

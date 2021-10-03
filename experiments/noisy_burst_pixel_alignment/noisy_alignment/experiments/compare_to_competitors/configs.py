@@ -19,7 +19,7 @@ def get_cfg_defaults():
     # -- data config --
     cfg.dataset = edict()
     cfg.dataset.root = f"{settings.ROOT_PATH}/data/"
-    cfg.dataset.name = "burst_with_flow_kitti"
+    cfg.dataset.name = "voc"
     cfg.dataset.mode = "dynamic"
     cfg.dataset.dict_loader = True
     cfg.dataset.num_workers = 2
@@ -52,20 +52,28 @@ def get_exp_cfgs(name):
     # ignore name for now.
 
     # -- create patchsize grid --
-    patchsize = [5]
+    # patchsize = [3,11,31,]#,11]
+    # patchsize = [3,11,31,]#,11]
     # patchsize = [3,5,7,15]
-    # patchsize = [11]
+    # patchsize = [11,31]
+    patchsize = [31,]
+    # patchsize = [3]
     ps_ticks = patchsize
     ps_tickmarks = ps_ticks
     ps_tickmarks_str = ["%d" % x for x in ps_tickmarks]
 
     # -- create noise level grid --
+    # noise_types = ['pn-15p0-0p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-50p0','g-25p0']
     # noise_types = ['pn-4p0-0p0','g-75p0','g-25p0']
     # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
-    # noise_types = ['g-5p0','g-10p0','g-15p0','g-20p0']
-    noise_types = ['g-10p0',]
+    # noise_types = ['g-1p0']
+    noise_types = ['g-100p0']
+    # noise_types = ['g-50p0']
+    # noise_types = ['g-5p0','g-15p0','g-20p0']
+    # noise_types = ['g-5p0','g-15p0','g-20p0','g-50p0']
+    # noise_types = ['g-10p0',]
     # noise_types = ['g-75p0','g-25p0','g-5p0']
     # std_ticks = [5.,25.,50.,75.,100.,150.]
     std_ticks = [float(nt.split('-')[1].split('p')[0]) for nt in noise_types]
@@ -78,8 +86,8 @@ def get_exp_cfgs(name):
 
     # -- create frame number grid --
     # nframes = [15,10,3] # [31]
-    # nframes = [3,] # [31]
-    nframes = [3,] # [31]
+    # nframes = [3,5] # [31]
+    nframes = [5,] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
@@ -90,16 +98,23 @@ def get_exp_cfgs(name):
     # -- dataset name --
     # dataset = ["voc","burst_with_flow_kitti"]
     dataset = ["voc"]
+    # dataset = ["bsd_burst"]
 
     # -- frame size --
+    # frame_size = ['512_512']#,'128_128']
+    # frame_size = ['64_64','128_128','256_256']#,'128_128']
+    # frame_size = ['64_64','128_128','256_256','512_512']#,'128_128']
+    frame_size = ['256_256']#,'128_128']
     # frame_size = ['128_128']#,'128_128']
-    frame_size = ['64_64']
+    # frame_size = ['64_64','128_128']
+    # frame_size = ['64_64']
 
     # -- create number of local regions grid --
-    nblocks = [3]
+    # nblocks = [3,]
+    nblocks = [3,]
     
     # -- dynamics grid --
-    ppf = [1]
+    ppf = [1.]#,3]
 
     # -- batch size --
     batch_size = [1]
@@ -109,9 +124,13 @@ def get_exp_cfgs(name):
     # image_xform = ['resnet-50']#,None]
     # image_xform = ['none','resnet-50']
     image_xform = ['none']
+    # image_xform = ['anscombe']
+    # image_xform = ['resize_64_64']
 
     # -- random seed --
-    random_seed = [234,345,456]
+    # random_seed = [234,345,456,567,678,789]
+    random_seed = [234,345,456,]
+    # random_seed = [234]
 
     # -- create a list of arrays to mesh --
     lists = [patchsize,noise_types,
@@ -135,6 +154,8 @@ def get_exp_cfgs(name):
 
     # -- keep only pairs lists --
     # filters = [{'nframes-ppf':[[3,3],[5,1]]}]
+    # named_mesh = apply_mesh_filters(named_mesh,filters)
+    # filters = [{'nblocks-ppf':[[5,2],[7,3]]}]
     # named_mesh = apply_mesh_filters(named_mesh,filters)
 
     # -- format grids --
@@ -191,7 +212,7 @@ def setup_exp_cfg(base_cfg,exp):
     cfg.noise_type = nconfig.ntype
     cfg.noise_params = nconfig
     
-    # -- dynamics function --
+    # -- dynamics --
     cfg.dynamic_info.ppf = exp.ppf
     cfg.dynamic_info.total_pixels = cfg.dynamic_info.ppf*(cfg.nframes-1)
     cfg.dynamic_info.nframes = exp.nframes

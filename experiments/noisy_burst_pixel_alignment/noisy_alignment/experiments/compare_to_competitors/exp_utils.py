@@ -7,6 +7,7 @@ import torchvision.transforms.functional as tvF
 
 # -- project imports --
 from align import compute_epe,compute_aligned_psnr,compute_pair_flow_acc
+from .plots.utils import method_names
 
 def print_dict_ndarray_0_midpix(dict_ndarray,mid_pix):
     print("-"*50)
@@ -18,11 +19,16 @@ def remove_center_frame(frames):
     nc_frames =torch.cat([frames[:nframes//2],frames[nframes//2+1:]],dim=0)
     return nc_frames
 
+def apply_across_dict(adict,fxn):
+    for key in adict:
+        adict[key] = fxn(adict[key])
+    return adict
+
 def center_crop_frames(frames,csize=30):
     csize = 30
     cc_frames = edict()
     for name,burst in frames.items():
-        cc_frames[name] = tvF.center_crop(aligned_of,(csize,csize))
+        cc_frames[name] = tvF.center_crop(burst,(csize,csize))
     return cc_frames
     
 def compute_nnf_acc(flows):
@@ -49,7 +55,7 @@ def compute_flows_epe_wrt_ref(flows,ref):
     epes = edict()
     for field in flows.keys():
         if field in skip_fields: continue
-        print(field,ref,flows[field].shape,flows[ref].shape)
+        # print(field,ref,flows[field].shape,flows[ref].shape)
         epes[field] = compute_epe(flows[field],flows[ref])
     return epes
 
@@ -66,7 +72,7 @@ def compute_flows_epe_wrt_ref(flows,ref):
     # epes.est = compute_epe(flows.est,flows.gt)
     # return epes
 
-def remove_frame_centers(frames):
+def remove_center_frames(frames):
     nc_frames = edict()
     for name,burst in frames.items():
         nc_frames[name] = remove_center_frame(burst)
@@ -78,9 +84,10 @@ def print_runtimes(runtimes):
     print("-"*50)
     print("[NNF]: %2.3e" % runtimes.nnf)
     print("[Split]: %2.3e" % runtimes.split)
-    print("[Ave [Simple]]: %2.3e" % runtimes.ave_simp)
-    print("[Ave]: %2.3e" % runtimes.ave)
-    print("[Proposed]: %2.3e" % runtimes.est)
+    print("[L2-Local [Simple]]: %2.3e" % runtimes.ave_simp)
+    print("[L2-Local]: %2.3e" % runtimes.ave)
+    print("[Proposed (Old)]: %2.3e" % runtimes.est)
+    print("[Proposed (BLK)]: %2.3e" % runtimes.blk)
     print("[NVOF]: %2.3e" % runtimes.nvof)
     print("[FlowNetv2]: %2.3e" % runtimes.flownet)
 
@@ -89,13 +96,13 @@ def print_verbose_epes(epes_of,epes_nnf):
     print("EPE Errors [smaller is better]")
     print("-"*50)
 
-    print("NNF v.s. Optical Flow.")
+    print("L2-Global (Clean) v.s. Optical Flow.")
     print(epes_of.nnf)
-    print("Split v.s. Optical Flow.")
+    print("L2-Global (Noisy) v.s. Optical Flow.")
     print(epes_of.split)
-    print("Ave [Simple] v.s. Optical Flow.")
+    print("L2-Local [Simple] v.s. Optical Flow.")
     print(epes_of.ave_simp)
-    print("Ave v.s. Optical Flow.")
+    print("L2-Local v.s. Optical Flow.")
     print(epes_of.ave)
     print("Proposed v.s. Optical Flow.")
     print(epes_of.est)
@@ -104,11 +111,11 @@ def print_verbose_epes(epes_of,epes_nnf):
     print("FlowNetv2 v.s. Optical Flow.")
     print(epes_of.flownet)
 
-    print("Split v.s. NNF")
+    print("L2-Global (Noisy) v.s. NNF")
     print(epes_nnf.split)
-    print("Ave [Simple] v.s. NNF")
+    print("L2-Local [Simple] v.s. NNF")
     print(epes_nnf.ave_simp)
-    print("Ave v.s. NNF")
+    print("L2-Local v.s. NNF")
     print(epes_nnf.ave)
     print("Proposed v.s. NNF")
     print(epes_nnf.est)
@@ -122,14 +129,14 @@ def print_summary_epes(epes_of,epes_nnf):
     print("Summary of EPE Errors [smaller is better]")
     print("-"*50)
     print("[NNF v.s. Optical Flow]: %2.3f" % epes_of.nnf.mean().item())
-    print("[Split v.s. Optical Flow]: %2.3f" % epes_of.split.mean().item())
-    print("[Ave [Simple] v.s. Optical Flow]: %2.3f" % epes_of.ave_simp.mean().item())
-    print("[Ave v.s. Optical Flow]: %2.3f" % epes_of.ave.mean().item())
+    print("[L2-Global (Noisy) v.s. Optical Flow]: %2.3f" % epes_of.split.mean().item())
+    print("[L2-Local [Simple] v.s. Optical Flow]: %2.3f" % epes_of.ave_simp.mean().item())
+    print("[L2-Local v.s. Optical Flow]: %2.3f" % epes_of.ave.mean().item())
     print("[Proposed v.s. Optical Flow]: %2.3f" % epes_of.est.mean().item())
     print("[NVOF v.s. Optical Flow]: %2.3f" % epes_of.nvof.mean().item())
-    print("[Split v.s. NNF]: %2.3f" % epes_nnf.split.mean().item())
-    print("[Ave [Simple] v.s. NNF]: %2.3f" % epes_nnf.ave_simp.mean().item())
-    print("[Ave v.s. NNF]: %2.3f" % epes_nnf.ave.mean().item())
+    print("[L2-Global (Noisy) v.s. NNF]: %2.3f" % epes_nnf.split.mean().item())
+    print("[L2-Local [Simple] v.s. NNF]: %2.3f" % epes_nnf.ave_simp.mean().item())
+    print("[L2-Local v.s. NNF]: %2.3f" % epes_nnf.ave.mean().item())
     print("[Proposed v.s. NNF]: %2.3f" % epes_nnf.est.mean().item())
     print("[NVOF v.s. NNF]: %2.3f" % epes_nnf.nvof.mean().item())
     print("[FlowNetv2 v.s. NNF]: %2.ef" % epes_nnf.flownet.mean().item())
@@ -139,23 +146,35 @@ def print_verbose_psnrs(psnrs):
     print("-"*50)
     print("PSNR Values [bigger is better]")
     print("-"*50)
+    for key in psnrs:
+        print(method_names(key))
+        print(psnrs[key])
 
-    print("Optical Flow [groundtruth v1]")
-    print(psnrs.of)
-    print("NNF [groundtruth v2]")
-    print(psnrs.nnf)
-    print("Split [old method]")
-    print(psnrs.split)
-    print("Ave [simple; old method]")
-    print(psnrs.ave_simp)
-    print("Ave [old method]")
-    print(psnrs.ave)
-    print("Proposed [new method]")
-    print(psnrs.est)
-    print("NVOF")
-    print(psnrs.nvof)
-    print("FlowNetv2")
-    print(psnrs.flownet)
+# def key2name(key):
+#     if key == "of":
+#         return "Optical Flow [groundtruth v1]"
+#     elif key == "nnf":
+#         return "NNF [groundtruth v2]"
+#     elif key == "split":
+#         return "L2-Global (Noisy) [old method]"
+#     elif key == "ave_simp":
+#         return "L2-Local [simple; old method]"
+#     elif key == "ave":
+#         return "L2-Local [old method]"
+#     elif key == "est":
+#         return "Proposed [old method]"
+#     elif key == "blk":
+#         return "Proposed [new method]"
+#     elif key == "cflow":
+#         return "C-Flow"
+#     elif key == "nvof":
+#         return "NVOF"
+#     elif key == "flownet":
+#         return "FlowNetv2"
+#     elif key == "l2r":
+#         return "L2-Local-Recursive"
+#     else:
+#         return key
 
 def print_delta_summary_psnrs(psnrs):
     print("-"*50)
@@ -168,9 +187,9 @@ def print_delta_summary_psnrs(psnrs):
     delta_est = psnrs.nnf - psnrs.est
     delta_nvof = psnrs.nnf - psnrs.nvof
     delta_flownet = psnrs.nnf - psnrs.flownet
-    print("ave([NNF] - [Split]): %2.3f" % delta_split.mean().item())
-    print("ave([NNF] - [Ave [Simple]]): %2.3f" % delta_ave_simp.mean().item())
-    print("ave([NNF] - [Ave]): %2.3f" % delta_ave.mean().item())
+    print("ave([NNF] - [L2-Global (Noisy)]): %2.3f" % delta_split.mean().item())
+    print("ave([NNF] - [L2-Local [Simple]]): %2.3f" % delta_ave_simp.mean().item())
+    print("ave([NNF] - [L2-Local]): %2.3f" % delta_ave.mean().item())
     print("ave([NNF] - [Proposed]): %2.3f" % delta_est.mean().item())
     print("ave([NNF] - [NVOF]): %2.3f" % delta_nvof.mean().item())
     print("ave([NNF] - [FlowNet]): %2.3f" % delta_flownet.mean().item())
@@ -180,25 +199,32 @@ def print_summary_psnrs(psnrs):
     print("Summary PSNR Values [bigger is better]")
     print("-"*50)
 
-    print("[Optical Flow]: %2.3f" % psnrs.of.mean().item())
-    print("[NNF]: %2.3f" % psnrs.nnf.mean().item())
-    print("[Split]: %2.3f" % psnrs.split.mean().item())
-    print("[Ave [Simple]]: %2.3f" % psnrs.ave_simp.mean().item())
-    print("[Ave]: %2.3f" % psnrs.ave.mean().item())
-    print("[Proposed]: %2.3f" % psnrs.est.mean().item())
-    print("[NVOF]: %2.3f" % psnrs.nvof.mean().item())
-    print("[FlowNet]: %2.3f" % psnrs.flownet.mean().item())
+    for key in psnrs:
+        mname = method_names(key)
+        psnr = psnrs[key].mean().item()
+        print("[%s]: %2.3f" % (mname,psnr))
+        
+def print_summary_denoised_psnrs(psnrs):
+    print("-"*50)
+    print("Summary Denoised PSNR Values [bigger is better]")
+    print("-"*50)
+
+    for key in psnrs:
+        mname = method_names(key)
+        psnr = psnrs[key].mean().item()
+        print("[%s]: %2.3f" % (mname,psnr))
+
 
 def print_nnf_acc(nnf_acc):
     print("-"*50)
     print("NNF Accuracy [bigger is better]")
     print("-"*50)
 
-    print("Split v.s. NNF")
+    print("L2-Global (Noisy) v.s. NNF")
     print(nnf_acc.split)
-    print("Ave [Simple] v.s. NNF")
+    print("L2-Local [Simple] v.s. NNF")
     print(nnf_acc.ave_simp)
-    print("Ave v.s. NNF")
+    print("L2-Local v.s. NNF")
     print(nnf_acc.ave)
     print("Proposed v.s. NNF")
     print(nnf_acc.est)
@@ -207,16 +233,24 @@ def print_nnf_acc(nnf_acc):
     print("Proposed v.s. FlowNet")
     print(nnf_acc.flownet)
 
+def print_runtimes(runtimes):
+    print("-"*50)
+    print("Runtimes [seconds]")
+    print("-"*50)
+    for key, val in runtimes.items():
+        mname = method_names(key)
+        print("%s: %2.3f" % (mname,val))
+
 def print_nnf_local_acc(nnf_acc):
     print("-"*50)
     print("Local NNF Accuracy [bigger is better]")
     print("-"*50)
 
-    print("Split v.s. NNF")
+    print("L2-Global (Noisy) v.s. NNF")
     print(nnf_acc.split)
-    print("Ave [Simple] v.s. NNF")
+    print("L2-Local [Simple] v.s. NNF")
     print(nnf_acc.ave_simp)
-    print("Ave v.s. NNF")
+    print("L2-Local v.s. NNF")
     print(nnf_acc.ave)
     print("Proposed v.s. NNF")
     print(nnf_acc.est)

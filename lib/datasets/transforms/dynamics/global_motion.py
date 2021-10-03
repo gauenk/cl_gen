@@ -100,12 +100,13 @@ class GlobalCameraMotionTransform():
         # exit()
 
         # -- jitter --
-        # direction = [0,0]
-        # tl = torch.IntTensor([self.frame_size//2,self.frame_size//2])
+        direction = [0,0]
+        # tl = torch.IntTensor([self.frame_size[0]//2,self.frame_size[1]//2])
+        tl = torch.IntTensor([2*self.ppf,2*self.ppf])
 
         # -- simple, continuous motion --
-        direction = self.sample_direction()
-        if tl is None: tl = self.init_coordinate(direction,h,w)
+        # direction = self.sample_direction()
+        # if tl is None: tl = self.init_coordinate(direction,h,w)
 
         # -- compute pixels per frame and resize image for fractions -- 
         if raw_ppf < 1 and raw_ppf > 0:
@@ -120,19 +121,26 @@ class GlobalCameraMotionTransform():
             crop_frame_size = self.min_frame_size
         # print(f"ppf: {ppf}")
 
-        # -- create list of indices -- 
+        # -- smooth, global motion --
         tl_list = [tl.clone()]
         delta_list = [torch.LongTensor([0,0])]
-        for i in range(self.nframes-1):
+        nframe_iters = self.nframes-1
+
+        # -- jitter --
+        tl_list = []
+        delta_list = []
+        nframe_iters = self.nframes
+
+        for i in range(nframe_iters):
 
             # -- smooth, global motion --
-            step = (torch.round((i+1) * direction * ppf)).type(torch.int)
+            # step = (torch.round((i+1) * direction * ppf)).type(torch.int)
 
             # -- jitter --
-            # mult = 1.
-            # direction = self.sample_direction()
-            # step = (torch.round(mult * direction * ppf)).type(torch.int)
-
+            mult = 1.
+            direction = self.sample_direction()
+            step = (torch.round(mult * direction * ppf)).type(torch.int)
+            if i == (self.nframes//2): step = torch.zeros_like(step)
             tl_i = tl + step
 
             delta_list.append(step)

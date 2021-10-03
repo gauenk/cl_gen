@@ -1,4 +1,5 @@
 # -- python imports --
+import numpy as np
 from einops import rearrange
 from easydict import EasyDict as edict
 
@@ -32,6 +33,41 @@ def zero_out_of_bounds_pix(tile,patchsize,nblocks):
     raise NotImplemented("")
     
 
+def tile_patches_with_nblocks(burst,patchsize,nblocks,pxform=None):
+
+    # -- setup --
+    nframes,nimages,c,h,w = burst.shape
+    tile_ps = patchsize + nblocks + 1
+    patches = tile_patches(burst,tile_ps,pxform)
+
+    # -- create vars for indexing --
+    hw = patches.shape[2]
+    hP = int(np.sqrt(hw))
+    assert hP**2 == hw, "must be a square image."
+    pad = hP - h
+    center = slice(0,h)
+
+    # -- first pix --
+    patches.pix = rearrange(patches.pix,'b t (hP wP) f -> b t hP wP f',hP=hP)
+    patches.pix = patches.pix[...,center,center,:]
+    pixH,pixW = patches.pix.shape[2],patches.pix.shape[3]
+    patches.pix = rearrange(patches.pix,'b t h w f -> b t (h w) f')
+
+    # -- second ftrs --
+    patches.ftr = rearrange(patches.ftr,'b t (hP wP) f -> b t hP wP f',hP=hP)
+    patches.ftr = patches.ftr[...,center,center,:]
+    patches.ftr = rearrange(patches.ftr,'b t h w f -> b t (h w) f')
+
+    # -- check --
+    assert pixH == h, f"Please ensure cropped to height, {pixH} v {h}"
+    assert pixW == w, f"Please ensure cropped to width, {pixW} v {w}"
+
+    # -- contiguous for faiss --
+    patches.pix = patches.pix.contiguous()
+    patches.ftr = patches.ftr.contiguous()
+
+    return patches
+
 def tile_patches(burst,patchsize,pxform=None):
     """
     prepares a sequence of patches centered at each pixel location
@@ -44,6 +80,7 @@ def tile_patches(burst,patchsize,pxform=None):
     """
     
     # -- backward compat --
+    assert patchsize % 2 == 1,"Must be odd patchsize to offset correctly."
     pix_only = (not isinstance(burst,edict))
     burst = convert_edict(burst)
 

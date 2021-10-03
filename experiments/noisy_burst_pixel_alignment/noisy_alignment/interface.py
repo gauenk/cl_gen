@@ -60,7 +60,7 @@ def run_exp(exp_info):
     torch.cuda.set_device(device=cfg.gpuid)
 
     # -- Init Experiment Cache  --
-    cache_name += "_v4"
+    cache_name += "_v5"
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
     cache.clear()
@@ -129,7 +129,8 @@ def expand_noise_nums(records):
             stds.append(std)
             alphas.append(-1)
         elif ntype == "pn":
-            alpha = float(nlevel.split('-')[1].replace("p","."))
+            print(ntype,nlevel)
+            alpha = float(nlevel.replace("p","."))
             stds.append(-1)
             alphas.append(alpha)
         else:

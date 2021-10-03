@@ -120,7 +120,8 @@ def run_pixel_batch(fxn,patches,masks,evaluator,
     choose parallel or serial
     """
     evaluator = copy.deepcopy(evaluator)
-    PARALLEL = True
+    PARALLEL = False
+    # PARALLEL = True
     # if evaluator.score_fxn_name == "ave":
     #     PARALLEL = True
     # else:

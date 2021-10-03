@@ -24,6 +24,7 @@ from pyplots.legend import add_legend
 from .example_images import plot_example_images
 from .quality_v_noise import create_quality_v_noise_plot,create_ideal_v_noise_plot
 from .quality_v_runtime import create_quality_v_runtime_plot
+from .runtime_hist import runtime_hist
 
 def plot_experiment(records,egrids,exp_cfgs):
     """
@@ -45,8 +46,7 @@ def plot_experiment(records,egrids,exp_cfgs):
     # fname = "all"
     # plot_results(records,egrids,title,fname)
 
-    print("plot examples.")
-    plot_example_images(records,exp_cfgs)
+    # plot_example_images(records,exp_cfgs)
     fname = "all"
     print("plot exp.")
     records = records.astype({'methods':'string'})
@@ -56,25 +56,35 @@ def plot_experiment(records,egrids,exp_cfgs):
     # create_quality_v_noise_plot(records,egrids,exp_cfgs)
     # create_ideal_v_noise_plot(records,egrids,exp_cfgs)
     # frecords = records[records['image_xform'].isin(['none'])]
+    print(records[records['methods'].isin(['ave'])])
+    print(records[records['methods'].isin(['nnf'])])
     print(records['image_xform'])
-    frecords = records[records['image_xform'].isin(['resnet-50'])]
+    
+    dsname = records['dataset'].to_numpy()[0]
+    # records = records[records['patchsize'].isin([11])]
+    # runtime_hist(records,egrids,exp_cfgs,dsname)
+
+    frecords = records[records['image_xform'].isin(['none'])]
     for std,std_group in frecords.groupby('std'):
         print(std)
-        if not(std == 15.): continue
+        if not(std == 25.): continue
         for dsname,ds_group in std_group.groupby('dataset'):
             create_quality_v_runtime_plot(ds_group,egrids,exp_cfgs,dsname)
 
     # -- plot accuracy of methods  --
     import numpy as np
+    skips = ['ave','of','nnf_local','nnf']
     for nframes,fgroup in records.groupby('nframes'):
         handles,labels = [],[]
         fig,ax = plt.subplots(figsize=(8,4))
         for method,mgroup in fgroup.groupby('methods'):
+            if method in skips: continue
             mdata = []
             for std,std_group in mgroup.groupby('std'):
                 psnrs = []
                 for mpsnrs in std_group['psnrs']:
                     psnrs.extend(list(mpsnrs))
+                psnrs = np.nan_to_num(psnrs,neginf=0)
                 ave_psnr = np.mean(psnrs)
                 mdata.append([std,ave_psnr])
             mdata = np.array(mdata)
@@ -94,15 +104,18 @@ def plot_experiment(records,egrids,exp_cfgs):
         save_dir = Path("./")
         fn =  save_dir / f"./psnr_v_noise_{nframes}.png"
         plt.savefig(fn,transparent=True,bbox_inches='tight',dpi=300)
+        print(f"Saved plot to [{fn}]")
         plt.close('all')
 
     print(records)
     print(records['methods'])
-    sims = records[records['methods'].isin(['ave','est'])]
+    sims = records[records['methods'].isin(['ave'])]
     sims = sims[sims['patchsize'].isin([7])]
     sims = sims[sims['nframes'].isin([10])]
     fig,ax = plt.subplots(figsize=(8,4))
+    skips = ['ave']
     for method,mgroup in sims.groupby('methods'):
+        if method in skips: continue
         tmethod = method.replace("_"," ")
         title = f"Method All"#[{tmethod}]"
         fname = f"method_all"#{method}"

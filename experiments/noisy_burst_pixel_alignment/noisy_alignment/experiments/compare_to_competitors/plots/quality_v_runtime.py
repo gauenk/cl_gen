@@ -15,24 +15,7 @@ from matplotlib import pyplot as plt
 from pyplots.legend import add_legend
 from pyplots.log import get_matplotlib_formatters
 from datasets.wrap_image_data import load_resample_dataset,sample_to_cuda
-
-def method_names(method):
-    if method == "nnf":
-        return "L2-Global (Clean)"
-    elif method == "nnf_local":
-        return "L2-Local (Clean)"
-    elif method == "nvof":
-        return "NVOF"
-    elif method == "split":
-        return "L2-Global"
-    elif method == "ave_simp":
-        return "L2-Local"
-    elif method == "est":
-        return "Ours"
-    elif method == "flownet":
-        return "FlowNetv2"
-    else:
-        return method.replace("_","-")
+from .utils import method_names
 
 def dataset_names(dsname):
     if dsname in ["voc"]:
@@ -75,11 +58,11 @@ def create_quality_v_runtime_plot(records,egrids,exp_cfgs,dsname):
         logx = log_xvalues[idx]
         x = xvalues[idx]
         y = yvalues[idx]
-        offset = 0
-        # yoffset = 0
         text_x,text_y = get_text_xy_v2(logx,x,y,method)
-        ax.text(text_x,text_y,method,fontsize=25)
-
+        print(method,text_x,text_y,x,y)
+        # text_x = np.log10(text_x)
+        # ax.text(text_x,text_y,method,fontsize=25)
+        ax.text(10**x,y,method,fontsize=25)
 
     #
     # -- save plot to file --
@@ -117,6 +100,9 @@ def get_text_xy_v2(logx,x,y,method):
     elif "FlowNetv2" == method:
         xoffset = 10**(logx)
         yoffset = y+.15
+    elif "L2-Local (Old)" == method:
+        xoffset = 10**(logx)
+        yoffset = y+.15
     else:
         xoffset = 0
         yoffset = 0
@@ -142,6 +128,9 @@ def get_text_xy_v1(logx,x,y,method):
     elif "NVOF" == method:
         xoffset = 10**(logx-0.2)
         yoffset = .5
+    elif "L2-Local (Old)" == method:
+        xoffset = 10**(logx-0.2)
+        yoffset = y+.15
     else:
         xoffset = 0
         yoffset = 0
@@ -151,8 +140,8 @@ def get_text_xy_v1(logx,x,y,method):
 def extract_formatted_data(records,egrids,exp_cfgs,dsname):
     # -- plot accuracy of methods  --
     fmt_data = []
-    skip_methods = ["of","ave"]
-    if dsname in ["voc"]: skip_methods += ["nnf","nnf_local"]
+    skip_methods = ["of","nvof","split","ave_simp","blk"] # "ave"
+    if dsname in ["voc"]: skip_methods += ["nnf","nnf_local","cflow",]
     for method,mgroup in records.groupby('methods'):
         if method in skip_methods: continue
         smethod = method_names(method)

@@ -9,6 +9,7 @@ from .yiheng import get_eccv2020_dataset
 from .rebel2021 import get_rebel2021_dataset
 from .rots import get_rots_dataset
 from .kitti import get_kitti_dataset,get_burst_kitti_dataset,get_burst_with_flow_kitti_dataset
+from .bsdBurst import get_bsdBurst_dataset
 from .common import sample_to_cuda,dict_to_device
 
 def load_dataset(cfg,cfg_type):
@@ -47,6 +48,8 @@ def get_dataset(cfg,cfg_type):
         return get_burst_kitti_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "burst_with_flow_kitti":
         return get_burst_with_flow_kitti_dataset(cfg,cfg_type)
+    elif  ds_dict.dataset.name.lower() in ["bsd_burst","bsdBurst"]:
+        return get_bsdBurst_dataset(cfg,cfg_type)
     else:
         raise ValueError(f"Uknown dataset name {ds_dict.dataset.name}")
 
