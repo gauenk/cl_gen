@@ -1,3 +1,1 @@
-
-def run():
-    raise NotImplemented("")
+from .interface import run

@@ -60,7 +60,8 @@ def run_exp(exp_info):
     torch.cuda.set_device(device=cfg.gpuid)
 
     # -- Init Experiment Cache  --
-    cache_name += "_v5"
+    # "v5" has current results
+    cache_name += "_v6"
     cache_root = EXP_PATH / cache_name
     cache = cache_io.ExpCache(cache_root,cache_name)
     cache.clear()

@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 from einops import rearrange,repeat
 from easydict import EasyDict as edict
+import pprint
+pp = pprint.PrettyPrinter(indent=4)
 
 # -- pytorch imports --
 import torch
@@ -14,6 +16,9 @@ import faiss
 sys.path.append("/home/gauenk/Documents/faiss/contrib/")
 import nnf_utils as nnf_utils
 import bnnf_utils as bnnf_utils
+from bp_search import runBpSearch
+from nnf_share import mode_vals,flow2locs
+from sub_burst import evalAtLocs
 
 # -- project imports --
 import settings
@@ -42,6 +47,11 @@ from align.interface import get_align_method
 from ._image_xforms import get_image_xform
 from .exp_utils import *
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
+
+def vprint(*args,**kwargs):
+    VERBOSE = False
+    if VERBOSE:
+        print(*args,**kwargs)
 
 def set_seed(seed):
     np.random.seed(seed)
@@ -86,12 +96,32 @@ def execute_experiment(cfg):
     score_fxn_bs = get_score_function(cfg.score_fxn_name)
 
     # -- some constants --
-    NUM_BATCHES = 3
+    NUM_BATCHES = 10
     nframes,nblocks = cfg.nframes,cfg.nblocks 
     patchsize = cfg.patchsize
     ps = patchsize
     ppf = cfg.dynamic_info.ppf
     check_parameters(nblocks,patchsize)
+
+    # -- theory constants --
+    std = cfg.noise_params.g.std/255.
+    p = cfg.patchsize**2*3
+    t = cfg.nframes
+    theory = edict()
+    theory.c2 = ((t-1)/t)**2 * std**2 + (t-1)/t**2 * std**2
+    theory.mean = theory.c2
+    theory.mode = (1 - 2/p)*theory.c2
+    theory.var = 2/p*theory.c2**2
+    theory.std = np.sqrt(theory.var)
+    pp.pprint(theory)
+
+    theory_npn = edict()
+    theory_npn.c2 = ((t-1)/t)**2 * std**2 + (t-1)/t**2 * std**2
+    theory_npn.mean = theory_npn.c2*p
+    theory_npn.mode = (1 - 2/p)*theory_npn.c2*p
+    theory_npn.var = 2*theory_npn.c2**2*p
+    theory_npn.std = np.sqrt(theory_npn.var)
+    pp.pprint(theory_npn)
 
     # -- create evaluator for ave; simple --
     iterations,K = 1,1
@@ -155,7 +185,7 @@ def execute_experiment(cfg):
             dyn_noisy_ftrs = dyn_noisy
         
         if "resize" in cfg.image_xform:
-            print("Images, Flows, and NNF Modified.")
+            vprint("Images, Flows, and NNF Modified.")
             dyn_clean = image_xform(dyn_clean)
             dyn_noisy = image_xform(dyn_noisy)
             T,B,C,H,W = dyn_noisy.shape
@@ -177,6 +207,8 @@ def execute_experiment(cfg):
         ref_t = nframes//2
         nimages,npix,nframes = B,H*W,T
         frame_size = [H,W]
+        ifsize = [H-2*pad,W-2*pad]
+        print("flow_gt: ",flow_gt[0,:,H//2,W//2,:])
 
         # -- create results dict --
         pixs = edict()
@@ -193,56 +225,87 @@ def execute_experiment(cfg):
         # print("Optimal: ",gt_offset)
         gt_offset = -1.
 
-        # -- compute proposed search of nnf --
-        print("Our Method")
+        # -- FIND MODE of BURST --
+        vprint("Our Method")
+        flow_fmt = rearrange(flow_gt,'i t h w two -> t i h w 1 two')
+        locs_fmt = flow2locs(flow_fmt)
+        vals,_ = evalAtLocs(dyn_noisy_ftrs, locs_fmt, patchsize,
+                            nblocks, return_mode=False)
         # flow_fmt = rearrange(flow_gt,'i t h w two -> i (h w) t two')
-        # mode = bnnf_utils.evalAtFlow(dyn_noisy_ftrs, flow_fmt, patchsize,
-        #                              nblocks, return_mode=True)
-        # print("mode: ",mode)
-        print("dyn_noisy_ftrs.shape ",dyn_noisy_ftrs.shape)
-        valMean = 0.#mode
-        print("valMean: ",valMean)
+        # vals,_ = bnnf_utils.evalAtFlow(dyn_noisy_ftrs, flow_fmt, patchsize,
+        #                                nblocks, return_mode=False)
+        mode = mode_vals(vals,ifsize)
+        cc_vals = vals[0,5:29,5:29,0].ravel()
+        vstd = torch.std(cc_vals).item()
+        print("[SubBurst] Computed Mode: ",mode)
+        print("[SubBurst] Computed Std: ",vstd)
+
+        # -- compute proposed search of nnf --
+        vprint("dyn_noisy_ftrs.shape ",dyn_noisy_ftrs.shape)
+        valMean = theory_npn.mode
+        vprint("valMean: ",valMean)
         start_time = time.perf_counter()
-        _,flows.est = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
-                                             nblocks, k = 1,
-                                             valMean = valMean, blockLabels=None,
-                                             fmt = True, to_flow=True)
+        if cfg.nframes <= 7:
+            _,flows.est = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
+                                                 nblocks, k = 1,
+                                                 valMean = valMean, blockLabels=None,
+                                                 fmt = True, to_flow=True)
+        else:
+            flows.est = rearrange(flow_gt,'i t h w two -> 1 i (h w) t two').clone()
         flows.est = flows.est[0]        
-        # flows.est = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         runtimes.est = time.perf_counter() - start_time
         pixs.est = flow_to_pix(flows.est.clone(),nframes,isize=isize)
         aligned.est = align_from_flow(dyn_clean,flows.est,patchsize,isize=isize)
+        if cfg.nframes > 7: aligned.est = torch.zeros_like(aligned.est)
         anoisy.est = align_from_flow(dyn_noisy,flows.est,patchsize,isize=isize)
         optimal_scores.est = np.zeros((nimages,npix,1,nframes))
 
-        # -- compute proposed search of nnf [with tiling ]--
-        print("Our Method")
-        # flow_fmt = rearrange(flow_gt,'i t h w two -> i (h w) t two')
-        # mode = bnnf_utils.evalAtFlow(dyn_noisy_ftrs, flow_fmt, patchsize,
-        #                              nblocks, return_mode=True)
-        # print("mode: ",mode)
-        print("dyn_noisy_ftrs.shape ",dyn_noisy_ftrs.shape)
-        valMean = 0.#mode
-        print("valMean: ",valMean)
+        # -- compute proposed search of nnf --
+        vprint("Our BpSearch Method")
+        # print(flow_gt)
+        # std = cfg.noise_params.g.std/255.
+        valMean = theory.mode
         start_time = time.perf_counter()
-        _,flows.est_tile = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
-                                             nblocks, k = 1,
-                                             valMean = valMean, blockLabels=None,
-                                             fmt = True, to_flow=True,
-                                             tile_burst=False)
+        _,bp_est,a_noisy = runBpSearch(dyn_noisy_ftrs, dyn_noisy_ftrs,
+                                       patchsize, nblocks, k = 1,
+                                       valMean = valMean, std=std,
+                                       blockLabels=None,
+                                       fmt = True, to_flow=True)
+        flows.bp_est = bp_est[0]
+        # flows.bp_est = rearrange(flow_gt,'i t h w two -> i (h w) t two')
+        runtimes.bp_est = time.perf_counter() - start_time
+        pixs.bp_est = flow_to_pix(flows.bp_est.clone(),nframes,isize=isize)
+        # aligned.bp_est = a_clean
+        aligned.bp_est = align_from_flow(dyn_clean,flows.bp_est,patchsize,isize=isize)
+        anoisy.bp_est = align_from_flow(dyn_noisy,flows.bp_est,patchsize,isize=isize)
+        optimal_scores.bp_est = np.zeros((nimages,npix,1,nframes))
+
+        # -- compute proposed search of nnf [with tiling ]--
+        vprint("Our Burst Method (Tiled)")
+        valMean = 0.
+        start_time = time.perf_counter()
+        if cfg.nframes <= 7:
+            _,flows.est_tile = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
+                                                      nblocks, k = 1,
+                                                      valMean = valMean, blockLabels=None,
+                                                      fmt = True, to_flow=True,
+                                                      tile_burst=True)
+        else:
+            flows.est_tile = rearrange(flow_gt,'i t h w two -> 1 i (h w) t two').clone()
         flows.est_tile = flows.est_tile[0]        
         # flows.est_tile = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         runtimes.est_tile = time.perf_counter() - start_time
         pixs.est_tile = flow_to_pix(flows.est_tile.clone(),nframes,isize=isize)
         aligned.est_tile = align_from_flow(dyn_clean,flows.est_tile,patchsize,isize=isize)
+        if cfg.nframes > 7: aligned.est_tile = torch.zeros_like(aligned.est_tile)
         anoisy.est_tile = align_from_flow(dyn_noisy,flows.est_tile,patchsize,isize=isize)
         optimal_scores.est_tile = np.zeros((nimages,npix,1,nframes))
 
         # -- compute new est method --
-        print("[Burst-LK] loss function")
-        print(flow_gt.shape)
-        print(flow_gt[0,:3,32,32,:])
-        print(flow_gt.shape)
+        vprint("[Burst-LK] loss function")
+        vprint(flow_gt.shape)
+        # print(flow_gt[0,:3,32,32,:])
+        vprint(flow_gt.shape)
         start_time = time.perf_counter()
         if frame_size[0] <= 64 and cfg.nblocks < 10 and True:
             flows.blk = burstNnf.run(dyn_noisy_ftrs,patchsize,nblocks)
@@ -257,8 +320,8 @@ def execute_experiment(cfg):
         optimal_scores.blk = torch_to_numpy(optimal_scores.blk)
 
         # -- compute optical flow --
-        print("[C Flow]")
-        print(dyn_noisy_ftrs.shape)
+        vprint("[C Flow]")
+        vprint(dyn_noisy_ftrs.shape)
         start_time = time.perf_counter()
         # flows.cflow = cflow.runBurst(dyn_clean_ftrs)
         # flows.cflow[...,1] = -flows.cflow[...,1]
@@ -300,21 +363,21 @@ def execute_experiment(cfg):
         #                                                    patchsize,nblocks)[0]
 
         # -- compute nearest neighbor fields [global] --
-        print("NNF Global.")
+        vprint("NNF Global.")
         start_time = time.perf_counter()
         shape_str = 't b h w two -> b (h w) t two'
         nnf_vals,nnf_pix = nnf.compute_burst_nnf(dyn_clean_ftrs,ref_t,patchsize)
         runtimes.nnf = time.perf_counter() - start_time
         pixs.nnf = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
         flows.nnf = pix_to_flow(pixs.nnf.clone())
-        print(dyn_clean.shape,pixs.nnf.shape,nblocks)
+        vprint(dyn_clean.shape,pixs.nnf.shape,nblocks)
         aligned.nnf = align_from_pix(dyn_clean,pixs.nnf,nblocks)
         anoisy.nnf = align_from_pix(dyn_noisy,pixs.nnf,nblocks)
         # aligned.nnf = align_from_flow(dyn_clean,flows.nnf,nblocks,isize=isize)
         optimal_scores.nnf = np.zeros((nimages,npix,1,nframes)) # clean target is zero
 
         # -- compute nearest neighbor fields [local] --
-        print("NNF Local.")
+        vprint("NNF Local.")
         start_time = time.perf_counter()
         valMean = 0.
         vals_local,pix_local = nnf_utils.runNnfBurst(dyn_clean_ftrs,
@@ -323,12 +386,12 @@ def execute_experiment(cfg):
                                                       blockLabels=blockLabels)
         runtimes.nnf_local = time.perf_counter() - start_time
         torch.cuda.synchronize()
-        print("pix_local.shape ",pix_local.shape)
+        vprint("pix_local.shape ",pix_local.shape)
         pixs.nnf_local = rearrange(pix_local,'t i h w 1 two -> i (h w) t two')
         flows.nnf_local = pix_to_flow(pixs.nnf_local.clone())
         # aligned_local = align_from_flow(clean,flow_gt,cfg.nblocks)
         # aligned_local = align_from_pix(dyn_clean,pix_local,cfg.nblocks)
-        print(flows.nnf_local.min(),flows.nnf_local.max())
+        vprint(flows.nnf_local.min(),flows.nnf_local.max())
         aligned.nnf_local = align_from_pix(dyn_clean,pixs.nnf_local,nblocks)
         anoisy.nnf_local = align_from_pix(dyn_noisy,pixs.nnf_local,nblocks)
         optimal_scores.nnf_local = optimal_scores.nnf
@@ -356,7 +419,7 @@ def execute_experiment(cfg):
 
 
         # -- compute proposed search of nnf --
-        print("Global NNF Noisy")
+        vprint("Global NNF Noisy")
         start_time = time.perf_counter()
         split_vals,split_pix = nnf.compute_burst_nnf(dyn_noisy_ftrs,ref_t,patchsize)
         runtimes.split = time.perf_counter() - start_time
@@ -375,10 +438,10 @@ def execute_experiment(cfg):
         # -- compute complex ave --
         iterations,K = 0,1
         subsizes = []
-        print("[Ours] Ave loss function")
+        vprint("[Ours] Ave loss function")
         start_time = time.perf_counter()
         estVar = torch.std(dyn_noisy_ftrs.reshape(-1)).item()**2
-        valMean = 2 * estVar# * patchsize**2# / patchsize**2
+        valMean = 0.#2 * estVar# * patchsize**2# / patchsize**2
         vals_local,pix_local = nnf_utils.runNnfBurst(dyn_noisy_ftrs,
                                                      patchsize, nblocks,
                                                      1, valMean = valMean,
@@ -392,7 +455,7 @@ def execute_experiment(cfg):
         optimal_scores.ave = optimal_scores.split # same "ave" function
 
         # -- compute  flow --
-        print("L2-Local Recursive")
+        vprint("L2-Local Recursive")
         start_time = time.perf_counter()
         vals_local,pix_local,wburst = nnf_utils.runNnfBurstRecursive(dyn_noisy_ftrs,
                                                                      dyn_clean,
@@ -408,10 +471,10 @@ def execute_experiment(cfg):
         optimal_scores.l2r = optimal_scores.split # same "ave" function
 
         # -- compute nvof flow --
-        print("NVOF")
+        vprint("NVOF")
         start_time = time.perf_counter()
-        # flows.nvof = nvof.nvof_burst(dyn_noisy_ftrs)
-        flows.nvof = flows.ave.clone()
+        flows.nvof = nvof.nvof_burst(dyn_noisy_ftrs)
+        # flows.nvof = flows.ave.clone()
         runtimes.nvof = time.perf_counter() - start_time
         pixs.nvof = flow_to_pix(flows.nvof.clone(),nframes,isize=isize)
         aligned.nvof = align_from_flow(dyn_clean,flows.nvof,nblocks,isize=isize)
@@ -419,9 +482,10 @@ def execute_experiment(cfg):
         optimal_scores.nvof = optimal_scores.split # same "ave" function
 
         # -- compute flownet --
-        print("FlowNetv2")
+        vprint("FlowNetv2")
         start_time = time.perf_counter()
-        _,flows.flownet = flownet_align(dyn_noisy_ftrs)
+        # _,flows.flownet = flownet_align(dyn_noisy_ftrs)
+        flows.flownet = flows.ave.clone().cpu()
         runtimes.flownet = time.perf_counter() - start_time
         pixs.flownet = flow_to_pix(flows.flownet.clone(),nframes,isize=isize)
         aligned.flownet = align_from_flow(dyn_clean,flows.flownet,nblocks,isize=isize)
@@ -431,7 +495,7 @@ def execute_experiment(cfg):
         # -- compute simple ave --
         iterations,K = 0,1
         subsizes = []
-        print("[simple] Ave loss function")
+        vprint("[simple] Ave loss function")
         start_time = time.perf_counter()
         optim = AlignOptimizer("v3")
         if cfg.patchsize < 11 and cfg.frame_size[0] <= 64 and False:
@@ -474,21 +538,20 @@ def execute_experiment(cfg):
         anoisy = remove_center_frames(anoisy)
         anoisy = apply_across_dict(anoisy,burst_mean)
         dn_psnrs = compute_frames_psnr(anoisy,psize)
-        print(dn_psnrs)
+        vprint(dn_psnrs)
 
         # -- print report ---
         print("\n"*3) # banner
         print("-"*25 + " Results " + "-"*25)
-        print_dict_ndarray_0_midpix(flows_np,mid_pix)
-        print_dict_ndarray_0_midpix(pixs_np,mid_pix)
-        print_runtimes(runtimes)
+        # print_dict_ndarray_0_midpix(flows_np,mid_pix)
+        # print_dict_ndarray_0_midpix(pixs_np,mid_pix)
         # print_verbose_psnrs(psnrs)
         # print_delta_summary_psnrs(psnrs)
         # print_verbose_epes(epes_of,epes_nnf)
         # print_nnf_acc(nnf_acc)
         # print_nnf_local_acc(nnf_local_acc)
         # print_summary_epes(epes_of,epes_nnf)
-        print_summary_denoised_psnrs(dn_psnrs)
+        # print_summary_denoised_psnrs(dn_psnrs)
         print_summary_psnrs(psnrs)
         print_runtimes(runtimes)
 
@@ -532,15 +595,13 @@ def execute_experiment(cfg):
     # print(record.record)
     # print("-"*20)    
     print("\n"*3)
-
-    print("\n"*3)
     print("-"*20)
     # df = pd.DataFrame().append(record.record,ignore_index=True)
     for key,val in record.record.items():
-        print(key,val.shape)
-    # print(df)
-    print("-"*20)    
-    print("\n"*3)
+        vprint(key,val.shape)
+    # vprint(df)
+    vprint("-"*20)    
+    vprint("\n"*3)
 
     return record.record
     

@@ -10,6 +10,7 @@ from torchvision import transforms as thT
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
+from pyutils.sobel import create_sobel_filter,apply_sobel_filter
 from datasets.common import return_optional
 
 class ScaleZeroMean:
@@ -46,8 +47,11 @@ class GlobalCameraMotionTransform():
         self.frame_size = info['frame_size']
         if isinstance(self.frame_size,int):
             self.frame_size = (self.frame_size,self.frame_size)
+        if self.frame_size[0] <= 64: self.very_small = True
+        else: self.very_small = False
         self.min_frame_size = np.min(self.frame_size)
         self.load_res = load_res
+        self.sobel_filter = create_sobel_filter()
 
         # -- optional --
         self.total_pixels = return_optional(info,'total_pixels',0)
@@ -103,6 +107,7 @@ class GlobalCameraMotionTransform():
         direction = [0,0]
         # tl = torch.IntTensor([self.frame_size[0]//2,self.frame_size[1]//2])
         tl = torch.IntTensor([2*self.ppf,2*self.ppf])
+        if self.very_small: tl = self._pick_interesting_tl(pic)
 
         # -- simple, continuous motion --
         # direction = self.sample_direction()
@@ -206,6 +211,44 @@ class GlobalCameraMotionTransform():
         ref_flow = torch.IntTensor(ref_flow)
         return ref_flow
 
+    def _pick_interesting_tl(self,pic):
+        """
+        We assume jitter motion!
+        """
+
+        # -- image info --
+        img = self.to_tensor(pic)
+        c,h,w = img.shape
+
+        # -- where are good edges --
+        edges = apply_sobel_filter(img)[0]
+        thresh = torch.quantile(edges,.6).item()
+        edges = edges > thresh
+
+        # -- what is legal --
+        pad = int(self.ppf+1)
+        hF,wF = self.frame_size
+        interior = torch.zeros_like(edges)
+        interior[pad:-(pad+hF),pad:-(pad+wF)] = 1.
+        
+        # -- pick a t,l from both
+        mask = torch.logical_and(edges,interior)
+        rows,cols = torch.where(mask)
+        nsel = rows.shape[0]
+        if nsel == 0: rows,cols = [h//2],[w//2]
+        idx = int(torch.rand(1).item() * nsel)
+        row,col = rows[idx],cols[idx]
+
+        # -- verify --
+        legal_hw = (row+wF+pad) < w and (col+hF+pad) < h
+        legal_hw = (wF-pad) >= 0 and (hF-pad) >= 0
+        assert legal_hw,"The top-left must be within image shape"
+
+        # -- format output --
+        tl = torch.IntTensor([row,col]) # top,left
+        
+        return tl
+        
     def _motion_dinit_to_seq_flow(self,delta):
         """
         Compute "burst flow" or flow between 
