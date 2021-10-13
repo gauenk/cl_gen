@@ -123,14 +123,48 @@ class ExpCache():
         record['pdid'] = np.arange(rlen)
 
         # -- repeat config info along result axis --
-        # print("All should be equal length.")
-        # for key,val in record.items():
-        #     print(key,len(val))
+        all_equal,msg = self.check_equal_field_len(record)
+        if not(all_equal): record = self.try_to_expand_record(record)
+        all_equal,msg = self.check_equal_field_len(record)
+        assert all_equal,f"All record shapes must be equal.\n\n{msg}"
+        pdid = record['pdid']
 
         # record = pd.DataFrame().append(record,ignore_index=True)
         record = pd.DataFrame(record,index=pdid)
         records.append(record)
 
+    def check_equal_field_len(self,record):
+        all_equal,msg,vlen = True,"",-1
+        for key,val in record.items():
+            if vlen == -1: vlen = len(val)
+            elif vlen != len(val): all_equal = False
+            msg += "%s, %d\n" %( key, len(val) )
+        return all_equal,msg
+
+    def try_to_expand_record(self,record):
+        max_len,num_ones,nmax = 0,0,0
+        for key,val in record.items():
+            if len(val) == 1: num_ones += 1
+            if len(val) > max_len:
+                max_len = len(val)
+                nmax = 0
+            if len(val) == max_len: nmax += 1
+        if (num_ones + nmax) != len(record):
+            return record
+        # print("Trying to expand single record match values.")
+        for key,val in record.items():
+            vlen = len(val)
+            if vlen == 1:
+                if isinstance(val,list):
+                    record[key] = np.array(record[key]*max_len)
+                elif isinstance(val,np.ndarray):
+                    record[key] = record[key][None,:].repeat(max_len,0)
+            if isinstance(val,list):
+                record[key] = np.array(record[key]).squeeze()
+        record['pdid'] = np.arange(max_len) # replace "pandas ID"
+
+        return record
+            
     # -------------------------
     #     Clear Function
     # -------------------------
@@ -144,14 +178,25 @@ class ExpCache():
         data = self.uuid_cache.data
         for uuid in data.uuid:
             uuid_path = self.root / Path(uuid)
-            if not uuid_path.exists(): continue
-            shutil.rmtree(uuid_path)
-            assert not uuid_path.exists(),f"exp cache [{uuid_path}] should be removed."
+            if uuid_path.exists():
+                shutil.rmtree(uuid_path)
+                msg = f"exp cache [{uuid_path}] should be removed."
+                assert not uuid_path.exists(),msg
+            torch_path = self.pytorch_filepath(uuid)
+            if torch_path.exists():
+                shutil.rmtree(torch_path)
+                msg = f"exp cache [{torch_path}] should be removed."
+                assert not torch_path.exists(),msg
 
         # -- remove uuid cache --
         if uuid_file.exists(): os.remove(uuid_file)
         assert not uuid_file.exists(),f"uuid file [{uuid_file}] should be removed."
         self.uuid_cache.init_uuid_file()
+
+    # -- allow for model checkpoints to be removed with cache --
+    def pytorch_filepath(self,uuid):
+        pytorch_models = self.root/"pytorch_models"/uuid
+        return pytorch_models
     
     # -------------------------
     #   Read/Write Functions

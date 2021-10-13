@@ -27,7 +27,7 @@ from torch.utils.data.distributed import DistributedSampler
 from settings import ROOT_PATH
 from pyutils.timer import Timer
 from datasets.transforms import get_dynamic_transform,get_noise_transform
-from .common import get_loader,return_optional
+from .common import get_loader,return_optional,RandomOnce
 
 class DenoiseVOC(VOCDetection):
 
@@ -81,7 +81,8 @@ class DenoiseVOC(VOCDetection):
 
 class DynamicVOC(VOCDetection):
 
-    def __init__(self,root,year,image_set,N,noise_info,dynamic_info,load_res,bw,rtype='list'):
+    def __init__(self,root,year,image_set,N,noise_info,
+                 dynamic_info,load_res,bw,nsamples,rtype='list'):
         # -- super call with corrected paths --
         self.__class__.__name__ = "pascal_voc"
         if year == "2012":
@@ -98,6 +99,7 @@ class DynamicVOC(VOCDetection):
         self.size = self.dynamic_info.frame_size
         self.image_set = image_set
         self.bw = bw
+        self.nsamples = nsamples
 
         # -- return type --
         if not (rtype in ['list','dict']):
@@ -109,14 +111,51 @@ class DynamicVOC(VOCDetection):
         self.noise_trans = get_noise_transform(noise_info,use_to_tensor=False)
         self.dynamic_trans = get_dynamic_transform(dynamic_info,None,load_res)
 
+        # -- limit num of samples --
+        total_samples = len(self.images)
+        if nsamples > 0:
+            self.indices = torch.randperm(total_samples)
+            self.indices = self.indices[:nsamples]
+        else:
+            self.indices = torch.arange(total_samples)
+        self.nsamples = len(self.indices)
+        nsamples = self.nsamples
+
+        # -- get bools for single sample per index --
+        self.dyn_once = return_optional(dynamic_info,"sim_once",False)
+        self.noise_once = return_optional(noise_info,"sim_once",False)
+        self.noise_states = None
+        self.noise_states_v2 = None
+        self.dyn_states = None
+        if self.noise_once:
+            self.noise_states = self._sim_random_states(nsamples)
+            self.noise_states_v2 = self._sim_random_states(nsamples)
+        if self.dyn_once:
+            self.dyn_states = self._sim_random_states(nsamples)
+
+    def __len__(self):
+        return self.nsamples                
+
+    def _sim_random_states(self,nsamples):
+        states = [None,]*nsamples
+        for i in range(nsamples):
+            states[i] = self._get_random_state()
+            np.random.rand(1)
+            torch.rand(1)
+        return states
+        
     def _set_random_state(self,rng_state):
         torch.set_rng_state(rng_state['th'])
         np.random.set_state(rng_state['np'])
+        for device,device_state in enumerate(rng_state['cuda']):
+            torch.cuda.set_rng_state(device_state,device)
 
     def _get_random_state(self):
         th_rng_state = torch.get_rng_state()
+        cuda_rng_state = torch.cuda.get_rng_state_all()
         np_rng_state = np.random.get_state()
-        rng_state = edict({'th':th_rng_state,'np':np_rng_state})
+        rng_state = edict({'th':th_rng_state,'np':np_rng_state,
+                           'cuda':cuda_rng_state})
         return rng_state
 
     def __getitem__(self, index):
@@ -130,21 +169,29 @@ class DynamicVOC(VOCDetection):
 
         # -- get random state --
         rng_state = self._get_random_state()
-
+        
         # -- image --
-        img = Image.open(self.images[index]).convert("RGB")
+        image_index = self.indices[index]
+        img = Image.open(self.images[image_index]).convert("RGB")
         if self.bw: img = img.convert('1')
-        dyn_clean,res_set,_,seq_flow,ref_flow,tl = self.dynamic_trans(img)
-        dyn_noisy = self.noise_trans(dyn_clean)+0.5
+
+        # -- get dynamics ---
+        with RandomOnce(index,self.dyn_states,self.dyn_once):
+            dyn_clean,res_set,_,seq_flow,ref_flow,tl = self.dynamic_trans(img)
+
+        # -- get noise --
+        with RandomOnce(index,self.noise_states,self.noise_once):
+            dyn_noisy = self.noise_trans(dyn_clean)+0.5
         nframes,c,h,w = dyn_noisy.shape
+
+        # -- get second, different noise --
         static_clean = repeat(dyn_clean[nframes//2],'c h w -> t c h w',t=nframes)
-        static_noisy = self.noise_trans(static_clean)+0.5
-        # print(static_clean.min(),static_clean.max())
-        # print(dyn_clean.min(),dyn_clean.max())
-        # print(dyn_noisy.min(),dyn_noisy.max())        
-        # print(ref_flow.shape,dyn_noisy.shape)
+        with RandomOnce(index,self.noise_states_v2,self.noise_once):
+            static_noisy = self.noise_trans(static_clean)+0.5
+
+        # -- manage flow and output --
         ref_flow = repeat(ref_flow ,'t two -> t h w two',h=h,w=w)
-        index_th = torch.IntTensor([index])
+        index_th = torch.IntTensor([image_index])
         if self._return_type == "list":
             return dyn_noisy, res_set, clean_target, seq_flow, ref_flow
         elif self._return_type == "dict":
@@ -384,16 +431,20 @@ def get_voc_dataset(cfg,mode):
         noise_params = cfg.noise_params[noise_type]
         noise_info = cfg.noise_params
         dynamic_info = cfg.dynamic_info
+        nsamples = return_optional(cfg.dataset,"nsamples",-1)
         bw = False#cfg.dataset.bw
-        data.tr = DynamicVOC(root,"2012","trainval",N,noise_info,dynamic_info,load_res,bw,rtype)
+        data.tr = DynamicVOC(root,"2012","trainval",N,noise_info,dynamic_info,
+                             load_res,bw,nsamples,rtype)
         D = -1
         if D > 0:
             print(f"Limiting Dataset Size to [{D}]")
             data.tr.images = data.tr.images[:D]
-        data.val = DynamicVOC(root,"2012","val",N,noise_info,dynamic_info,load_res,bw,rtype)
+        data.val = DynamicVOC(root,"2012","val",N,noise_info,dynamic_info,
+                              load_res,bw,nsamples,rtype)
         # data.val.data = data.val.data[0:2*2048]
         # data.val.targets = data.val.targets[0:2*2048]
-        data.te = DynamicVOC(root,"2007","test",N,noise_info,dynamic_info,load_res,bw,rtype)
+        data.te = DynamicVOC(root,"2007","test",N,noise_info,dynamic_info,
+                             load_res,bw,nsamples,rtype)
 
     elif mode == "dynamic-lmdb-all":
         batch_size = cfg.batch_size

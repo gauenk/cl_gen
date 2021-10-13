@@ -84,9 +84,9 @@ def execute_experiment(cfg):
     # -- get neural netowrk --
     model,loss_fxn,optim,sched_fxn = get_nn_model(cfg,cfg.nn_arch)
 
-    # -- get sim method --
-    aligned_fxn = get_align_method(cfg,method_name)
-    sim_fxn = get_sim_method(cfg,cfg.sim_method,aligned_fxn)
+    # -- get align + sim method --
+    aligned_fxn = get_align_method(cfg,cfg.align_method)
+    sim_fxn = get_sim_method(cfg,aligned_fxn)
     
     # -- some constants --
     nframes,nblocks = cfg.nframes,cfg.nblocks 

@@ -56,7 +56,7 @@ def get_exp_cfgs(name):
     # patchsize = [3,11,31,]#,11]
     # patchsize = [3,5,7,15]
     # patchsize = [11,31]
-    patchsize = [3,]
+    patchsize = [11,]
     # patchsize = [3,11,]
     ps_ticks = patchsize
     ps_tickmarks = ps_ticks
@@ -88,13 +88,13 @@ def get_exp_cfgs(name):
     # nframes = [15,10,3] # [31]
     # nframes = [3,5] # [31]
     # nframes = [3,5,9,15] # [31]
-    nframes = [3,] # [31]
+    nframes = [5,] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
 
     # -- bootstrapping name --
-    bsname = ['bootstrapping_cf']
+    bp_type = ['cluster']
 
     # -- dataset name --
     # dataset = ["voc","burst_with_flow_kitti"]
@@ -106,9 +106,9 @@ def get_exp_cfgs(name):
     # frame_size = ['64_64','128_128','256_256']#,'128_128']
     # frame_size = ['64_64','128_128','256_256','512_512']#,'128_128']
     # frame_size = ['256_256']#,'128_128']
-    frame_size = ['128_128']#,'128_128']
+    # frame_size = ['128_128']#,'128_128']
     # frame_size = ['64_64','128_128']
-    # frame_size = ['64_64']
+    frame_size = ['64_64']
     # frame_size = ['32_32']
 
     # -- create number of local regions grid --
@@ -137,11 +137,11 @@ def get_exp_cfgs(name):
     # -- create a list of arrays to mesh --
     lists = [patchsize,noise_types,
              nframes,nblocks,dataset,
-             image_xform,bsname,ppf,
+             image_xform,bp_type,ppf,
              batch_size,frame_size,random_seed]
     order = ['patchsize','noise_type',
              'nframes','nblocks','dataset',
-             'image_xform','bsname','ppf',
+             'image_xform','bp_type','ppf',
              'batch_size','frame_size','random_seed']
     named_params = edict({o:l for o,l in zip(order,lists)})
 
@@ -200,7 +200,7 @@ def setup_exp_cfg(base_cfg,exp):
     cfg.nframes = int(exp.nframes)
 
     # -- bootstrapping name --
-    cfg.score_fxn_name = exp.bsname
+    cfg.bp_type = exp.bp_type
 
     # -- batchsize --
     cfg.batch_size = int(exp.batch_size)

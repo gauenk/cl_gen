@@ -8,7 +8,8 @@ from .noise import AddGaussianNoiseSetN2N,GaussianBlur,AddGaussianNoise,AddPoiss
 
 __all__ = ['get_noise_transform']
 
-def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True,zero_mean=True):
+def get_noise_transform(noise_info,noise_only=False,
+                        use_to_tensor=True,zero_mean=True):
     """
     The exemplar function for noise getting info
     """
@@ -31,6 +32,8 @@ def get_noise_transform(noise_info,noise_only=False,use_to_tensor=True,zero_mean
 def choose_noise_transform(noise_info, verbose=False):
     if verbose: print("[datasets/transforms/parse_noise_info.py]: ",noise_info)
     ntype = noise_info.ntype
+    # print(noise_info)
+    # print(list(noise_info.keys()))
     noise_params = noise_info[ntype]
     # print(f"NoiseTransformType: {ntype}")
     if ntype == "g":

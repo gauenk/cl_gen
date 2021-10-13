@@ -1,6 +1,10 @@
 import copy
 from easydict import EasyDict as edict
 
+def return_optional(edict,key,default):
+    if key in edict: return edict[key]
+    else: return default
+
 def get_keys_noise_level_grid(cfg):
     noise_configs = create_noise_level_grid(cfg)
     keys = []
@@ -60,7 +64,7 @@ def create_noise_level_grid(cfg):
 
     # -- no noise --
     noise_type = 'none'
-    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns = copy.deepcopy(return_optional(cfg.noise_params,noise_type,edict()))
     ns['ntype'] = noise_type
     ns['name'] = "clean"
     ns = edict(ns)
@@ -68,7 +72,7 @@ def create_noise_level_grid(cfg):
 
     # -- no noise --
     noise_type = 'none'
-    ns = copy.deepcopy(cfg.noise_params[noise_type])
+    ns = copy.deepcopy(return_optional(cfg.noise_params,noise_type,edict()))
     ns['ntype'] = noise_type
     ns['name'] = "none"
     ns = edict(ns)

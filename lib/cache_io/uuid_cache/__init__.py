@@ -89,7 +89,7 @@ class UUIDCache():
         return configs
 
     def init_uuid_file(self):
-        if VERBOSE: print(f"Init [{cfg.uuid_file}]")
+        if VERBOSE: print(f"Init [{uuid_file}]")
         if self.uuid_file.exists(): return None    
         data = edict({'uuid':[],'config':[]})
         write_uuid_file(self.uuid_file,data)

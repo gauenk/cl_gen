@@ -49,7 +49,7 @@ from .exp_utils import *
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 def vprint(*args,**kwargs):
-    VERBOSE = False
+    VERBOSE = True
     if VERBOSE:
         print(*args,**kwargs)
 
@@ -115,6 +115,7 @@ def execute_experiment(cfg):
     theory.std = np.sqrt(theory.var)
     pp.pprint(theory)
 
+    # npn = no patch normalization
     theory_npn = edict()
     theory_npn.c2 = ((t-1)/t)**2 * std**2 + (t-1)/t**2 * std**2
     theory_npn.mean = theory_npn.c2*p
@@ -122,6 +123,16 @@ def execute_experiment(cfg):
     theory_npn.var = 2*theory_npn.c2**2*p
     theory_npn.std = np.sqrt(theory_npn.var)
     pp.pprint(theory_npn)
+
+    # oracle = clean reference frame
+    theory_oracle = edict()
+    theory_oracle.c2 = std**2
+    theory_oracle.mean = theory_oracle.c2*p
+    theory_oracle.mode = (1 - 2/p)*theory_oracle.c2*p
+    theory_oracle.var = 2*theory_oracle.c2**2*p
+    theory_oracle.std = np.sqrt(theory_oracle.var)
+    pp.pprint(theory_oracle)
+
 
     # -- create evaluator for ave; simple --
     iterations,K = 1,1
@@ -156,6 +167,7 @@ def execute_experiment(cfg):
         torch.cuda.empty_cache()
 
         # -- sample & unpack batch --
+        sample = next(image_iter) # waste one
         sample = next(image_iter)
         sample_to_cuda(sample)
         convert_keys(sample)
@@ -208,6 +220,7 @@ def execute_experiment(cfg):
         nimages,npix,nframes = B,H*W,T
         frame_size = [H,W]
         ifsize = [H-2*pad,W-2*pad]
+        print("flow_gt.shape: ",flow_gt.shape)
         print("flow_gt: ",flow_gt[0,:,H//2,W//2,:])
 
         # -- create results dict --
@@ -223,12 +236,13 @@ def execute_experiment(cfg):
         # frames = dyn_noisy_ftrs[:,0,:,4:4+ps,4:4+ps]
         # gt_offset = torch.sum((frames - ave)**2/nframes).item()
         # print("Optimal: ",gt_offset)
-        gt_offset = -1.
+        # gt_offset = -1.
 
         # -- FIND MODE of BURST --
         vprint("Our Method")
         flow_fmt = rearrange(flow_gt,'i t h w two -> t i h w 1 two')
         locs_fmt = flow2locs(flow_fmt)
+        print("locs_fmt.shape: ",locs_fmt.shape)
         vals,_ = evalAtLocs(dyn_noisy_ftrs, locs_fmt, patchsize,
                             nblocks, return_mode=False)
         # flow_fmt = rearrange(flow_gt,'i t h w two -> i (h w) t two')
@@ -245,7 +259,7 @@ def execute_experiment(cfg):
         valMean = theory_npn.mode
         vprint("valMean: ",valMean)
         start_time = time.perf_counter()
-        if cfg.nframes <= 7:
+        if cfg.nframes < 5:
             _,flows.est = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
                                                  nblocks, k = 1,
                                                  valMean = valMean, blockLabels=None,
@@ -264,13 +278,15 @@ def execute_experiment(cfg):
         vprint("Our BpSearch Method")
         # print(flow_gt)
         # std = cfg.noise_params.g.std/255.
-        valMean = theory.mode
+        valMean = theory_npn.mode
         start_time = time.perf_counter()
         _,bp_est,a_noisy = runBpSearch(dyn_noisy_ftrs, dyn_noisy_ftrs,
                                        patchsize, nblocks, k = 1,
                                        valMean = valMean, std=std,
                                        blockLabels=None,
-                                       fmt = True, to_flow=True)
+                                       fmt = True, to_flow=True,
+                                       search_type=cfg.bp_type,
+                                       gt_info={'flow':flow_gt})
         flows.bp_est = bp_est[0]
         # flows.bp_est = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         runtimes.bp_est = time.perf_counter() - start_time
@@ -284,7 +300,7 @@ def execute_experiment(cfg):
         vprint("Our Burst Method (Tiled)")
         valMean = 0.
         start_time = time.perf_counter()
-        if cfg.nframes <= 7:
+        if cfg.nframes < 5:
             _,flows.est_tile = bnnf_utils.runBurstNnf(dyn_noisy_ftrs, patchsize,
                                                       nblocks, k = 1,
                                                       valMean = valMean, blockLabels=None,
@@ -318,6 +334,27 @@ def execute_experiment(cfg):
         # optimal_scores.blk = eval_prop.score_burst_from_flow(dyn_noisy,flows.nnf_local,
         #                                                      patchsize,nblocks)[1]
         optimal_scores.blk = torch_to_numpy(optimal_scores.blk)
+
+        # -- compute new est method --
+        vprint("Oracle")
+        vprint(flow_gt.shape)
+        # print(flow_gt[0,:3,32,32,:])
+        vprint(flow_gt.shape)
+        valMean = theory_oracle.mode
+        oracle_burst = dyn_noisy_ftrs.clone()
+        oracle_burst[nframes//2] = dyn_clean_ftrs[nframes//2]
+        start_time = time.perf_counter()
+        vals_oracle,pix_oracle = nnf_utils.runNnfBurst(oracle_burst,
+                                                       patchsize, nblocks,
+                                                       1, valMean = valMean,
+                                                       blockLabels=blockLabels)
+        runtimes.oracle = time.perf_counter() - start_time
+        pixs.oracle = rearrange(pix_oracle,'t i h w 1 two -> i (h w) t two')
+        flows.oracle = pix_to_flow(pixs.oracle.clone())
+        aligned.oracle = align_from_flow(dyn_clean,flows.oracle,
+                                         patchsize,isize=isize)
+        optimal_scores.oracle = np.zeros((nimages,npix,1,nframes))
+        optimal_scores.oracle = torch_to_numpy(optimal_scores.blk)
 
         # -- compute optical flow --
         vprint("[C Flow]")
@@ -473,8 +510,8 @@ def execute_experiment(cfg):
         # -- compute nvof flow --
         vprint("NVOF")
         start_time = time.perf_counter()
-        flows.nvof = nvof.nvof_burst(dyn_noisy_ftrs)
-        # flows.nvof = flows.ave.clone()
+        # flows.nvof = nvof.nvof_burst(dyn_noisy_ftrs)
+        flows.nvof = flows.ave.clone()
         runtimes.nvof = time.perf_counter() - start_time
         pixs.nvof = flow_to_pix(flows.nvof.clone(),nframes,isize=isize)
         aligned.nvof = align_from_flow(dyn_clean,flows.nvof,nblocks,isize=isize)

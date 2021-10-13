@@ -18,9 +18,7 @@ from torch.nn import functional as tnnF
 from pyutils import torch_to_numpy
 import align.combo._block_utils as block_utils
 from patch_search import get_score_function
-
-# -- [local] project imports --
-from ._blocks import get_search_blocks
+from pyutils.align_utils.blocks import get_search_blocks
 
 @nvtx.annotate("rand_subset_search", color="green")
 def rand_subset_search(patches,masks,evaluator,curr_blocks,brange,nblocks,subsizes):

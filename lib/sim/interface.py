@@ -12,34 +12,62 @@ from numba.typed import List
 from numba.cuda.random import create_xoroshiro128p_states,xoroshiro128p_uniform_float32
 
     
-def get_sim_method(cfg,method_name,aligned_fxn):
-    def sim_fxn(burst,sim_type,db=None,gt_info=None):
-        aligned,flow = None,None
-        if sim_type == "a":
-            aligned,flow = aligned_fxn(burst,db,gt_info)
-            sims,masks = uniform_pix_sampling(aligned)
-        elif sim_type == "b":
-            aligned,flow = aligned_fxn(burst,db,gt_info)
-            nframes = aligned.shape[0]
-            ref = nframes//2
-            aligned = torch.cat([aligned[:ref],aligned[ref+1:]])
-            sims,masks = uniform_pix_sampling(aligned)
-            sims[0] = burst[nframes//2]
-        elif sim_type == "c":
-            aligned,flow = aligned_fxn(burst,db,gt_info)
-            nframes = aligned.shape[0]
-            ref = nframes//2
-            aligned = torch.cat([aligned[:ref],aligned[ref+1:]])
-            sims,masks = uniform_pix_sampling(aligned)
-        elif sim_type == "sup":
-            sims,masks = get_gt_clean_sim(burst,gt_info)
-        elif sim_type == "n2n":
-            masks = None
-            sims,masks = get_gt_noisy_sim(burst,gt_info)
-        else:
-            raise ValueError(f"Uknown sim type [{sim_type}]")
+def get_sim_method(cfg,sim_method,aligned_fxn):
+    if sim_method == "uniform":
+        return get_run_sim_uniform(cfg,aligned_fxn)
+    elif sim_method == "uniform_nocenter":
+        return get_run_sim_uniform_nocenter(cfg,aligned_fxn)
+    elif sim_method == "uniform_nocenter_midframe":
+        return get_run_sim_uniform_nocenter_midframe(cfg,aligned_fxn)
+    else:
+        raise ValueError(f"Uknown sim type [{sim_method}]")
+
+# ---------------------------------------
+#
+#            Run Sim Functions
+#
+# ---------------------------------------
+
+
+def get_run_sim_uniform(cfg,aligned_fxn):
+    def run_sim_uniform(burst,gt_info):
+        aligned,flow = aligned_fxn(burst,gt_info)
+        sims,masks = uniform_pix_sampling(aligned)
         return sims,masks,aligned,flow
-    return sim_fxn
+    return run_sim_uniform
+
+def get_run_sim_uniform_nocenter(cfg,aligned_fxn):
+    def run_sim_uniform_nocenter(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
+        nframes = aligned.shape[0]
+        ref = nframes//2
+        to_sim = torch.cat([aligned[:ref],aligned[ref+1:]])
+        sims,masks = uniform_pix_sampling(to_sim)
+        return sims,masks,aligned,flow
+    return run_sim_uniform_nocenter
+    
+def get_run_sim_uniform_nocenter_midframe(cfg,aligned_fxn):
+    run_sim_uniform_nocenter = get_run_sim_uniform_nocenter(cfg,aligned_fxn)
+    def run_sim_uniform_nocenter_midframe(burst,db=None,gt_info=None):
+        sims,masks,aligned,flow = run_sim_uniform_nocenter(burst,db,gt_info)
+        nframes = burst.shape[0]
+        sims[0] = burst[nframes//2]
+        return sims,masks,aligned,flow
+    return run_sim_uniform_nocenter_midframe
+
+def get_run_sim_uniform(cfg,aligned_fxn):
+    def run_sim_uniform(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
+        sims,masks = uniform_pix_sampling(aligned)
+        return sims,masks,aligned,flow
+    return run_sim_uniform
+
+# ---------------------------------------
+#
+#              Utils 
+#
+# ---------------------------------------
+    
 
 def uniform_pix_sampling(aligned,S=2):
     nframes,nimages,ncolor,h,w = aligned.shape

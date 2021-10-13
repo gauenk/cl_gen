@@ -1,5 +1,6 @@
 
 # -- python imports --
+import numpy as np
 from easydict import EasyDict as edict
 
 # -- pytorch imports --
@@ -26,7 +27,7 @@ def get_loader_serial(cfg,data,batch_size,mode):
     if 'drop_last' in cfg.keys(): drop_last = edict(cfg.drop_last)
     else: drop_last = edict({'tr':True,'val':True,'te':True})
 
-    num_workers = return_optional(cfg,"num_workers",1)
+    num_workers = return_optional(cfg,"num_workers",0)
     shuffle = return_optional(cfg,"shuffle_dataset",True)
     loader_kwargs = {'batch_size': batch_size,
                      'shuffle':shuffle,
@@ -139,4 +140,49 @@ def dict_to_device(sample,device):
     for key in sample.keys():
         if torch.is_tensor(sample[key]):
             sample[key] = sample[key].to(device,non_blocking=True)
+
+
+
+class RandomOnce():
+    """
+    Creates a decorator for a random
+    seed to be used once.
+    """
+
+    def __init__(self,index,random_states,activate):
+        self.index = index
+        self.states = random_states
+        self.current = None
+        self.activate = activate
+
+    def __enter__(self):
+        if self.activate:
+
+            # -- save state --
+            self.current = self._get_random_state()
+
+            # -- get fixed state --
+            new_state = self.states[self.index]
+
+            # -- set to fixed state --
+            self._set_random_state(new_state)
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.activate:
+            # -- reset to original state --
+            self._set_random_state(self.current)
+        
+    def _set_random_state(self,rng_state):
+        torch.set_rng_state(rng_state['th'])
+        np.random.set_state(rng_state['np'])
+        for device,device_state in enumerate(rng_state['cuda']):
+            torch.cuda.set_rng_state(device_state,device)
+
+    def _get_random_state(self):
+        th_rng_state = torch.get_rng_state()
+        cuda_rng_state = torch.cuda.get_rng_state_all()
+        np_rng_state = np.random.get_state()
+        rng_state = edict({'th':th_rng_state,'np':np_rng_state,
+                           'cuda':cuda_rng_state})
+        return rng_state
 

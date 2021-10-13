@@ -16,6 +16,8 @@ def get_cfg_defaults():
     cfg.nframes = 5
     cfg.use_anscombe = True
     cfg.frame_size = 64
+
+    # -- NN training info --
     cfg.nepochs = 10
     # cfg.nepochs = 3
     cfg.test_interval = 2
@@ -47,9 +49,7 @@ def get_cfg_defaults():
     # -- combo config --
     cfg.nblocks = 3
     cfg.patchsize = 3
-    cfg.score_fxn_name = "bootstrapping_cf"
-    # cfg.score_fxn_name = "bootstrapping"
-    # cfg.score_fxn_name = "bootstrapping_mod2"
+    cfg.align_method = "pair_l2_local"
     
     return cfg
 
@@ -83,6 +83,21 @@ def get_exp_cfgs(name):
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
 
+    # -- dataset name --
+    # dataset = ["voc","burst_with_flow_kitti"]
+    dataset = ["voc"]
+    # dataset = ["bsd_burst"]
+
+    # -- frame size --
+    # frame_size = ['512_512']#,'128_128']
+    # frame_size = ['64_64','128_128','256_256']#,'128_128']
+    # frame_size = ['64_64','128_128','256_256','512_512']#,'128_128']
+    # frame_size = ['256_256']#,'128_128']
+    frame_size = ['128_128']#,'128_128']
+    # frame_size = ['64_64','128_128']
+    # frame_size = ['64_64']
+    # frame_size = ['32_32']
+
     # -- create number of local regions grid --
     nblocks = [3]
     
@@ -92,29 +107,30 @@ def get_exp_cfgs(name):
     # -- batch size --
     batch_size = [4]
 
+    # -- alignment method --
+    align_method = ["flownet_v2","l2_global","pair_l2_local",
+                    "of","exh_jointly_l2_local","bp_jointly_l2_local"]
+
     # -- neural network --
     # nn_arch = ['fdvd']
     nn_arch = ['fdvd','kpn']
     # nn_arch = ['kpn']
 
     # -- sim method --
-    # sim_method = ['l2_global','l2_local','bs_local_v1','of']
-    sim_method = ['l2_global','l2_local','bs_local_v2']
-    # sim_method = ['l2_global']
-    sim_type = ['c','n2n','sup']
-    # sim_type = ['a','n2n','sup']
-    # sim_type = ['sup','n2n']
-    # sim_type = ['n2n']
-    # sim_type = ['sup']
+    sim_method = ['c','n2n','sup']
+    # sim_method = ['a','n2n','sup']
+    # sim_method = ['sup','n2n']
+    # sim_method = ['n2n']
+    # sim_method = ['sup']
 
     # -- random seed --
     random_seed = [123]
 
     # -- create a list of arrays to mesh --
-    lists = [patchsize,noise_types,nframes,nblocks,
-             ppf,batch_size,nn_arch,sim_method,sim_type,random_seed]
-    order = ['patchsize','noise_type','nframes','nblocks',
-             'ppf','batch_size','nn_arch','sim_method','sim_type','random_seed']
+    lists = [patchsize,noise_types,nframes,nblocks,ppf,batch_size,
+             nn_arch,sim_method,align_method,dataset,frame_size,random_seed]
+    order = ['patchsize','noise_type','nframes','nblocks','ppf','batch_size',
+             'nn_arch','sim_method','align_method','dataset','frame_size','random_seed']
     named_params = edict({o:l for o,l in zip(order,lists)})
 
     # -- create mesh --
@@ -127,8 +143,8 @@ def get_exp_cfgs(name):
         named_mesh.append(named_elem)
 
     # -- keep only pairs lists --
-    filters = [{'sim_method-sim_type':[['l2_global','c'],['l2_local','c'],['bs_local_v2','c'],['of','c'],['l2_global','n2n'],['l2_global','sup']]}]
-    named_mesh = apply_mesh_filters(named_mesh,filters)
+    # filters = [{'align_method-sim_method':[['l2_global','c'],['l2_local','c'],['bs_local_v2','c'],['of','c'],['l2_global','n2n'],['l2_global','sup']]}]
+    # named_mesh = apply_mesh_filters(named_mesh,filters)
 
     # -- format grids --
     logs = {'nframes':False,'patchsize':True,'std':False,'alpha':False}
@@ -156,6 +172,16 @@ def setup_exp_cfg(base_cfg,exp):
     # -- random seed --
     cfg.random_seed = exp.random_seed
 
+    # -- set frame size
+    cfg.frame_size = frame_size_from_str(exp.frame_size)
+    cfg.dynamic_info.frame_size = cfg.frame_size
+
+    # -- fix dataset --
+    cfg.dataset.name = exp.dataset
+
+    # -- number of frames --
+    cfg.image_xform = exp.image_xform
+
     # -- number of frames --
     cfg.nframes = int(exp.nframes)
 
@@ -166,8 +192,10 @@ def setup_exp_cfg(base_cfg,exp):
     cfg.nn_arch = exp.nn_arch
 
     # -- sim method --
+    cfg.align_method = exp.align_method
+
+    # -- sim method --
     cfg.sim_method = exp.sim_method
-    cfg.sim_type = exp.sim_type
 
     # -- combinatoric search info --
     cfg.nblocks = int(exp.nblocks)

@@ -10,10 +10,10 @@ import torch
 # -- project imports --
 from pyutils import torch_to_numpy
 from align._parallel import ProgressParallel
+from pyutils.align_utils.blocks import get_search_blocks
 
 # -- [local] project imports --
 from ._utils import get_ref_block
-from ._blocks import  get_search_blocks
 
 def init_topK_split_search(nimages,nsegs,nframes,K):
     topK_blocks = torch.zeros((nimages,nsegs,nframes,K)).type(torch.long)
