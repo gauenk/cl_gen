@@ -107,8 +107,8 @@ class DynamicVOC(VOCDetection):
         self._return_type = rtype
 
         # -- create transforms --
-        noise_trans = get_noise_transform(noise_info,noise_only=True)
-        self.noise_trans = get_noise_transform(noise_info,use_to_tensor=False)
+        self.noise_trans = get_noise_transform(noise_info,noise_only=True)
+        # self.noise_trans = get_noise_transform(noise_info,use_to_tensor=False)
         self.dynamic_trans = get_dynamic_transform(dynamic_info,None,load_res)
 
         # -- limit num of samples --
@@ -181,13 +181,13 @@ class DynamicVOC(VOCDetection):
 
         # -- get noise --
         with RandomOnce(index,self.noise_states,self.noise_once):
-            dyn_noisy = self.noise_trans(dyn_clean)+0.5
+            dyn_noisy = self.noise_trans(dyn_clean)#+0.5
         nframes,c,h,w = dyn_noisy.shape
 
         # -- get second, different noise --
         static_clean = repeat(dyn_clean[nframes//2],'c h w -> t c h w',t=nframes)
         with RandomOnce(index,self.noise_states_v2,self.noise_once):
-            static_noisy = self.noise_trans(static_clean)+0.5
+            static_noisy = self.noise_trans(static_clean)#+0.5
 
         # -- manage flow and output --
         ref_flow = repeat(ref_flow ,'t two -> t h w two',h=h,w=w)

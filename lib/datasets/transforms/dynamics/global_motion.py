@@ -136,6 +136,17 @@ class GlobalCameraMotionTransform():
         delta_list = []
         nframe_iters = self.nframes
 
+        # -- random direction box --
+        prng = int(2*ppf+1)
+        choices = torch.arange(prng**2)# - prng//2
+        order = torch.randperm(prng**2)
+        choices = choices[order]
+        zidx = torch.where(choices==0)[0]
+        tmp = choices[0].item()
+        choices[0] = 0
+        choices[zidx] = tmp
+        choices = choices.reshape(prng,prng)
+
         for i in range(nframe_iters):
 
             # -- smooth, global motion --
@@ -143,13 +154,23 @@ class GlobalCameraMotionTransform():
 
             # -- jitter --
             mult = 1.
-            direction = self.sample_direction()
-            step = (torch.round(mult * direction * ppf)).type(torch.int)
-            if i == (self.nframes//2): step = torch.zeros_like(step)
-            tl_i = tl + step
+            direction9 = self.sample_direction_num(9,ppf,choices)
+            step = (torch.round(mult * direction9 * ppf)).type(torch.int)
 
+            # -- jitter with no resampling of center frame --
+            # direction = self.sample_direction()
+            # step = (torch.round(mult * direction * ppf)).type(torch.int)
+
+            # print("[a v.s. b]: {} v.s. {}".format(direction9,direction))
+            # print("[a v.s. b]: {} v.s. {}".format(step9,step))
+            if i == (self.nframes//2): step = torch.zeros_like(step)
+
+            # -- update with step --
+            tl_i = tl + step
             delta_list.append(step)
             tl_list.append(tl_i)
+
+
         delta_list = torch.stack(delta_list,dim=0)
         # a = tl_list[0].type(torch.float)
         # b = tl_list[-1].type(torch.float)
@@ -298,7 +319,50 @@ class GlobalCameraMotionTransform():
             pic_i = self.to_tensor(pic_i)
         return pic_i,res_i
 
+    def sample_direction_num(self,ndirs,ppf,choices):
+        # -- constants --
+        negOnes = torch.FloatTensor([-1.,-1.])
+        zeros = torch.FloatTensor([0.,0.])
+
+        # -- handle inputs --
+        if self.reset_seed:
+            torch.manual_seed(0)
+            torch.cuda.manual_seed(0)
+        rand_int = int(ndirs*torch.rand(1).item())
+
+        nrange = int(2*ppf+1)
+        mid = nrange//2
+        # h = rand_int % nrange - mid
+        # w = rand_int // nrange - mid
+        # init = torch.FloatTensor([h,w])
+
+        y,x = torch.where(choices == rand_int)
+        y,x = y.item(),x.item()
+        init = torch.FloatTensor([y-mid,x-mid])
+        # print(choices)
+        # print(rand_int)
+        # print(init)
+
+        # -- ensure a [0,0] exists: swap (-1,-1) with (0,0) --
+        # is_negOnes = torch.all(torch.isclose(init,negOnes))
+        # is_zeros = torch.all(torch.isclose(init,zeros))
+        # if is_negOnes: init = zeros
+        # elif is_zeros: init = negOnes
+
+        # print("init,rand_int: ",init,rand_int)
+        return init
+        # if rand_int == 0:
+        #     return torch.FloatTensor([1.,0.])
+        # elif rand_int == 1:
+        #     return torch.FloatTensor([0.,0.])
+        # elif rand_int == 2:
+        #     return torch.FloatTensor([0.,1.])
+        # else:
+        #     raise ValueError(f"Uknown rand int value [{rand_int}]")
+
     def sample_direction(self):
+
+        # -- seeds --
         if self.reset_seed:
             torch.manual_seed(0)
             torch.cuda.manual_seed(0)

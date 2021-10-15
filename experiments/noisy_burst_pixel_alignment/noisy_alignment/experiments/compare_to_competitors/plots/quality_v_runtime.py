@@ -140,8 +140,9 @@ def get_text_xy_v1(logx,x,y,method):
 def extract_formatted_data(records,egrids,exp_cfgs,dsname):
     # -- plot accuracy of methods  --
     fmt_data = []
-    skip_methods = ["of","nvof","split","ave_simp","blk"] # "ave"
+    skip_methods = ["of","nvof","split","ave_simp","blk","l2r","est","est_tile",'flownet'] # "ave"
     if dsname in ["voc"]: skip_methods += ["nnf","nnf_local","cflow",]
+    print(records['methods'].unique())
     for method,mgroup in records.groupby('methods'):
         if method in skip_methods: continue
         smethod = method_names(method)

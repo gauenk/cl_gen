@@ -13,7 +13,9 @@ from numba.cuda.random import create_xoroshiro128p_states,xoroshiro128p_uniform_
 
     
 def get_sim_method(cfg,sim_method,aligned_fxn):
-    if sim_method == "uniform":
+    if sim_method == "first_frame":
+        return get_run_sim_first_frame(cfg,aligned_fxn)
+    elif sim_method == "uniform":
         return get_run_sim_uniform(cfg,aligned_fxn)
     elif sim_method == "uniform_nocenter":
         return get_run_sim_uniform_nocenter(cfg,aligned_fxn)
@@ -28,10 +30,19 @@ def get_sim_method(cfg,sim_method,aligned_fxn):
 #
 # ---------------------------------------
 
+def get_run_sim_first_frame(cfg,aligned_fxn):
+    def run_sim_first_frame(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
+        nframes = aligned.shape[0]
+        ref,masks = nframes//2,None
+        sims = torch.stack([aligned[0],aligned[0]])
+        aligned = aligned[1:]
+        return sims,masks,aligned,flow
+    return run_sim_first_frame
 
 def get_run_sim_uniform(cfg,aligned_fxn):
-    def run_sim_uniform(burst,gt_info):
-        aligned,flow = aligned_fxn(burst,gt_info)
+    def run_sim_uniform(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
         sims,masks = uniform_pix_sampling(aligned)
         return sims,masks,aligned,flow
     return run_sim_uniform
@@ -54,13 +65,6 @@ def get_run_sim_uniform_nocenter_midframe(cfg,aligned_fxn):
         sims[0] = burst[nframes//2]
         return sims,masks,aligned,flow
     return run_sim_uniform_nocenter_midframe
-
-def get_run_sim_uniform(cfg,aligned_fxn):
-    def run_sim_uniform(burst,db=None,gt_info=None):
-        aligned,flow = aligned_fxn(burst,db,gt_info)
-        sims,masks = uniform_pix_sampling(aligned)
-        return sims,masks,aligned,flow
-    return run_sim_uniform
 
 # ---------------------------------------
 #

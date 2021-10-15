@@ -49,7 +49,7 @@ from .exp_utils import *
 # os.environ['CUDA_LAUNCH_BLOCKING']='1'
 
 def vprint(*args,**kwargs):
-    VERBOSE = True
+    VERBOSE = False
     if VERBOSE:
         print(*args,**kwargs)
 
@@ -167,7 +167,9 @@ def execute_experiment(cfg):
         torch.cuda.empty_cache()
 
         # -- sample & unpack batch --
-        sample = next(image_iter) # waste one
+        nwaste = 1 + 1
+        for w in range(nwaste):
+            sample = next(image_iter) # waste one
         sample = next(image_iter)
         sample_to_cuda(sample)
         convert_keys(sample)
@@ -280,10 +282,12 @@ def execute_experiment(cfg):
         # std = cfg.noise_params.g.std/255.
         valMean = theory_npn.mode
         start_time = time.perf_counter()
+        bp_nblocks = 3
         _,bp_est,a_noisy = runBpSearch(dyn_noisy_ftrs, dyn_noisy_ftrs,
-                                       patchsize, nblocks, k = 1,
+                                       patchsize, bp_nblocks, k = 1,
                                        valMean = valMean, std=std,
                                        blockLabels=None,
+                                       l2_nblocks=nblocks,
                                        fmt = True, to_flow=True,
                                        search_type=cfg.bp_type,
                                        gt_info={'flow':flow_gt})

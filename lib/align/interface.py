@@ -108,14 +108,9 @@ def get_align_pair_l2_local(cfg,align_noise):
         if db is None: db = burst
         T,B,C,H,W = burst.shape
         isize = edict({'h':H,'w':W})
-        search = burst
-        # if cfg.noise_params.ntype == "pn" or cfg.use_anscombe:
-        #     search = anscombe.forward(burst)
-        #     search -= search.min()
-        #     search /= search.max()
+
         clean = gt_info['clean']
         search = align_noise(burst,clean)
-
         _,pix = runPairSearch(search,cfg.patchsize,cfg.nblocks,
                               k=1,valMean=valMode)
         pix = rearrange(pix,'t i h w 1 two -> i (h w) t two')

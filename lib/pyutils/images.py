@@ -27,6 +27,11 @@ def include_batch_dim(img):
         raise NotImplemented(msg)
 
 def print_tensor_stats(prefix,tensor):
+    # -- swap if necessary --
+    if torch.is_tensor(prefix):
+        tmp = prefix
+        prefix = tensor
+        tensor = prefix
     stats_fmt = (tensor.min().item(),tensor.max().item(),
                  tensor.mean().item(),tensor.std().item())
     stats_str = "[min,max,mean,std]: %2.2e,%2.2e,%2.2e,%2.2e" % stats_fmt

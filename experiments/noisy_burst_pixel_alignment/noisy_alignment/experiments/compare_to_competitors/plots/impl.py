@@ -67,7 +67,7 @@ def plot_experiment(records,egrids,exp_cfgs):
     frecords = records[records['image_xform'].isin(['none'])]
     for std,std_group in frecords.groupby('std'):
         print(std)
-        if not(std == 25.): continue
+        # if not(std == 100.): continue
         for dsname,ds_group in std_group.groupby('dataset'):
             create_quality_v_runtime_plot(ds_group,egrids,exp_cfgs,dsname)
 
