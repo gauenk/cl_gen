@@ -2,7 +2,7 @@ from .dynamics import GlobalCameraMotionTransform,LocalCameraMotionTransform
 
 __all__ = ["get_dynamic_transform"]
 
-def get_dynamic_transform(dynamic_info,noise_trans,load_res=False):
+def get_dynamic_transform(dynamic_info,noise_trans=None,load_res=False):
     if 'bool' in dynamic_info.keys():
         if dynamic_info['bool'] == False: 
             raise ValueError("We must set dynamics = True for the dynamic dataset loader.")

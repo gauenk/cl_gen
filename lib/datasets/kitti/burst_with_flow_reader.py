@@ -6,7 +6,7 @@ from PIL import Image
 import torchvision.transforms.functional as tvF
 from easydict import EasyDict as edict
 import torch
-from datasets.kitti.nnf_io import get_nnf,check_valid_burst_nnf
+from datasets.nnf_io import check_valid_burst_nnf,read_nnf_paths,read_nnf
 from .utils import *
 
 CHECK_NNF_DATA=False
@@ -27,7 +27,9 @@ def read_frame_info(burst_id,ref_fid,fid,paths,crop,resize,ref_frame,nnf_ps,nnf_
         occ = np.nan * np.ones(img.shape)
 
     # -- read nnf --
-    nnf_vals,nnf_locs = get_nnf(ref_frame,img,burst_id,ref_fid,fid,paths.nnf,nnf_ps,nnf_K)
+    lpaths,vpaths = read_nnf_paths(burst_id,ref_fid,fid,path_nnf,nnf_K)
+    nnf_vals,nnf_locs = read_nnf(lpaths,vpaths)
+    # nnf_vals,nnf_locs = get_nnf(ref_frame,img,burst_id,ref_fid,fid,paths.nnf,nnf_ps,nnf_K)
 
     # -- crop --
     if crop is not None:

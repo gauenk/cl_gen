@@ -1,3 +1,9 @@
+"""
+The KITTI dataset with only nnf?
+
+
+"""
+
 # -- python imports --
 import os,cv2,tqdm
 import numpy as np
@@ -33,8 +39,10 @@ class BurstKITTI():
         self.read_resize = (370, 1224)
         parts = self._get_split_parts_name(split)
         self.dataset = self._read_dataset_paths(paths,edition,parts,nframes,
-                                                self.read_resize,nnf_K,nnf_ps,nnf_exists)
+                                                self.read_resize,nnf_K,
+                                                nnf_ps,nnf_exists)
         self.noise_xform = get_noise_transform(noise_info,use_to_tensor=False)
+        print(split,len(self.dataset['burst_id']))
 
     def _read_dataset_paths(self,paths,edition,parts,nframes,
                             read_resize,nnf_K,nnf_ps,nnf_exists=True):
@@ -128,7 +136,7 @@ def get_burst_kitti_dataset(cfg,mode):
     nnf_K = 3
     nnf_ps = 3
     nnf_exists = return_optional(cfg.dataset,'nnf_exists',True)
-    if mode == "dynamic":
+    if mode in ["dynamic","denoising"]:
         edition = "2015"
         nframes = cfg.nframes
         noise_info = cfg.noise_params

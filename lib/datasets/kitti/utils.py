@@ -22,12 +22,6 @@ def read_frame(path_images,burst_id,fid):
     img = cv2.cvtColor(cv2.imread(str(frame_path)),cv2.COLOR_BGR2RGB) # (h, w, c)
     return img
 
-def read_ishape(path_images,burst_id,fid):
-    frame_path = Path(os.path.join(path_images, '%s_%s.png' % (burst_id, fid)))
-    w,h = Image.open(frame_path).size
-    ishape = (h,w,3)
-    return ishape
-
 def vprint(*args,**kwargs):
     if VERBOSE:
         print(*args,**kwargs)

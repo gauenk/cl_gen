@@ -3,11 +3,13 @@
 import numpy as np
 from joblib import Parallel, delayed
 from functools import partial
+from PIL import Image
 
 # -- pytorch imports --
 import torch
 from torchvision import transforms as thT
 import torchvision.transforms.functional as tvF
+import torchvision.utils as tvUtils
 
 # -- project imports --
 from pyutils.sobel import create_sobel_filter,apply_sobel_filter
@@ -45,13 +47,19 @@ class GlobalCameraMotionTransform():
         self.nframes = info['nframes']
         self.ppf = info['ppf']
         self.frame_size = info['frame_size']
-        if isinstance(self.frame_size,int):
-            self.frame_size = (self.frame_size,self.frame_size)
-        if self.frame_size[0] <= 64: self.very_small = True
-        else: self.very_small = False
-        self.min_frame_size = np.min(self.frame_size)
         self.load_res = load_res
         self.sobel_filter = create_sobel_filter()
+
+        # -- manage frame size --
+        if isinstance(self.frame_size,int):
+            self.frame_size = (self.frame_size,self.frame_size)
+        if not(self.frame_size is None):
+            if self.frame_size[0] <= 64: self.very_small = True
+            else: self.very_small = False
+            self.min_frame_size = np.min(self.frame_size)
+        else:
+            self.very_small = None
+            self.min_frame_size = None
 
         # -- optional --
         self.total_pixels = return_optional(info,'total_pixels',0)
@@ -62,22 +70,31 @@ class GlobalCameraMotionTransform():
         # -- init vars and consts --
         self.random_eraser = thT.RandomErasing()#scale=(0.40,0.80))
         self.PI = 2*torch.acos(torch.zeros(1)).item() 
-        self.to_tensor = thT.Compose([thT.ToTensor()])
         self.szm = thT.Compose([ScaleZeroMean()])
         self.noise_trans = noise_trans
 
     def __call__(self, pic, tl=None):
         
+        if self.nframes == 1:
+            pics = self.to_tensor(pic)[None,:]
+            clean_target = pics
+            seq_flow = torch.zeros((1,2))
+            ref_flow = torch.zeros((1,2))
+            return pics,None,pics,seq_flow,ref_flow,0
+        
         # pics = pic.unsqueeze(0).repeat(cfg.nframes,1,1,1) 
         clean_target = None
         middle_index = self.nframes // 2
-        w,h = pic.size
+        h,w = self._get_pic_hw(pic)
         out_frame_size = self.frame_size            
         # tl_init = tl.clone()
+        pic = self.to_tensor(pic)
 
         # -- compute ppf rate given fixed frames --
         if self.total_pixels > 0:
-            raw_ppf = float(self.total_pixels) / (self.nframes-1) if self.nframes > 1 else float(self.total_pixels)
+            tpix = float(self.total_pixels)
+            nf = self.nframes
+            raw_ppf = tpix / (nf-1) if nf > 1 else tpix
         else:
             raw_ppf = self.ppf
 
@@ -179,7 +196,7 @@ class GlobalCameraMotionTransform():
 
         # print("d",torch.LongTensor([np.array(tl) for tl in tl_list]))
         # -- get clean image --
-        w_new,h_new = pic.size
+        h_new,w_new = self._get_pic_hw(pic)
         tl_mid = tl_list[middle_index]
         t,l = tl_mid[0].item(),tl_mid[1].item()
         target = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
@@ -208,6 +225,21 @@ class GlobalCameraMotionTransform():
         ref_flow = self._motion_dinit_to_ref_flow(delta_list,self.nframes//2)
         return pics,res,clean_target,seq_flow,ref_flow,tl
 
+    def to_tensor(self,tensor):
+        if not torch.is_tensor(tensor):
+            if isinstance(tensor,np.ndarray):
+                tensor = torch.Tensor(tensor)
+            else:
+                tensor = tvF.to_tensor(tensor)
+            tensor /= tensor.max() # normalize
+        return tensor
+
+    def _get_pic_hw(self,pic):
+        if torch.is_tensor(pic): c,h,w = pic.shape
+        elif isinstance(pic,np.ndarray): c,h,w = pic.shape
+        else: w,h = pic.size
+        return h,w
+        
     def _motion_dinit_to_ref_flow(self,delta,ref_t):
         """
         Compute "ref flow" 
@@ -232,13 +264,13 @@ class GlobalCameraMotionTransform():
         ref_flow = torch.IntTensor(ref_flow)
         return ref_flow
 
-    def _pick_interesting_tl(self,pic):
+    def _pick_interesting_tl(self,img):
         """
         We assume jitter motion!
         """
 
         # -- image info --
-        img = self.to_tensor(pic)
+        img = self.to_tensor(img)
         c,h,w = img.shape
 
         # -- where are good edges --
@@ -300,6 +332,14 @@ class GlobalCameraMotionTransform():
         #print(flow)
         return flow
         
+    def _check_pic_crop_dims(self,pic,t,l,out_frame_size):
+        ch,cw = out_frame_size
+        _,ih,iw = pic.shape
+        ht,wl = abs(ih - t),abs(iw - l)
+        if ht < ch or wl < cw:
+            print("WARNING: Image Crop contains zero padding.")
+            print("t,l",t,l,out_frame_size,pic.shape)
+
     def _crop_image(self,pic,tl_list,crop_frame_size,out_frame_size,i):
         tl = tl_list[i]
         # print(torch.norm(tl.type(torch.FloatTensor) - tl_init.type(torch.FloatTensor)))
@@ -307,16 +347,26 @@ class GlobalCameraMotionTransform():
         # -- resizing clean image results in image blur across (t,l) dynamics --
         # -- notably this blur is consistent so we only see disconnect w/ frame idx 0 --
         # pic_i = tvF.resized_crop(pic,t,l,crop_frame_size,crop_frame_size,out_frame_size)
+
+        # -- to tensor & crop --
+        pic = self.to_tensor(pic)
+        self._check_pic_crop_dims(pic,t,l,out_frame_size)
         pic_i = tvF.crop(pic,t,l,out_frame_size[0],out_frame_size[1])
+        # tvUtils.save_image(pic_i,f"cropped_pic_{i}.png")
+
+        # -- pad to ensure correct size --
+        # c,h,w = pic_i.shape
+        # pads = max(out_frame_size[0]-h,0),max(out_frame_size[1]-w,0)
+        # pic_i = tvF.pad(pic_i,pads)
+
+        # -- apply noise --
         res_i = torch.empty(0)
         if (not self.noise_trans is None):
-            noisy_pic_i = self.szm(self.noise_trans(self.to_tensor(pic_i)))
+            noisy_pic_i = self.szm(self.noise_trans(pic_i))
             if self.load_res:
-                pic_nmlz = self.szm(self.to_tensor(pic_i))
+                pic_nmlz = self.szm(pic_i)
                 res_i = noisy_pic_i - pic_nmlz
             pic_i = noisy_pic_i
-        else:
-            pic_i = self.to_tensor(pic_i)
         return pic_i,res_i
 
     def sample_direction_num(self,ndirs,ppf,choices):

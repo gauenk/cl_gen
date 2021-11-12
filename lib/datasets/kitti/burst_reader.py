@@ -14,7 +14,7 @@ We only care about Nearest Neighbor Fields!
 """
 
 # -- python imports --
-import os,cv2,glob,re,math
+import os,cv2,glob,re,math,tqdm
 import numpy as np
 from PIL import Image
 from pathlib import Path
@@ -25,7 +25,7 @@ import torch
 import torchvision.transforms.functional as tvF
 
 # -- project imports --
-from datasets.kitti.nnf_io import get_nnf,check_valid_burst_nnf
+from datasets.nnf_io import check_valid_burst_nnf,read_nnf_paths,read_nnf
 from .utils import *    
 
 CHECK_NNF_DATA = True
@@ -36,8 +36,10 @@ def read_frame_info(burst_id,ref_fid,fid,paths,crop,resize,ref_frame,nnf_ps,nnf_
     img = read_frame(paths.images,burst_id,fid)
 
     # -- get that nnf --
-    nnf_vals,nnf_locs = get_nnf(ref_frame,img,burst_id,ref_fid,
-                                fid,paths.nnf,nnf_ps,nnf_K)
+    lpaths,vpaths = read_nnf_paths(burst_id,ref_fid,fid,path_nnf,nnf_K)
+    nnf_vals,nnf_locs = read_nnf(lpaths,vpaths)
+    # nnf_vals,nnf_locs = get_nnf(ref_frame,img,burst_id,ref_fid,
+    #                             fid,paths.nnf,nnf_ps,nnf_K)
 
     # -- crop --
     if crop is not None:
@@ -88,7 +90,7 @@ def read_dataset_sample(burst_id,nframes,edition,fstart,istest,
 
     # -- read reference for possible nnf compute --
     ref_fid = '%02d' % frame_ids[nframes//2]
-    ref_frame = read_frame(paths,burst_id,ref_fid)
+    ref_frame = read_frame(paths.images,burst_id,ref_fid)
 
     # -- loop over frames --            
     for t in range(nframes):
@@ -116,9 +118,10 @@ def read_dataset_sample(burst_id,nframes,edition,fstart,istest,
     return results
 
 def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
-                 nframes = None, crop = None, resize = None,
+                       nframes = None, crop = None, resize = None,
                        nnf_K = 1, nnf_ps = 3, nnf_exists = True, samples = None):
 
+    run_check = False
     if path is None:
         path = kitti_path
     if nframes is None or nframes <= 0:
@@ -165,9 +168,17 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
             for fstart in range(burst_nframes-nframes+1):
 
                 # -- check if valid burst for nnf --
-                if not check_valid_burst_nnf(burst_id,fstart,nframes,
-                                             paths,nnf_K,CHECK_NNF_DATA):
-                    if nnf_exists: continue # require the nnf must exist
+                valid_nnf = True
+                if run_check:
+
+                    # -- load paths to images in burst --
+                    fpaths = read_frames(paths.images,burst_id,fstart,nframes)
+
+                    # -- check em! --
+                    valid_nnf = check_valid_burst_nnf(burst_id,fstart,nframes,paths.nnf,
+                                                      nnf_K,fpaths,CHECK_NNF_DATA)
+
+                if not(valid_nnf) and nnf_exists: continue # require the nnf must exist
 
                 # -- append --
                 dataset['burst_id'].append(burst_id)
@@ -177,11 +188,19 @@ def read_dataset_paths(path = None, editions = 'mixed', parts = 'mixed',
 
     return dataset
 
+def read_frames(ipath,burst_id,fstart,nframes):
+    frame_paths = []
+    for t in range(fstart,fstart+nframes):
+        fid = '%02d' % t
+        frame_path = Path(os.path.join(path_images, '%s_%s.png' % (burst_id, fid)))
+        frame_paths.append(frame_path)
+    return frame_paths
 
 def read_dataset_testing(path = None, editions = 'mixed',
                          nframes = None, crop = None, resize = None,
                          nnf_K = 1, nnf_ps = 3, nnf_exists = True,
                          samples = None):
+    run_check = False
     if nframes is None or nframes <= 0:
         raise ValueError("nframes must be a positive int.")
 
@@ -215,15 +234,16 @@ def read_dataset_testing(path = None, editions = 'mixed',
             for fstart in range(burst_nframes-nframes+1):
 
                 # -- check if valid burst for nnf --
-                if not check_valid_burst_nnf(burst_id,fstart,
-                                             nframes,paths,nnf_K,CHECK_NNF_DATA):
-                    if nnf_exists: continue # require the nnf must exist
+                valid_nnf = True
+                if run_check:
+                    valid_nnf = check_valid_burst_nnf(burst_id,fstart,nframes,
+                                                      paths,nnf_K,CHECK_NNF_DATA)
+                if not(valid_nnf) and nnf_exists: continue # require the nnf must exist
 
                 dataset['burst_id'].append(burst_id)
                 dataset['edition'].append(edition)
                 dataset['nframes'].append(burst_nframes)
                 dataset['fstart'].append(fstart)
-
     return dataset
 
 

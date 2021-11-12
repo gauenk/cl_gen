@@ -8,7 +8,10 @@ from .sun2009 import get_sun2009_dataset
 from .yiheng import get_eccv2020_dataset
 from .rebel2021 import get_rebel2021_dataset
 from .rots import get_rots_dataset
-from .kitti import get_kitti_dataset,get_burst_kitti_dataset,get_burst_with_flow_kitti_dataset
+from .kitti import get_kitti_dataset,get_burst_kitti_dataset
+from .kitti import get_burst_with_flow_kitti_dataset
+from .davis import get_davis_dataset
+from .set8 import get_set8_dataset
 from .bsdBurst import get_bsdBurst_dataset
 from .common import sample_to_cuda,dict_to_device
 
@@ -33,7 +36,11 @@ def get_dataset(cfg,cfg_type):
     elif ds_dict.dataset.name.lower() == "voc":
         return get_voc_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "cbsd68":
-        return get_cbsd68_dataset(cfg,cfg_type)
+        return get_cbsd68_dataset(cfg)
+    elif ds_dict.dataset.name.lower() == "davis":
+        return get_davis_dataset(cfg)
+    elif ds_dict.dataset.name.lower() == "set8":
+        return get_set8_dataset(cfg)
     elif ds_dict.dataset.name.lower() == "sun2009":
         return get_sun2009_dataset(cfg,cfg_type)
     elif ds_dict.dataset.name.lower() == "eccv2020":

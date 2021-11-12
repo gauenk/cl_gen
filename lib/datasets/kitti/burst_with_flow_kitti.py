@@ -1,3 +1,9 @@
+"""
+The KITTI dataset with flow?
+
+"""
+
+
 # -- python imports --
 import os,cv2,tqdm
 import numpy as np
@@ -149,6 +155,8 @@ def get_burst_with_flow_kitti_dataset(cfg,mode):
     nnf_exists = return_optional(cfg.dataset,'nnf_exists',True)
 
     crop = cfg.frame_size
+    if isinstance(crop,int):
+        print("WARNING: the [cfg.frame_size] parameter is just an int.")
     path_resize = (1224, 370)
     load_resize = crop#(256, 128)
     resizes = edict({'path':path_resize,'load':load_resize})

@@ -10,19 +10,22 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 
 def return_optional(pydict,field,default):
+    if pydict is None: return default
     if field in pydict.keys(): return pydict[field]
     else: return default
 
-def get_loader(cfg,data,batch_size,mode):
+def get_loader(cfg,data,batch_size,mode=None):
+    if not(mode is None):
+        print("WARNING: [mode] in get_loader is depcrecated.")
     use_ddp = return_optional(cfg,"use_ddp",False)
     if use_ddp:
         loader = get_loader_ddp(cfg,data)
     else:
-        loader = get_loader_serial(cfg,data,batch_size,mode)
+        loader = get_loader_serial(cfg,data,batch_size)
     return loader
 
 
-def get_loader_serial(cfg,data,batch_size,mode):
+def get_loader_serial(cfg,data,batch_size):
     # -- default for non-compat configs --
     if 'drop_last' in cfg.keys(): drop_last = edict(cfg.drop_last)
     else: drop_last = edict({'tr':True,'val':True,'te':True})
@@ -140,49 +143,4 @@ def dict_to_device(sample,device):
     for key in sample.keys():
         if torch.is_tensor(sample[key]):
             sample[key] = sample[key].to(device,non_blocking=True)
-
-
-
-class RandomOnce():
-    """
-    Creates a decorator for a random
-    seed to be used once.
-    """
-
-    def __init__(self,index,random_states,activate):
-        self.index = index
-        self.states = random_states
-        self.current = None
-        self.activate = activate
-
-    def __enter__(self):
-        if self.activate:
-
-            # -- save state --
-            self.current = self._get_random_state()
-
-            # -- get fixed state --
-            new_state = self.states[self.index]
-
-            # -- set to fixed state --
-            self._set_random_state(new_state)
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.activate:
-            # -- reset to original state --
-            self._set_random_state(self.current)
-        
-    def _set_random_state(self,rng_state):
-        torch.set_rng_state(rng_state['th'])
-        np.random.set_state(rng_state['np'])
-        for device,device_state in enumerate(rng_state['cuda']):
-            torch.cuda.set_rng_state(device_state,device)
-
-    def _get_random_state(self):
-        th_rng_state = torch.get_rng_state()
-        cuda_rng_state = torch.cuda.get_rng_state_all()
-        np_rng_state = np.random.get_state()
-        rng_state = edict({'th':th_rng_state,'np':np_rng_state,
-                           'cuda':cuda_rng_state})
-        return rng_state
 

@@ -26,7 +26,7 @@ from pyutils import tile_patches,flow_to_color,save_image
 from align.nnf import compute_nnf
 from datasets.kitti.paths import get_kitti_path
 from datasets.kitti.burst_reader import dir_to_burst_info
-from datasets.kitti.nnf_io import write_nnf
+from datasets.nnf_io import write_nnf
 
 def check_nnf_dataset_exists(path_nnf):
     if not path_nnf.exists(): path_nnf.mkdir(parents=True)
@@ -99,7 +99,7 @@ def create_nnf_dataset(path, patchsize, resize, K=10,
                 frame_path = os.path.join(path_images, '%s_%s.png' % (burst_id, fid))
                 img = tvF.to_tensor(Image.open(frame_path).convert("RGB"))
                 vals,locs = compute_nnf(ref_img,img,patchsize)
-                write_nnf(vols,locs,burst_id,ref_fid,fid,paths.nnf,nnf_K)
+                write_nnf(vals,locs,burst_id,ref_fid,fid,paths.nnf,nnf_K)
 
 def create_kitti_nnf(root,patchsize,resize,K):
     path = get_kitti_path(root)

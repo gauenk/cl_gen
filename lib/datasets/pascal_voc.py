@@ -27,7 +27,8 @@ from torch.utils.data.distributed import DistributedSampler
 from settings import ROOT_PATH
 from pyutils.timer import Timer
 from datasets.transforms import get_dynamic_transform,get_noise_transform
-from .common import get_loader,return_optional,RandomOnce
+from .common import get_loader,return_optional
+from .reproduce import RandomOnce,get_random_state,set_random_state
 
 class DenoiseVOC(VOCDetection):
 
@@ -93,7 +94,7 @@ class DynamicVOC(VOCDetection):
         super(DynamicVOC, self).__init__( path, year, image_set)
 
         # -- set init params --
-        self.N = N
+        self.nframes = N
         self.noise_params = noise_info[noise_info.ntype]
         self.dynamic_info = dynamic_info
         self.size = self.dynamic_info.frame_size
@@ -121,42 +122,17 @@ class DynamicVOC(VOCDetection):
         self.nsamples = len(self.indices)
         nsamples = self.nsamples
 
-        # -- get bools for single sample per index --
+        # -- fix random dyanmics? --
         self.dyn_once = return_optional(dynamic_info,"sim_once",False)
+        self.fixRandDynamics = RandomOnce(self.dyn_once,nsamples)
+
+        # -- fix noisy realizations? --
         self.noise_once = return_optional(noise_info,"sim_once",False)
-        self.noise_states = None
-        self.noise_states_v2 = None
-        self.dyn_states = None
-        if self.noise_once:
-            self.noise_states = self._sim_random_states(nsamples)
-            self.noise_states_v2 = self._sim_random_states(nsamples)
-        if self.dyn_once:
-            self.dyn_states = self._sim_random_states(nsamples)
+        self.fixRandNoise_1 = RandomOnce(self.noise_once,nsamples)
+        self.fixRandNoise_2 = RandomOnce(self.noise_once,nsamples)
 
     def __len__(self):
         return self.nsamples                
-
-    def _sim_random_states(self,nsamples):
-        states = [None,]*nsamples
-        for i in range(nsamples):
-            states[i] = self._get_random_state()
-            np.random.rand(1)
-            torch.rand(1)
-        return states
-        
-    def _set_random_state(self,rng_state):
-        torch.set_rng_state(rng_state['th'])
-        np.random.set_state(rng_state['np'])
-        for device,device_state in enumerate(rng_state['cuda']):
-            torch.cuda.set_rng_state(device_state,device)
-
-    def _get_random_state(self):
-        th_rng_state = torch.get_rng_state()
-        cuda_rng_state = torch.cuda.get_rng_state_all()
-        np_rng_state = np.random.get_state()
-        rng_state = edict({'th':th_rng_state,'np':np_rng_state,
-                           'cuda':cuda_rng_state})
-        return rng_state
 
     def __getitem__(self, index):
         """
@@ -168,7 +144,7 @@ class DynamicVOC(VOCDetection):
         """
 
         # -- get random state --
-        rng_state = self._get_random_state()
+        rng_state = get_random_state()
         
         # -- image --
         image_index = self.indices[index]
@@ -176,17 +152,17 @@ class DynamicVOC(VOCDetection):
         if self.bw: img = img.convert('1')
 
         # -- get dynamics ---
-        with RandomOnce(index,self.dyn_states,self.dyn_once):
+        with self.fixRandDynamics.set_state(index):
             dyn_clean,res_set,_,seq_flow,ref_flow,tl = self.dynamic_trans(img)
 
         # -- get noise --
-        with RandomOnce(index,self.noise_states,self.noise_once):
+        with self.fixRandNoise_1.set_state(index):
             dyn_noisy = self.noise_trans(dyn_clean)#+0.5
         nframes,c,h,w = dyn_noisy.shape
 
         # -- get second, different noise --
         static_clean = repeat(dyn_clean[nframes//2],'c h w -> t c h w',t=nframes)
-        with RandomOnce(index,self.noise_states_v2,self.noise_once):
+        with self.fixRandNoise_2.set_state(index):
             static_noisy = self.noise_trans(static_clean)#+0.5
 
         # -- manage flow and output --
@@ -209,7 +185,7 @@ class DynamicVOC_LMDB_All():
 
         # -- init params --
         self.lmdb_path = lmdb_path
-        self.N = N
+        self.nframes = N
         # self.noise_info = noise_info
         self.dynamic_info = dynamic_info
         self.size = self.dynamic_info.frame_size
@@ -219,7 +195,7 @@ class DynamicVOC_LMDB_All():
 
         # -- load metadata --
         self.meta_info = pickle.load(open(metadata_fn,'rb'))
-        assert self.N <= self.meta_info['num_frames'], f"Cannot exceed {self.meta_info['num_frames']} frames"
+        assert self.nframes <= self.meta_info['num_frames'], f"Cannot exceed {self.meta_info['num_frames']} frames"
         self.data_env = None
 
         print(f"DynamicVOC LMDB Path: [{lmdb_path}]")
@@ -265,8 +241,8 @@ class DynamicVOC_LMDB_All():
             if field == "raw": data[field] = sample.reshape(shape)
 
         # -- adjust to target number of frames --
-        Md,Mt = num_frames//2,self.N//2
-        sN,eN = (Md - Mt),(Md - Mt)+self.N
+        Md,Mt = num_frames//2,self.nframes//2
+        sN,eN = (Md - Mt),(Md - Mt)+self.nframes
         data['burst'] = data['burst'][sN:eN]
         data['sim_burst'] = rearrange(data['sim_burst'][:,sN:eN],'k n c h w -> n k c h w')
 
@@ -305,7 +281,7 @@ class DynamicVOC_LMDB_Burst():
 
         # -- init params --
         self.lmdb_path = lmdb_path
-        self.N = N
+        self.nframes = N
         # self.noise_info = noise_info
         self.dynamic_info = dynamic_info
         self.size = self.dynamic_info.frame_size
@@ -314,7 +290,7 @@ class DynamicVOC_LMDB_Burst():
 
         # -- load metadata --
         self.meta_info = pickle.load(open(metadata_fn,'rb'))
-        assert self.N <= self.meta_info['num_frames'], f"Cannot exceed {self.meta_info['num_frames']} frames"
+        assert self.nframes <= self.meta_info['num_frames'], f"Cannot exceed {self.meta_info['num_frames']} frames"
         self.data_env = None
 
         print(f"DynamicVOC LMDB Path: [{lmdb_path}]")
@@ -361,8 +337,8 @@ class DynamicVOC_LMDB_Burst():
             if field == "raw": data[field] = sample.reshape(shape)
             
         # -- adjust to target number of frames --
-        Md,Mt = num_frames//2,self.N//2
-        sN,eN = (Md - Mt),(Md - Mt)+self.N
+        Md,Mt = num_frames//2,self.nframes//2
+        sN,eN = (Md - Mt),(Md - Mt)+self.nframes
         data['burst'] = data['burst'][sN:eN]
 
         # -- torch tensor --
@@ -524,26 +500,7 @@ def get_voc_dataset(cfg,mode):
     return data,loader
 
 def get_voc_transforms(cfg):
-    cls_batch_size = cfg.cls.batch_size
-    cfg.cls.batch_size = 1
-    data,loader = get_voc_dataset(cfg,'cls')
-    cfg.cls.batch_size = cls_batch_size
-
-    transforms = edict()
-    transforms.tr = get_dataset_transforms(cfg,data.tr.data)
-    transforms.te = get_dataset_transforms(cfg,data.te.data)
-
-    return transforms
+    raise NotImplemented("not here.")
 
 def get_dataset_transforms(cfg,data):
-    import numpy as np
-    noise_levels = cfg.imgrec.dataset.noise_levels
-    noise_data = []
-    for noise_level in noise_levels:
-        shape = (len(data),3,33,33)
-        means = torch.zeros(shape)
-        noise_i = torch.normal(means,noise_level)
-        noise_data.append(noise_i)
-    noise_data = torch.stack(noise_data,dim=1)
-    return noise_data
-
+    raise NotImplemented("not here.")
