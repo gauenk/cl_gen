@@ -16,7 +16,8 @@ import faiss
 sys.path.append("/home/gauenk/Documents/faiss/contrib/")
 import nnf_utils as nnf_utils
 import bnnf_utils as bnnf_utils
-from bp_search import runBpSearch
+from kmb_search import runKmSearch
+from bp_search import runBpSearch,smooth_locs
 from nnf_share import mode_vals,flow2locs
 from sub_burst import evalAtLocs
 
@@ -151,7 +152,7 @@ def execute_experiment(cfg):
 
     # -- init flownet model --
     cfg.gpuid = 1 - cfg.gpuid # flip. flop.
-    flownet_align = get_align_method(cfg,"flownet_v2",False)
+    flownet_align = get_align_method(cfg,"flownet_v2",comp_align=False)
     cfg.gpuid = 1 - cfg.gpuid # flippity flop.
 
     # -- get an image transform --
@@ -159,6 +160,7 @@ def execute_experiment(cfg):
     blockLabels,_ = nnf_utils.getBlockLabels(None,nblocks,np.int32,cfg.device,True)
     
     # -- iterate over images --
+    NUM_BATCHES = min(NUM_BATCHES,len(image_iter))
     for image_bindex in range(NUM_BATCHES):
 
         print("-="*30+"-")
@@ -167,7 +169,7 @@ def execute_experiment(cfg):
         torch.cuda.empty_cache()
 
         # -- sample & unpack batch --
-        nwaste = 1 + 1
+        nwaste = 0
         for w in range(nwaste):
             sample = next(image_iter) # waste one
         sample = next(image_iter)
@@ -203,8 +205,8 @@ def execute_experiment(cfg):
             dyn_clean = image_xform(dyn_clean)
             dyn_noisy = image_xform(dyn_noisy)
             T,B,C,H,W = dyn_noisy.shape
-            flow_gt = torch.zeros((B,T,H,W,2))
-            nnf_gt = torch.zeros((T,B,H,W,2))
+            flow_gt = torch.zeros((B,1,T,H,W,2))
+            nnf_gt = torch.zeros((1,T,B,H,W,2))
 
 
         save_image(dyn_clean,"dyn_clean.png")
@@ -223,7 +225,7 @@ def execute_experiment(cfg):
         frame_size = [H,W]
         ifsize = [H-2*pad,W-2*pad]
         print("flow_gt.shape: ",flow_gt.shape)
-        print("flow_gt: ",flow_gt[0,:,H//2,W//2,:])
+        print("flow_gt: ",flow_gt[0,0,:,H//2,W//2,:])
 
         # -- create results dict --
         pixs = edict()
@@ -242,11 +244,13 @@ def execute_experiment(cfg):
 
         # -- FIND MODE of BURST --
         vprint("Our Method")
-        flow_fmt = rearrange(flow_gt,'i t h w two -> t i h w 1 two')
+        flow_fmt = rearrange(flow_gt,'i 1 t h w two -> t i h w 1 two')
         locs_fmt = flow2locs(flow_fmt)
         print("locs_fmt.shape: ",locs_fmt.shape)
+        print(dyn_noisy_ftrs.min(),dyn_noisy_ftrs.max())
         vals,_ = evalAtLocs(dyn_noisy_ftrs, locs_fmt, patchsize,
                             nblocks, return_mode=False)
+        vals = torch.zeros_like(vals)
         # flow_fmt = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         # vals,_ = bnnf_utils.evalAtFlow(dyn_noisy_ftrs, flow_fmt, patchsize,
         #                                nblocks, return_mode=False)
@@ -267,7 +271,7 @@ def execute_experiment(cfg):
                                                  valMean = valMean, blockLabels=None,
                                                  fmt = True, to_flow=True)
         else:
-            flows.est = rearrange(flow_gt,'i t h w two -> 1 i (h w) t two').clone()
+            flows.est = rearrange(flow_gt,'i 1 t h w two -> 1 i (h w) t two').clone()
         flows.est = flows.est[0]        
         runtimes.est = time.perf_counter() - start_time
         pixs.est = flow_to_pix(flows.est.clone(),nframes,isize=isize)
@@ -276,6 +280,18 @@ def execute_experiment(cfg):
         anoisy.est = align_from_flow(dyn_noisy,flows.est,patchsize,isize=isize)
         optimal_scores.est = np.zeros((nimages,npix,1,nframes))
 
+        # -- the proposed method --
+        std = cfg.noise_params.g.std
+        start_time = time.perf_counter()
+        _flow = flow_gt.clone()
+        # _,_flow = runKmSearch(dyn_noisy_ftrs, patchsize, nblocks, k = 1,
+        #                       std = std/255.,mode="cuda")
+        runtimes.kmb = time.perf_counter() - start_time
+        flows.kmb = rearrange(_flow,'i 1 t h w two -> i (h w) t two')
+        pixs.kmb = flow_to_pix(flows.kmb.clone(),nframes,isize=isize)
+        aligned.kmb = align_from_flow(dyn_clean,flows.kmb,0,isize=isize)
+        optimal_scores.kmb = torch_to_numpy(optimal_scores.est)
+
         # -- compute proposed search of nnf --
         vprint("Our BpSearch Method")
         # print(flow_gt)
@@ -283,14 +299,15 @@ def execute_experiment(cfg):
         valMean = theory_npn.mode
         start_time = time.perf_counter()
         bp_nblocks = 3
-        _,bp_est,a_noisy = runBpSearch(dyn_noisy_ftrs, dyn_noisy_ftrs,
-                                       patchsize, bp_nblocks, k = 1,
-                                       valMean = valMean, std=std,
-                                       blockLabels=None,
-                                       l2_nblocks=nblocks,
-                                       fmt = True, to_flow=True,
-                                       search_type=cfg.bp_type,
-                                       gt_info={'flow':flow_gt})
+        # _,bp_est,a_noisy = runBpSearch(dyn_noisy_ftrs, dyn_noisy_ftrs,
+        #                                patchsize, bp_nblocks, k = 1,
+        #                                valMean = valMean, std=std,
+        #                                blockLabels=None,
+        #                                l2_nblocks=nblocks,
+        #                                fmt = True, to_flow=True,
+        #                                search_type=cfg.bp_type,
+        #                                gt_info={'flow':flow_gt})
+        bp_est = flows.est[None,:].clone()
         flows.bp_est = bp_est[0]
         # flows.bp_est = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         runtimes.bp_est = time.perf_counter() - start_time
@@ -311,7 +328,7 @@ def execute_experiment(cfg):
                                                       fmt = True, to_flow=True,
                                                       tile_burst=True)
         else:
-            flows.est_tile = rearrange(flow_gt,'i t h w two -> 1 i (h w) t two').clone()
+            flows.est_tile = rearrange(flow_gt,'i 1 t h w two -> 1 i (h w) t two').clone()
         flows.est_tile = flows.est_tile[0]        
         # flows.est_tile = rearrange(flow_gt,'i t h w two -> i (h w) t two')
         runtimes.est_tile = time.perf_counter() - start_time
@@ -330,7 +347,7 @@ def execute_experiment(cfg):
         if frame_size[0] <= 64 and cfg.nblocks < 10 and True:
             flows.blk = burstNnf.run(dyn_noisy_ftrs,patchsize,nblocks)
         else:
-            flows.blk = rearrange(flow_gt,'i t h w two -> i (h w) t two')
+            flows.blk = rearrange(flow_gt,'i 1 t h w two -> i (h w) t two')
         runtimes.blk = time.perf_counter() - start_time
         pixs.blk = flow_to_pix(flows.blk.clone(),nframes,isize=isize)
         aligned.blk = align_from_flow(dyn_clean,flows.blk,patchsize,isize=isize)
@@ -391,7 +408,7 @@ def execute_experiment(cfg):
             flows.of = pix_to_flow(pix_gt.clone())
         else:
             flows.of = flow_gt
-            flows.of = rearrange(flow_gt,'i t h w two -> i (h w) t two')
+            flows.of = rearrange(flow_gt,'i 1 t h w two -> i (h w) t two')
         # -- align groundtruth flow --
         aligned.of = align_from_flow(dyn_clean,flows.of,nblocks,isize=isize)
         pixs.of = flow_to_pix(flows.of.clone(),nframes,isize=isize)
@@ -495,6 +512,24 @@ def execute_experiment(cfg):
         anoisy.ave = align_from_flow(dyn_noisy,flows.ave,nblocks,isize=isize)
         optimal_scores.ave = optimal_scores.split # same "ave" function
 
+        # -- compute ave with smoothing --
+        iterations,K = 0,1
+        subsizes = []
+        vprint("[Ours] Ave loss function")
+        start_time = time.perf_counter()
+        pix_local = smooth_locs(pix_local,nclusters=1)
+        runtimes.ave_smooth = time.perf_counter() - start_time + runtimes.ave
+        pixs.ave_smooth = rearrange(pix_local,'t i h w 1 two -> i (h w) t two')
+        flows.ave_smooth = pix_to_flow(pixs.ave_smooth.clone())
+        optimal_scores.ave_smooth = optimal_scores.split # same "ave" function
+        aligned.ave_smooth = align_from_flow(dyn_clean,flows.ave_smooth,
+                                             nblocks,isize=isize)
+        anoisy.ave_smooth = align_from_flow(dyn_noisy,flows.ave_smooth,
+                                            nblocks,isize=isize)
+        optimal_scores.ave_smooth = optimal_scores.split # same "ave_smooth" function
+
+
+
         # -- compute  flow --
         vprint("L2-Local Recursive")
         start_time = time.perf_counter()
@@ -525,8 +560,8 @@ def execute_experiment(cfg):
         # -- compute flownet --
         vprint("FlowNetv2")
         start_time = time.perf_counter()
-        # _,flows.flownet = flownet_align(dyn_noisy_ftrs)
-        flows.flownet = flows.ave.clone().cpu()
+        _,flows.flownet = flownet_align(dyn_noisy_ftrs)
+        # flows.flownet = flows.ave.clone().cpu()
         runtimes.flownet = time.perf_counter() - start_time
         pixs.flownet = flow_to_pix(flows.flownet.clone(),nframes,isize=isize)
         aligned.flownet = align_from_flow(dyn_clean,flows.flownet,nblocks,isize=isize)

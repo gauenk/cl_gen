@@ -15,14 +15,14 @@ from .set8 import get_set8_dataset
 from .bsdBurst import get_bsdBurst_dataset
 from .common import sample_to_cuda,dict_to_device
 
-def load_dataset(cfg,cfg_type):
+def load_dataset(cfg,cfg_type=""):
     return get_dataset(cfg,cfg_type)
 
 def get_dataset(cfg,cfg_type):
 
     # added for backward compatibility 09-14-20
     ds_dict = cfg
-    exempt_types = ["denoising","simcl","simcl_cls","cls_3c","dynamic","single_denoising","dynamic-lmdb","default","rebel2021","dynamic-lmdb-burst","dynamic-lmdb-all","kitti"]
+    exempt_types = ["denoising","simcl","simcl_cls","cls_3c","dynamic","single_denoising","dynamic-lmdb","default","rebel2021","dynamic-lmdb-burst","dynamic-lmdb-all","kitti",""]
     if not (cfg_type in exempt_types): ds_dict = cfg[cfg_type]
 
     if ds_dict.dataset.name.lower() == "mnist":

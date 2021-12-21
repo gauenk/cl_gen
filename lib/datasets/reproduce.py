@@ -28,7 +28,7 @@ def get_random_state():
 
 class RandomOnce():
     """
-    Is your random dataset resampling new behavior each batch? 
+    Is your random dataset resampling new behavior each batch?
     - new noise pattern each sample?
     - new dynamics each sample?
 
@@ -67,19 +67,20 @@ class RandomOnce():
             np.random.rand(1)
             torch.rand(1)
         return states
-        
+
     #
     # -- Create Context Manager for Easy Use --
     #
     #   randOnce = RandomOnce(...)
     #   with randOnce.cm(...):
     #       ... do stuff with set seed ...
-    #   
+    #
     #
 
     @contextmanager
     def set_state(self,index):
         try:
+            self.index = index
             yield self._enter(index)
         finally:
             self._exit()
@@ -95,7 +96,7 @@ class RandomOnce():
 
             # -- set to fixed state --
             set_random_state(new_state)
-    
+
     def _exit(self):
         if self.activate:
             # -- reset to original state --

@@ -23,7 +23,7 @@ class ExpCache():
         self.root = root
         self.tensor_cache = TensorCache(root)
         self.uuid_cache = UUIDCache(root,version)
-        
+
     @property
     def version(self):
         return self.uuid_cache.version
@@ -40,7 +40,7 @@ class ExpCache():
 
     def convert_files_to_tensors(self,uuid,data):
         return self.tensor_cache.convert_files_to_tensors(uuid,data)
-    
+
     # ---------------------
     #   Primary Functions
     # ---------------------
@@ -52,8 +52,11 @@ class ExpCache():
         return results
 
     def save_exp(self,uuid,config,results,overwrite=False):
-        check_uuid = self.get_uuid_from_config(config)
-        assert check_uuid == -1 or uuid == check_uuid, "Only one uuid per config." 
+        # check_uuid = self.get_uuid_from_config(config)
+        # 12/21/21 -- the assert statement is logical error
+        # we want to be able to set the uuid before we save the experiment.
+        # assert check_uuid == -1,"The \"config\" must not exist in the uuid cache."
+        # assert uuid == check_uuid, "Only one uuid per config."
         exists = self.check_results_exists(uuid)
         if overwrite is True or exists is False:
             if (exists is True) and VERBOSE:
@@ -87,7 +90,7 @@ class ExpCache():
     def load_flat_records(self,exps):
         """
         Load records but flatten exp configs against
-        experiments. Requires "results" to be have 
+        experiments. Requires "results" to be have
         equal number of rows.
         """
         records = []
@@ -164,7 +167,7 @@ class ExpCache():
         record['pdid'] = np.arange(max_len) # replace "pandas ID"
 
         return record
-            
+
     # -------------------------
     #     Clear Function
     # -------------------------
@@ -173,7 +176,7 @@ class ExpCache():
         print("Clearing Cache.")
         uuid_file = self.uuid_file
         if not uuid_file.exists(): return
-    
+
         # -- remove all experiment results --
         data = self.uuid_cache.data
         for uuid in data.uuid:
@@ -197,7 +200,7 @@ class ExpCache():
     def pytorch_filepath(self,uuid):
         pytorch_models = self.root/"pytorch_models"/uuid
         return pytorch_models
-    
+
     # -------------------------
     #   Read/Write Functions
     # -------------------------
@@ -206,6 +209,7 @@ class ExpCache():
         uuid_path = self.root / uuid
         if not uuid_path.exists(): return None
         results_path = uuid_path / "results.pkl"
+        if not results_path.exists(): return None
         results = self.read_results_file(results_path,uuid)
         return results
 
@@ -218,7 +222,7 @@ class ExpCache():
     def check_results_exists(self,uuid):
         path = self.root / Path(uuid) / "results.pkl"
         return path.exists()
-    
+
     def write_results_file(self,path,uuid,data):
         data_files = self.convert_tensors_to_files(uuid,data)
         with open(path,'w') as f:

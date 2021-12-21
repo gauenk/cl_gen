@@ -48,7 +48,7 @@ class SET8():
         self.groups = sorted(list(self.paths['images'].keys()))
 
         # -- limit num of samples --
-        self.indices = enumerate_indices(len(self.paths),nsamples)
+        self.indices = enumerate_indices(len(self.paths['images']),nsamples)
         self.nsamples = len(self.indices)
 
         # -- single random noise --
@@ -123,7 +123,7 @@ def get_set8_dataset(cfg):
     noise_info = cfg.noise_params
     isize = return_optional(cfg,"frame_size",None)
     nframes = return_optional(cfg,"nframes",None)
-    ps = return_optional(cfg,"patchsize",1)
+    ps = return_optional(cfg.dataset,"patchsize",3)
     tr_split = return_optional(cfg,"train_split","train") # alt = ["all"]
 
     # -- samples --

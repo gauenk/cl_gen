@@ -19,11 +19,11 @@ from ._flow2pix import flow_to_pix
 from ._blocks2pix import blocks_to_pix
 
 
-def align_from_flow(burst,flow,nblocks,centers=None,isize=None):
+def align_from_flow(burst,flow,padding=0,centers=None,isize=None):
     # nimages,npix,nframes_tilde,two = flow.shape
     nframes = burst.shape[0]
     pix = flow_to_pix(flow,nframes,centers,isize)
-    return align_from_pix(burst,pix,nblocks)
+    return align_from_pix(burst,pix,padding)
 
 def align_from_blocks(burst,blocks,nblocks,centers=None,isize=None):
     pix = blocks_to_pix(blocks,nblocks,centers,isize)
@@ -35,11 +35,19 @@ def align_from_blocks(burst,blocks,nblocks,centers=None,isize=None):
 #
 # -=-=-=-=-=-=-=-=-=-=-=-
 
-def align_from_pix(burst,pix,nblocks):
+def align_from_pix(burst,pix,pad):
     r"""
     Align a burst of frames 
     from a pixel tensor representing 
     each pixel's adjustment
+
+    In this code, we conflate the search radius
+    with the padding of an image. The search radius
+    was originally a local jitter, so padding the 
+    image border removed out-of-bounds access.
+    However, for a general search pattern this
+    padding does not remove out-of-bounds accesses.
+    So the "nblocks" (now renamed "pad") is actually just padding.
     """
 
     # -- shapes --
@@ -47,8 +55,8 @@ def align_from_pix(burst,pix,nblocks):
     nimages,npix,nframes,two = pix.shape
 
     # -- add paddings --
-    burst = rearrange(burst,'t i c h w -> (t i) c h w')
-    pad_burst = F.pad(burst,[nblocks//2,]*4,mode='reflect')
+    burst_pad = rearrange(burst,'t i c h w -> (t i) c h w')
+    pad_burst = F.pad(burst_pad,[pad//2,]*4,mode='reflect')
     pad_burst = rearrange(pad_burst,'(t i) c h w -> t i c h w',i=nimages)
 
     # -- ensure ndarray --
@@ -58,7 +66,7 @@ def align_from_pix(burst,pix,nblocks):
     # -- create blocks --
     aligned = np.zeros((nframes,nimages,c,h,w)).astype(np.float64)
     pad_burst = pad_burst.astype(np.float64)
-    align_from_pix_numba(aligned,pad_burst,pix,nblocks)
+    align_from_pix_numba(aligned,pad_burst,pix,pad)
 
     # -- back to torch --
     aligned = torch.FloatTensor(aligned)
@@ -70,14 +78,15 @@ def verify_burst_pix_sizes(burst,pix):
     nsamples = pix.shape[0]
     assert nsamples % npix == 0,"Must be a multiple of number of pixels."
 
-@jit(nopython=True)
-def align_from_pix_numba(aligned,burst,pix,nblocks):
+# @jit(nopython=True)
+def align_from_pix_numba(aligned,burst,pix,pad):
     nframes,nimages,c,h_pad,w_pad = burst.shape
-    pad = nblocks//2
+    pad = pad//2
     h = h_pad - 2*pad
     w = w_pad - 2*pad
     npix = h*w
     t_ref = nframes//2
+    # print("params: ",t_ref,h,w,pad)
     for i in range(nimages):
         for t in range(nframes):
             for p in range(npix):
@@ -93,6 +102,14 @@ def align_from_pix_numba(aligned,burst,pix,nblocks):
                 #     print(r_row,r_col,b_row,b_col)
 
                 b_row,b_col = b_row+pad,b_col+pad
+
+                # -- force in bounds; relfect --
+                if b_row < 0: b_row = -b_row
+                if b_row >= h: b_row = 2*(h - 1) - b_row
+                if b_col < 0: b_col = -b_col
+                if b_col >= w: b_col = 2*(w - 1) - b_col
+
+                # print(t,r_row,r_col,b_row,b_col)
                 # r_row,r_col = r_row+pad,r_col+pad
                 # if b_row < 0 or b_col < 0 or b_row > 31 or b_col > 31:
                 #     print("oob b",b_row-pad,b_col-pad)

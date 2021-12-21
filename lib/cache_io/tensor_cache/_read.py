@@ -20,7 +20,10 @@ def read_dict_tensor_cache(path,names):
         names_fn = path / f"{name}.npy"
         if not names_fn.exists(): value = []
         else: value = np.load(names_fn,allow_pickle=True)
-        data[name] = torch.tensor(value)
+        try:
+            data[name] = torch.tensor(value)
+        except:
+            data[name] = value.tolist()
     return data
 
 __all__ = ['read_tensor_cache','read_dict_tensor_cache']

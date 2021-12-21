@@ -69,8 +69,9 @@ def get_exp_cfgs(name):
     # noise_types = ['g-150p','g-100p','g-75p0','g-50p0','g-25p0','g-5p0']
     # noise_types = ['g-100p0','g-5p0']
     # noise_types = ['g-1p0']
-    noise_types = ['g-50p0']
+    noise_types = ['g-75p0']
     # noise_types = ['g-50p0']
+    # noise_types = ['g-25p0']
     # noise_types = ['g-200p0']
     # noise_types = ['g-10p0','g-25p0','g-35p0','g-50p0','g-100p0']
     # noise_types = ['g-5p0','g-15p0','g-20p0','g-50p0']
@@ -89,7 +90,7 @@ def get_exp_cfgs(name):
     # nframes = [15,10,3] # [31]
     # nframes = [3,5] # [31]
     # nframes = [3,5,9,15] # [31]
-    nframes = [27,] # [31]
+    nframes = [5,] # [31]
     nframes_ticks = nframes
     nframes_tickmarks = nframes_ticks
     nframes_tickmarks_str = ["%d" % x for x in nframes_tickmarks]
@@ -99,24 +100,26 @@ def get_exp_cfgs(name):
 
     # -- dataset name --
     # dataset = ["voc","burst_with_flow_kitti"]
-    dataset = ["voc"]
+    # dataset = ["burst_with_flow_kitti"]
+    # dataset = ["voc"]
+    dataset = ["set8"]
     # dataset = ["bsd_burst"]
-
+    
     # -- frame size --
     # frame_size = ['512_512']#,'128_128']
     # frame_size = ['64_64','128_128','256_256']#,'128_128']
     # frame_size = ['64_64','128_128','256_256','512_512']#,'128_128']
     # frame_size = ['256_256']#,'128_128']
-    # frame_size = ['128_128']#,'128_128']
+    frame_size = ['128_128']#,'128_128']
     # frame_size = ['64_64','128_128']
-    frame_size = ['64_64']
+    # frame_size = ['64_64']
     # frame_size = ['32_32']
 
     # -- create number of local regions grid --
-    nblocks = [9,]
+    nblocks = [3,]
     
     # -- dynamics grid --
-    ppf = [3.]
+    ppf = [1.]
 
     # -- batch size --
     batch_size = [1]
@@ -219,6 +222,10 @@ def setup_exp_cfg(base_cfg,exp):
     cfg.dynamic_info.ppf = exp.ppf
     cfg.dynamic_info.total_pixels = cfg.dynamic_info.ppf*(cfg.nframes-1)
     cfg.dynamic_info.nframes = exp.nframes
+
+    # -- some weirdness --
+    cfg.train_split = "all" # allow all data to be used instead of just train.
+    
 
     return cfg
 

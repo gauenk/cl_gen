@@ -8,7 +8,7 @@ matplotlib.use('Agg')
 
 # -- fix weird colorama error when using multiple threads --
 import colorama
-colorama.init() 
+colorama.init()
 
 # -- experiment package imports --
 import noisy_alignment
@@ -27,8 +27,8 @@ except RuntimeError:
 def run():
     print("PID: [{}]".format(os.getpid()))
     # unsup_denoising.run()
-    # sup_denoising.run()
-    noisy_alignment.run()
+    sup_denoising.run()
+    # noisy_alignment.run()
     # picker.run()
 
 if __name__ == "__main__":

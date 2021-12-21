@@ -26,6 +26,7 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0,pxform=None):
             # (AT END) swap: (rows,cols) -> (cols,rows) aka (y,x) -> (x,y)
             indices = indices.reshape(H,W,2)
             locs_t = repeat(indices,'h w two -> 1 b h w k two',b=B,k=K)
+            locs_t[...,:] = locs_t[...,::-1] # row,cols -> cols,rows
         else:
             to_image = burst[t]
             vals_t,locs_t = compute_batch_nnf(from_image,to_image,
@@ -34,7 +35,6 @@ def compute_burst_nnf(burst,ref_t,patchsize,K=10,gpuid=0,pxform=None):
         locs.append(locs_t)
     vals = np.concatenate(vals,axis=0)
     locs = np.concatenate(locs,axis=0)
-    locs[...,:] = locs[...,::-1] # (HERE) row,cols -> cols,rows
     # print("burst_nnf.shape", locs.shape)
     return vals,locs
 
@@ -81,7 +81,7 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0,pxform=None):
     # -- create database --
     gpu_index = faiss.GpuIndexFlatL2(res, ND, faiss_cfg)
     gpu_index.add(database)
-    
+
     # -- execute search --
     D,I = gpu_index.search(query,K)
     D = rearrange(D,'(b t r) k -> b t r k',b=B,t=T)
@@ -106,5 +106,6 @@ def compute_nnf(ref_img,prop_img,patchsize,K=10,gpuid=0,pxform=None):
 
     vals = rearrange(vals,'(b t) h w k -> b t h w k',b=B)
     locs = rearrange(locs,'(b t) h w k two -> b t h w k two',b=B)
+    locs[...,:] = locs[...,::-1] # (HERE) row,cols -> cols,rows
 
     return vals,locs

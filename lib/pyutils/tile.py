@@ -1,6 +1,6 @@
 # -- python imports --
 import numpy as np
-from einops import rearrange
+from einops import rearrange,repeat
 from easydict import EasyDict as edict
 
 # -- pytorch imports --
@@ -16,6 +16,16 @@ def convert_edict(pix_data):
         pix_data.ftr = tmp
         pix_data.shape = tmp.shape
     return pix_data
+
+def get_img_coords(t,i,h,w):
+    print("suspicious function. maybe (h w) should be (w h)")
+    pix = torch.arange(h*w)
+    rows = pix / w
+    cols = pix % w
+    coords = torch.stack([rows,cols],dim=0)
+    coords = repeat(coords,'two (w h) -> two t i h w',t=t,i=i,h=h)
+    coords = coords.type(torch.int).contiguous()
+    return coords
 
 def zero_out_of_bounds_pix(tile,patchsize,nblocks):
     r"""

@@ -22,6 +22,9 @@ def include_batch_dim(img):
     elif img.ndim == 3:
         return img[None,:]
     elif img.ndim == 4: return img
+    elif img.ndim > 4:
+        c,h,w = img.shape[-3:]
+        return img.reshape(-1,c,h,w)
     else:
         msg = f"[images.py:include_batch_dim] Uknown case images with ndim [{img.ndim}]"
         raise NotImplemented(msg)
@@ -72,7 +75,15 @@ def normalize_image_to_zero_one(img):
     img /= img.max()
     return img
 
+def images_to_psnrs_crop(img1,img2,bsize=10):
+    h,w = img1.shape[-2:]
+    csize = [h-bsize,w-bsize]
+    crop1 = tvF.center_crop(img1,csize)
+    crop2 = tvF.center_crop(img2,csize)
+    return images_to_psnrs(crop1,crop2)
+
 def images_to_psnrs(img1,img2):
+
     img1 = detached_cpu_tensor(img1)
     img2 = detached_cpu_tensor(img2)
 
@@ -89,11 +100,13 @@ def images_to_psnrs(img1,img2):
     psnrs = mse_to_psnr(mse)
     return psnrs
 
-def save_image(images,fn,normalize=True,vrange=None):
+def save_image(images,fn,normalize=True,vrange=None,bdim=0):
     if isinstance(images,str): # fix it: input are swapped of string and image
         tmp = images
         images = fn
         fn = tmp
+    if bdim != 0: # put batch dim in first dimension
+        images = images.transpose(0,bdim)
     if len(images.shape) > 4:
         C,H,W = images.shape[-3:]
         images = images.reshape(-1,C,H,W)

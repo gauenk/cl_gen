@@ -21,7 +21,7 @@ from datasets.reproduce import RandomOnce,get_random_state,enumerate_indices
 
 # -- local imports --
 from .paths import IMAGE_PATH,FLOW_PATH,IMAGE_SETS
-from .reader import read_files,read_burst,read_flow
+from .reader import read_files,read_subburst_files,read_burst,read_pix,pix2flow
 
 class DAVIS():
 
@@ -41,13 +41,19 @@ class DAVIS():
         self.noise_trans = get_noise_transform(noise_info,noise_only=True)
 
         # -- load paths --
-        self.paths,self.nframes,all_eq = read_files(iroot,froot,sroot,split,isize,ps,nframes)
-        if not(all_eq): print("\n\n\n\nWarning: Not all bursts are same length!!!\n\n\n\n")
+        self.paths,self.nframes,all_eq = read_subburst_files(iroot,froot,sroot,split,
+                                                             isize,ps,nframes)
+        # self.paths,self.nframes,all_eq = read_files(iroot,froot,sroot,split,
+        #                                             isize,ps,nframes)
+        # msg = "\n\n\n\nWarning: Not all bursts are same length!!!\n\n\n\n"
+        # if not(all_eq): print(msg)
         self.groups = sorted(list(self.paths['images'].keys()))
 
         # -- limit num of samples --
-        self.indices = enumerate_indices(len(self.paths),nsamples)
+        self.indices = enumerate_indices(len(self.paths['images']),nsamples)
         self.nsamples = len(self.indices)
+        nsamples = self.nsamples
+        print("nsamples: ",nsamples)
 
         # -- single random noise --
         self.noise_once = return_optional(noise_info,"sim_once",False)
@@ -55,7 +61,7 @@ class DAVIS():
         self.fixRandNoise_2 = RandomOnce(self.noise_once,nsamples)
 
     def __len__(self):
-        return self.nsamples                
+        return self.nsamples
 
     def __getitem__(self, index):
         """
@@ -68,7 +74,7 @@ class DAVIS():
 
         # -- get random state --
         rng_state = get_random_state()
-        
+
         # -- indices --
         image_index = self.indices[index]
         group = self.groups[image_index]
@@ -81,10 +87,21 @@ class DAVIS():
         frame_ids = np.arange(start,start+nframes)
 
         # -- load burst --
-        dyn_clean = read_burst(self.paths['images'][group],self.isize)
+        img_fn = self.paths['images'][group]
+        icrop = self.paths['crops'][group]
+        dyn_clean = read_burst(img_fn,self.isize,icrop)
 
-        # -- load flow --
-        ref_flow = read_flow(self.paths['flows'][group])
+        # -- load pix & flow --
+        ref_pix = read_pix(self.paths['flows'][group])
+        ref_flow = pix2flow(ref_pix)
+
+        # -- format pix --
+        ref_pix = rearrange(ref_pix,'two t k h w -> k t h w two')
+        ref_pix = torch.LongTensor(ref_pix)#.copy())
+
+        # -- format flow --
+        ref_flow = rearrange(ref_flow,'two t k h w -> k t h w two')
+        ref_flow = torch.FloatTensor(ref_flow.copy())#.copy())
 
         # -- get noise --
         with self.fixRandNoise_1.set_state(index):
@@ -97,14 +114,13 @@ class DAVIS():
             static_noisy = self.noise_trans(static_clean)#+0.5
 
         # -- manage flow and output --
-        ref_flow = rearrange(ref_flow ,'two t k h w -> k t h w two')
-        ref_flow = torch.FloatTensor(ref_flow.copy())
         index_th = torch.IntTensor([image_index])
 
         return {'dyn_noisy':dyn_noisy,'dyn_clean':dyn_clean,
                 'static_noisy':static_noisy,'static_clean':static_clean,
                 'nnf':ref_flow,'seq_flow':None, 'ref_flow':ref_flow,
-                'flow':ref_flow,'index':index_th,'rng_state':rng_state}
+                'flow':ref_flow,'index':index_th,'rng_state':rng_state,
+                'ref_pix':ref_pix}
 
 
 #

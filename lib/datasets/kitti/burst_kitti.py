@@ -57,7 +57,7 @@ class BurstKITTI():
                                         nnf_K = nnf_K, nnf_ps = nnf_ps,
                                         nnf_exists=nnf_exists)
         else: raise ValueError(f"[KITTI: read_dataset] Uknown part [{parts}]")
-            
+
     def _get_split_parts_name(self,split):
         if split == "trainval": parts = "mixed"
         elif split == "train": parts = "train"
@@ -65,7 +65,7 @@ class BurstKITTI():
         elif split == "test": parts = "test"
         else: raise ValueError(f"[KITTI: get_split_parts_name] Uknown split [{split}]")
         return parts
-        
+
     def _set_random_state(self,rng_state):
         torch.set_rng_state(rng_state['th'])
         np.random.set_state(rng_state['np'])
@@ -80,7 +80,7 @@ class BurstKITTI():
         return len(self.dataset['burst_id'])
 
     def __getitem__(self,index):
-        
+
         # -- get random state --
         rng_state = self._get_random_state()
 

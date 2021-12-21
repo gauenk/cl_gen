@@ -11,10 +11,12 @@ from numba import cuda
 from numba.typed import List
 from numba.cuda.random import create_xoroshiro128p_states,xoroshiro128p_uniform_float32
 
-    
+
 def get_sim_method(cfg,sim_method,aligned_fxn):
     if sim_method == "first_frame":
         return get_run_sim_first_frame(cfg,aligned_fxn)
+    elif sim_method in ["n2n","first_two_frames","sup"]:
+        return get_run_sim_first_two_frames(cfg,aligned_fxn)
     elif sim_method == "uniform":
         return get_run_sim_uniform(cfg,aligned_fxn)
     elif sim_method == "uniform_nocenter":
@@ -40,6 +42,33 @@ def get_run_sim_first_frame(cfg,aligned_fxn):
         return sims,masks,aligned,flow
     return run_sim_first_frame
 
+def get_run_sim_first_two_frames(cfg,aligned_fxn):
+    def run_sim_first_two_frames(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
+        nframes = aligned.shape[0]
+        ref,masks = nframes//2,None
+        sims = torch.stack([aligned[0],aligned[1]])
+        aligned = aligned
+        return sims,masks,aligned,flow
+    return run_sim_first_two_frames
+
+def get_run_sim_lref_frame(cfg,aligned_fxn):
+    """
+    a.) Use the frame left of the reference frame
+    as the input.
+
+    b.) Remove it from the "aligned" frames
+    """
+    def run_sim_lref_frame(burst,db=None,gt_info=None):
+        aligned,flow = aligned_fxn(burst,db,gt_info)
+        nframes = aligned.shape[0]
+        lref,masks = nframes//2-1,None
+        sims = torch.stack([aligned[lref],aligned[lref]])
+        aligned = torch.stack([aligned[:lref],aligned[lref+1:]],-1)
+        return sims,masks,aligned,flow
+    return run_sim_first_frame
+
+
 def get_run_sim_uniform(cfg,aligned_fxn):
     def run_sim_uniform(burst,db=None,gt_info=None):
         aligned,flow = aligned_fxn(burst,db,gt_info)
@@ -56,7 +85,7 @@ def get_run_sim_uniform_nocenter(cfg,aligned_fxn):
         sims,masks = uniform_pix_sampling(to_sim)
         return sims,masks,aligned,flow
     return run_sim_uniform_nocenter
-    
+
 def get_run_sim_uniform_nocenter_midframe(cfg,aligned_fxn):
     run_sim_uniform_nocenter = get_run_sim_uniform_nocenter(cfg,aligned_fxn)
     def run_sim_uniform_nocenter_midframe(burst,db=None,gt_info=None):
@@ -66,12 +95,13 @@ def get_run_sim_uniform_nocenter_midframe(cfg,aligned_fxn):
         return sims,masks,aligned,flow
     return run_sim_uniform_nocenter_midframe
 
+
 # ---------------------------------------
 #
-#              Utils 
+#              Utils
 #
 # ---------------------------------------
-    
+
 
 def uniform_pix_sampling(aligned,S=2):
     nframes,nimages,ncolor,h,w = aligned.shape
@@ -104,7 +134,7 @@ def fill_masks(masks,aligned):
     fill_masks_numba[blocks,threads_per_block](rng_states,nimages,
                                                ncolor,H,W,S,
                                                nframes,aligned,masks)
-    
+
 @cuda.jit
 def fill_masks_numba(rng_states,nimages,ncolor,H,W,S,nframes,aligned,masks):
     pass

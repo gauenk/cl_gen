@@ -17,7 +17,7 @@ def write_tensor_cache(path,data):
 def write_dict_tensor_cache(path,data):
     names_fn = path / "names.npy"
     np.save(names_fn,np.array(list(data.keys())),allow_pickle=True)
-    print(data)
+    # print(data)
     for name,value in data.items():
         if isinstance(value,list):
             if torch.is_tensor(value[0]):

@@ -1,6 +1,4 @@
 
-from pyutils.testing import get_cfg_defaults,set_seed,convert_keys,is_converted
-
 
 
 # -- python --
@@ -28,6 +26,8 @@ from align.combo import EvalBlockScores,EvalBootBlockScores
 from align.xforms import pix_to_flow,align_from_pix,flow_to_pix,align_from_flow
 from datasets import load_dataset
 # from datasets.kitti import write_burst_kitti_nnf,write_burst_with_flow_kitti_nnf
+from pyutils.testing import get_cfg_defaults,set_seed,convert_keys,is_converted
+
 
 # from datasets.wrap_image_data import load_image_dataset,load_resample_dataset,sample_to_cuda
 SAVE_PATH = Path(f"{settings.ROOT_PATH}/output/tests/datasets/test_davis/")
@@ -77,7 +77,7 @@ def set_seed(seed):
     torch.backends.cudnn.deterministic = False
 
 def batch_dim0(sample):
-    dim1 = ['burst','noisy','res','clean_burst','sburst','snoisy']    
+    dim1 = ['burst','noisy','res','clean_burst','sburst','snoisy']
     skeys = list(sample.keys())
     for field in dim1:
         if not(field in skeys): continue
@@ -108,7 +108,7 @@ def warp_burst_flow(burst, flows):
         wbatch.append(warped)
     wbatch = rearrange(torch.stack(wbatch),'i t h w c -> t i c h w')
     return wbatch
-        
+
 def warp_flow(img, flow):
     print("[warp_flow]: img.shape flow.shape ",img.shape,flow.shape)
     print("[warp_flow]: img.dtype flow.dtype ",img.dtype,flow.dtype)
@@ -120,19 +120,20 @@ def warp_flow(img, flow):
     return res
 
 def test_davis_dataset():
-    
+
     # -- run exp --
     cfg = get_cfg_defaults()
     cfg.random_seed = 123
     nbatches = 20
 
     # -- set random seed --
-    set_seed(cfg.random_seed)	
+    set_seed(cfg.random_seed)
 
     # -- load dataset --
-    cfg.nframes = 0
-    # cfg.frame_size = [128,128]
-    cfg.frame_size = None
+    cfg.nframes = 5
+    # cfg.frame_size = None
+    # cfg.frame_size = [256,256]
+    cfg.frame_size = [96,96]
     cfg.dataset.name = "davis"
     data,loaders = load_dataset(cfg,"dynamic")
     image_iter = iter(loaders.tr)
@@ -144,7 +145,7 @@ def test_davis_dataset():
     # -- save path for viz --
     save_dir = SAVE_PATH
     if not save_dir.exists(): save_dir.mkdir(parents=True)
-    
+
     # -- sample data --
     for image_index in range(nbatches):
 
@@ -156,18 +157,24 @@ def test_davis_dataset():
         #     index = sample['image_index'][0][0].item()
 
         sample = next(image_iter)
+        sample = next(image_iter)
         # batch_dim0(sample)
         # convert_keys(sample)
-        
+
         # -- extract info --
         noisy = sample['dyn_noisy']
         clean = sample['dyn_clean']
         snoisy = sample['static_noisy']
         sclean = sample['static_clean']
-        flow = sample['ref_flow']
+        flow_est = sample['ref_flow']
+        pix_gt = sample['ref_pix']
         index = sample['index'][0][0].item()
         nframes,nimages,c,h,w = noisy.shape
         mid_pix = h*w//2+2*cfg.nblocks
+        shape_str = 'b k t h w two -> k b (h w) t two'
+        pix_gt = rearrange(pix_gt,shape_str)[0]
+        flow_est = rearrange(flow_est,shape_str)[0]
+
 
         # -- print shapes --
         print("-"*50)
@@ -175,8 +182,6 @@ def test_davis_dataset():
             if isinstance(val,list): continue
             print("{}: {}".format(key,val.shape))
         print("-"*50)
-
-        
         print(f"Image Index {index}")
 
         # -- io info --
@@ -191,21 +196,74 @@ def test_davis_dataset():
         # pad = cfg.patchsize//2 if cfg.patchsize > 1 else 1
         pad = cfg.nblocks//2+1
         psize = edict({'h':h-2*pad,'w':w-2*pad})
-        flow_gt = rearrange(flow,'i fm1 h w two -> i (h w) fm1 two')
-        pix_gt = flow_to_pix(flow_gt.clone(),nframes,isize=isize)
+        # flow_gt = rearrange(flow,'i 1 fm1 h w two -> i (h w) fm1 two')
+        # pix_gt = flow_gt.clone()
+        # pix_gt = flow_to_pix(flow_gt.clone(),nframes,isize=isize)
         def cc(image): return tvF.center_crop(image,(psize.h,psize.w))
 
 
+        # -- align from [pix or flow] --
+        pix_gt = pix_gt.type(torch.long)
+        aligned_gt = align_from_pix(clean,pix_gt.clone(),0)#cfg.nblocks)
+        psnr = compute_aligned_psnr(sclean,aligned_gt,psize).T[0]
+        print(f"[Dataset Pix Alignment] PSNR: {psnr}")
+
+
+        flow_gt = pix_to_flow(pix_gt)
+        aligned_gt = align_from_flow(clean,flow_gt.clone(),0,isize=isize)
+        psnr = compute_aligned_psnr(sclean,aligned_gt,psize).T[0]
+        print(f"[Dataset Flow Alignment] PSNR: {psnr}")
+
+        aligned_gt = align_from_flow(clean,flow_est.clone(),0,isize=isize)
+        psnr = compute_aligned_psnr(sclean,aligned_gt,psize).T[0]
+        print(f"[(est) Dataset Flow Alignment] PSNR: {psnr}")
+
+        # aligned_gt = warp_burst_flow(clean, flow_global)
+        # isize = edict({'h':h,'w':w})
+        # flow_est = pix_to_flow_est(pix_gt)
+        print(torch.stack([flow_gt,flow_est],-1))
+        assert torch.sum((flow_est - flow_gt)**2).item() < 1e-8
+
+        # -- compute the nnf again [for checking] --
         nnf_vals,nnf_pix = compute_burst_nnf(clean,nframes//2,cfg.patchsize)
         shape_str = 't b h w two -> b (h w) t two'
         pix_global = torch.LongTensor(rearrange(nnf_pix[...,0,:],shape_str))
         flow_global = pix_to_flow(pix_global.clone())
-        # aligned_gt = warp_burst_flow(clean, flow_global)
-        aligned_gt = align_from_pix(clean,pix_gt,cfg.nblocks)
-        # isize = edict({'h':h,'w':w})
-        # aligned_gt = align_from_flow(clean,flow_global,cfg.nblocks,isize=isize)
-        # psnr = compute_aligned_psnr(sclean[[nframes//2]],clean[[nframes//2]],psize)
-        psnr = compute_aligned_psnr(sclean,aligned_gt,psize)
+        # print(flow_gt.shape,flow_global.shape)
+
+        # -- explore --
+        # print("NFrames: ",nframes)
+
+        print(pix_global.shape,pix_gt.shape)
+        for t in range(nframes):
+            delta = pix_global[:,:,t] != pix_gt[:,:,t]
+            delta = delta.type(torch.float)
+            delta = 100*torch.mean(delta)
+            print("[%d]: %2.3f" % (t,delta))
+        # print(torch.sum(torch.abs(pix_global - pix_gt)))
+        print(pix_global[:,:,41])
+        print(pix_gt[:,:,41])
+
+
+        # print(torch.stack([pix_global,pix_gt],-1))
+        # print(torch.where(pix_global!=pix_gt))
+        # print(torch.sum((pix_global-pix_gt)**2))
+        # print(torch.sum((pix_global!=pix_gt).type(torch.float)))
+
+        agg = torch.stack([pix_global.ravel(),pix_gt.ravel()],-1)
+        # print(agg)
+        # print(agg.shape)
+        # print(torch.sum((agg[:,0]!=agg[:,1]).type(torch.float)))
+        # print(torch.where(agg[:,0]!=agg[:,1]))
+
+        # -- create report --
+        print(pix_global.shape,pix_gt.shape)
+        print(pix_global.min(),pix_gt.min())
+        print(pix_global.max(),pix_gt.max())
+        print(type(pix_global),type(pix_gt))
+
+        aligned_gt = align_from_pix(clean,pix_global,cfg.nblocks)
+        psnr = compute_aligned_psnr(sclean,aligned_gt,psize).T[0]
         print(f"[GT Alignment] PSNR: {psnr}")
 
 
@@ -218,11 +276,13 @@ def test_davis_dataset():
 
         fn = image_dir / "clean.png"
         save_image(cc(clean),fn,normalize=True,vrange=None)
-    
+
         print(cc(sclean).shape)
         fn = image_dir / "diff.png"
         save_image(cc(sclean) - cc(aligned_gt),fn,normalize=True,vrange=None)
 
         fn = image_dir / "aligned_gt.png"
         save_image(cc(aligned_gt),fn,normalize=True,vrange=None)
+        print(image_dir)
 
+        return

@@ -17,7 +17,7 @@ from datasets.nnf_io import create_nnf_burst,check_valid_burst_nnf,read_nnf_burs
 from datasets.nnf_io import read_nnf_burst,read_nnf
 
 
-CHECK_NNF_DATA = True # make true for nnf checking; false for faster checking
+CHECK_NNF_DATA = False # make true for nnf checking; false for faster checking
 
 def read_split_ids(sdir,split):
 
@@ -69,7 +69,7 @@ def read_burst(ipaths,isize):
 def read_flow(fpaths,vpaths=None):
 
     # -- read all locs --
-    locs,_ = read_nnf_burst(fpaths,vpaths)
+    _,locs = read_nnf_burst(vpaths,fpaths)
     locs = rearrange(locs,'t k h w two -> two t k h w')
     ref_flows = locs2flow(locs)
     return ref_flows
@@ -77,9 +77,9 @@ def read_flow(fpaths,vpaths=None):
 def locs2flow(locs):
     two,t,k,h,w = locs.shape
     coords = get_img_coords(t,k,h,w).numpy()
-    print("coords.shape: ",coords.shape)
     flows = locs - coords # [Delta row,Delta col]
-    flows = np.flip(flows,axis=(-1,)) # [D row, D col]
+    flows = np.flip(flows,axis=(0,)) # [D col , D row ]
+    flows[1] = -flows[1]
     return flows
 
 def read_files(idir,fdir,sdir,split,isize,ps,nframes):
@@ -116,9 +116,9 @@ def read_files(idir,fdir,sdir,split,isize,ps,nframes):
         if not(group in split_groups): continue
         ipaths = paths['images'][group]
         frame_ids = paths['frame_ids'][group]
-        fpaths,vpaths = get_flow_paths(fdir,group,isize,ps,ipaths,frame_ids)
-        paths['flows'][group] = fpaths
+        vpaths,fpaths = get_flow_paths(fdir,group,isize,ps,ipaths,frame_ids)
         paths['vals'][group] = vpaths
+        paths['flows'][group] = fpaths
 
     return paths,out_nframes,all_eq
     
@@ -160,8 +160,8 @@ def get_flow_paths(fdir,group,isize,ps,ipaths,frame_ids):
     pstr = get_param_str(isize,ps)
     fpath = fdir/group/pstr
     nframes,K = len(ipaths),1
-    ref_fid = "%02d" % (nframes//2)
-    valid = check_valid_burst_nnf(group,0,nframes,fpath,K,ipaths,
+    ref_fid = "%02d" % (frame_ids[nframes//2])
+    valid = check_valid_burst_nnf(group,frame_ids,fpath,K,ipaths,
                                   check_data=CHECK_NNF_DATA)
 
     # -- create nnfs if not existant --
@@ -172,9 +172,9 @@ def get_flow_paths(fdir,group,isize,ps,ipaths,frame_ids):
         burst = rearrange(burst,'t c h w -> t h w c')
 
         # -- else create nnfs @ specified path --
-        locs,vals = create_nnf_burst(burst,group,frame_ids,fpath,ps,K)
+        vals,locs = create_nnf_burst(burst,group,frame_ids,fpath,ps,K)
 
     # -- return list of valid nnfs --
-    lpaths,vpaths = read_nnf_burst_paths(group,frame_ids,fpath,K)
+    vpaths,lpaths = read_nnf_burst_paths(group,frame_ids,fpath,K)
 
-    return lpaths,vpaths
+    return vpaths,lpaths

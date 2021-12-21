@@ -13,9 +13,9 @@ from .read_paths import read_nnf_paths
 from .data_io import read_nnf,write_nnf
 from .checks import check_nnf_data
 
-def load_nnf_burst(frame_ids,lpaths,vpaths):
-    
-    # -- loop over frames --            
+def load_nnf_burst(frame_ids,vpaths,lpaths):
+
+    # -- loop over frames --
     nframes = len(burst)
     assert nframes == len(frame_ids),"equal frame ids for burst and nnf"
     ref_fid = frame_ids[nframes//2]
@@ -24,9 +24,9 @@ def load_nnf_burst(frame_ids,lpaths,vpaths):
 
         # -- load image and compute nnf --
         fid = '%02d' % frame_ids[t]
-        
+
         # -- get that nnf --
-        _nnf_vals,_nnf_locs = read_nnf(lpaths[t],vpaths[t])
+        _nnf_vals,_nnf_locs = read_nnf(vpaths[t],lpaths[t])
 
         # -- append to frame burst sample --
         nnf_vals.append(_nnf_vals)
@@ -37,12 +37,12 @@ def load_nnf_burst(frame_ids,lpaths,vpaths):
 
     return nnf_vals,nnf_locs
 
-def create_nnf_burst(burst,burst_id,frame_ids,path_nnf,nnf_ps,nnf_K):
+def create_nnf_burst(burst,burst_id,frame_ids,path_nnf,nnf_ps,nnf_K,icrop,isize):
 
-    # -- loop over frames --            
+    # -- loop over frames --
     nframes = len(burst)
     assert nframes == len(frame_ids),"equal frame ids for burst and nnf"
-    ref_fid = frame_ids[nframes//2]
+    ref_fid = "%02d" % frame_ids[nframes//2]
     ref_frame = burst[nframes//2]
     nnf_vals,nnf_locs = [],[]
     for t in range(nframes):
@@ -50,14 +50,15 @@ def create_nnf_burst(burst,burst_id,frame_ids,path_nnf,nnf_ps,nnf_K):
         # -- load image and compute nnf --
         fid = '%02d' % frame_ids[t]
         img = burst[t]
-        
+
         # -- read paths --
         if not path_nnf.exists(): path_nnf.mkdir(parents=True)
-        lpaths,vpaths = read_nnf_paths(burst_id,ref_fid,fid,path_nnf,nnf_K)
+        vpaths,lpaths = read_nnf_paths(burst_id,ref_fid,fid,path_nnf,nnf_K,icrop)
 
         # -- get that nnf --
         _nnf_vals,_nnf_locs = create_nnf_from_paths(ref_frame,img,nnf_ps,nnf_K,burst_id,
-                                                    ref_fid,fid,path_nnf,lpaths,vpaths)
+                                                    isize,ref_fid,fid,path_nnf,
+                                                    vpaths,lpaths)
 
         # -- append to frame burst sample --
         nnf_vals.append(_nnf_vals)
@@ -69,14 +70,18 @@ def create_nnf_burst(burst,burst_id,frame_ids,path_nnf,nnf_ps,nnf_K):
     return nnf_vals,nnf_locs
 
 
-def create_nnf_from_paths(ref_frame,img,nnf_ps,nnf_K,burst_id,ref_fid,fid,path_nnf,lpaths,vpaths):
+def create_nnf_from_paths(ref_frame,img,nnf_ps,nnf_K,burst_id,
+                          isize,ref_fid,fid,path_nnf,vpaths,lpaths):
 
     # -- read into memory --
-    nnfs = read_nnf(lpaths,vpaths)
+    nnf_vals,nnf_locs = read_nnf(vpaths,lpaths)
+
+    # "ishape" might need to be "icrop"
 
     # -- check nnfs --
     ishape = ref_frame.shape
-    looks_good = check_nnf_data(nnfs,ishape)
+    if isize is None: isize = ishape[:2]
+    looks_good = check_nnf_data(nnf_vals,nnf_locs,isize)
     if not (looks_good):
         print(f"ID: {burst_id}.{fid} is not looking good.")
 
@@ -93,11 +98,9 @@ def create_nnf_from_paths(ref_frame,img,nnf_ps,nnf_K,burst_id,ref_fid,fid,path_n
         # -- reshape (no image or frame dims) --
         nnf_vals = rearrange(nnf_vals,'1 1 h w k -> k h w')
         nnf_locs = rearrange(nnf_locs,'1 1 h w k two -> k h w two')
-        write_nnf(nnf_vals,nnf_locs,lpaths,vpaths)
-        # write_nnf(nnf_vals,nnf_locs,burst_id,ref_fid,fid,path_nnf,nnf_K)
+        write_nnf(nnf_vals,nnf_locs,vpaths,lpaths)
+
         print(f"ID: {burst_id}.{fid} is fixed!")
-    else:
-        nnf_vals,nnf_locs = nnfs
 
     # -- reshape --
     nnf_vals = rearrange(nnf_vals,'k h w -> k h w')

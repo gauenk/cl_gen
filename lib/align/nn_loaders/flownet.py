@@ -13,6 +13,13 @@ try:
     from layers.flownet_v2 import FlowNet2
 except:
     print("No flownetv2 model. Not available for alignment.")
+    class FlowNet2():
+        def __init__(self,args,batchNorm=None,div_flow=None):
+            pass
+        def to(self,device):
+            return self
+        def load_state_dict(self,state):
+            pass
 
 class ModFlowNet2(FlowNet2):
     def __init__(self,args,batchNorm=False,div_flow=20.):

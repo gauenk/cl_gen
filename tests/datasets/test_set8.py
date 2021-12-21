@@ -37,7 +37,7 @@ def get_cfg_defaults():
     cfg = edict()
 
     # -- frame info --
-    cfg.nframes = 1
+    cfg.nframes = 0
     cfg.frame_size = [32,32]
 
     # -- data config --
@@ -128,15 +128,16 @@ def test_set8_dataset():
     # -- run exp --
     cfg = get_cfg_defaults()
     cfg.random_seed = 123
-    nbatches = 20
+    nbatches = 3
 
     # -- set random seed --
     set_seed(cfg.random_seed)	
 
     # -- load dataset --
     cfg.nframes = 0
+    cfg.frame_size = [256,256]
     # cfg.frame_size = [128,128]
-    cfg.frame_size = None
+    # cfg.frame_size = [32,32]
     cfg.dataset.name = "set8"
     data,loaders = load_dataset(cfg,"dynamic")
     image_iter = iter(loaders.tr)
@@ -195,7 +196,7 @@ def test_set8_dataset():
         # pad = cfg.patchsize//2 if cfg.patchsize > 1 else 1
         pad = cfg.nblocks//2+1
         psize = edict({'h':h-2*pad,'w':w-2*pad})
-        flow_gt = rearrange(flow,'i fm1 h w two -> i (h w) fm1 two')
+        flow_gt = rearrange(flow,'i 1 fm1 h w two -> i (h w) fm1 two')
         pix_gt = flow_to_pix(flow_gt.clone(),nframes,isize=isize)
         def cc(image): return tvF.center_crop(image,(psize.h,psize.w))
 

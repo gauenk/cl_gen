@@ -34,8 +34,9 @@ def theory_grouped_ave():
     # -- Theory Eqs --
     #
 
+    var = std**2
     theory = edict()
-    theory.c2 = ((t-1)/t)**2 * std**2 + (t-1)/t**2 * std**2
+    theory.c2 = ((t-1)/t)**2 * var + (t-1)/t**2 * var
     theory.mean = theory.c2*p
     theory.mode = (1 - 2/p)*theory.c2*p
     theory.var = 2*p*theory.c2**2
